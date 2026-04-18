@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(export PATH=\"$PATH:/c/Program Files/nodejs\")",
+      "Bash(npm install *)",
+      "Bash(npm run *)",
+      "Bash(mv kinvox-temp/.* .)",
+      "Bash(mv kinvox-temp/* .)",
+      "Bash(rmdir kinvox-temp *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000)",
+      "Bash(node -e \" const AdmZip = require\\('adm-zip'\\); \")",
+      "Bash(npx supabase *)",
+      "Bash(npx tsc *)",
+      "Bash(node -e \"console.log\\(require\\('./package.json'\\).dependencies.postmark\\)\")",
+      "Bash(node *)"
+    ]
+  }
+}

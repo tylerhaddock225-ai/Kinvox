@@ -1,0 +1,215 @@
+'use server'
+
+import { ServerClient } from 'postmark'
+import { createClient } from '@/lib/supabase/server'
+import { revalidatePath } from 'next/cache'
+
+type State = { status: 'success' } | { status: 'error'; error: string } | null
+
+export async function createTicket(_prev: State, formData: FormData): Promise<State> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { status: 'error', error: 'Not authenticated' }
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('organization_id')
+    .eq('id', user.id)
+    .single()
+
+  if (!profile?.organization_id) return { status: 'error', error: 'No organization' }
+
+  const subject     = formData.get('subject')     as string
+  const description = formData.get('description') as string | null
+  const priority    = formData.get('priority')    as string
+  const status      = formData.get('status')      as string
+  const channel     = formData.get('channel')     as string | null
+  const assigned_to = formData.get('assigned_to') as string | null
+  const lead_id     = formData.get('lead_id')     as string | null
+
+  if (!subject?.trim()) return { status: 'error', error: 'Subject is required' }
+
+  const { error } = await supabase.from('tickets').insert({
+    organization_id: profile.organization_id,
+    created_by:  user.id,
+    subject:     subject.trim(),
+    description: description || null,
+    priority:    (priority || 'medium') as 'low' | 'medium' | 'high',
+    status:      (status   || 'open')   as 'open' | 'pending' | 'closed',
+    channel:     (channel  || null)     as 'email' | 'chat' | 'phone' | 'portal' | 'manual' | null,
+    assigned_to: assigned_to || null,
+    lead_id:     lead_id     || null,
+  })
+
+  if (error) return { status: 'error', error: error.message }
+
+  revalidatePath('/tickets')
+  return { status: 'success' }
+}
+
+export async function updateTicketSubject(_prev: State, formData: FormData): Promise<State> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { status: 'error', error: 'Not authenticated' }
+
+  const ticket_id = formData.get('ticket_id') as string
+  const subject   = formData.get('subject')   as string
+
+  if (!ticket_id) return { status: 'error', error: 'Ticket is required' }
+  if (!subject?.trim()) return { status: 'error', error: 'Subject cannot be empty' }
+
+  const { error } = await supabase
+    .from('tickets')
+    .update({ subject: subject.trim() })
+    .eq('id', ticket_id)
+
+  if (error) return { status: 'error', error: error.message }
+
+  revalidatePath(`/tickets/${ticket_id}`)
+  return { status: 'success' }
+}
+
+export async function sendTicketMessage(_prev: State, formData: FormData): Promise<State> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { status: 'error', error: 'Not authenticated' }
+
+  const { data: senderProfile } = await supabase
+    .from('profiles')
+    .select('organization_id, full_name')
+    .eq('id', user.id)
+    .single()
+
+  if (!senderProfile?.organization_id) return { status: 'error', error: 'No organization' }
+
+  const ticket_id = formData.get('ticket_id') as string
+  const body      = formData.get('body')      as string
+  const type      = formData.get('type')      as string
+
+  if (!ticket_id) return { status: 'error', error: 'Ticket is required' }
+  if (!body?.trim()) return { status: 'error', error: 'Message cannot be empty' }
+  if (type !== 'public' && type !== 'internal') {
+    return { status: 'error', error: 'Invalid message type' }
+  }
+
+  // Confirm the ticket belongs to the sender's org before writing.
+  // RLS would block a cross-org insert anyway, but failing fast gives
+  // a friendlier error than a constraint violation.
+  const { data: ticket } = await supabase
+    .from('tickets')
+    .select('id, organization_id, display_id, subject, lead_id')
+    .eq('id', ticket_id)
+    .single()
+
+  if (!ticket || ticket.organization_id !== senderProfile.organization_id) {
+    return { status: 'error', error: 'Ticket not found' }
+  }
+
+  const trimmed = body.trim()
+
+  const { error } = await supabase.from('ticket_messages').insert({
+    ticket_id,
+    org_id:    senderProfile.organization_id,
+    sender_id: user.id,
+    body:      trimmed,
+    type,
+  })
+
+  if (error) return { status: 'error', error: error.message }
+
+  if (type === 'public') {
+    await dispatchOutboundEmail({
+      supabase,
+      orgId:         senderProfile.organization_id,
+      senderName:    senderProfile.full_name,
+      ticketId:      ticket.id,
+      ticketLeadId:  ticket.lead_id,
+      ticketSubject: ticket.subject,
+      ticketDisplayId: ticket.display_id,
+      body:          trimmed,
+    })
+  }
+
+  revalidatePath(`/tickets/${ticket_id}`)
+  return { status: 'success' }
+}
+
+type DispatchArgs = {
+  supabase:        Awaited<ReturnType<typeof createClient>>
+  orgId:           string
+  senderName:      string | null
+  ticketId:        string
+  ticketLeadId:    string | null
+  ticketSubject:   string
+  ticketDisplayId: string | null
+  body:            string
+}
+
+async function dispatchOutboundEmail(args: DispatchArgs) {
+  const token = process.env.POSTMARK_SERVER_TOKEN
+  if (!token) {
+    console.error('[ticket-email] POSTMARK_SERVER_TOKEN not set — skipping outbound email')
+    return
+  }
+
+  const { data: org } = await args.supabase
+    .from('organizations')
+    .select('inbound_email_address, verified_support_email')
+    .eq('id', args.orgId)
+    .single()
+
+  // Recipient comes from the linked lead. No lead → no public destination.
+  if (!args.ticketLeadId) {
+    console.error(`[ticket-email] ticket ${args.ticketId} has no lead — cannot send public reply`)
+    return
+  }
+
+  const { data: lead } = await args.supabase
+    .from('leads')
+    .select('email, first_name, last_name')
+    .eq('id', args.ticketLeadId)
+    .single()
+
+  if (!lead?.email) {
+    console.error(`[ticket-email] lead ${args.ticketLeadId} has no email — skipping outbound email`)
+    return
+  }
+
+  const displayId  = args.ticketDisplayId ?? args.ticketId
+  const senderName = args.senderName || 'Support'
+
+  // Use the org's verified support address when available; otherwise fall back
+  // to the shared Kinvox mailbox so outbound never silently breaks.
+  const fromAddress = org?.verified_support_email
+    ? `${senderName} <${org.verified_support_email}>`
+    : `${senderName} <support@kinvoxtech.com>`
+
+  if (!org?.verified_support_email) {
+    console.warn(`[ticket-email] org ${args.orgId} has no verified_support_email — sending from support@kinvoxtech.com`)
+  }
+
+  // Strip any pre-existing [tk_…] tag so we don't double-tag on follow-ups.
+  const baseSubject = args.ticketSubject.replace(/\[tk_[a-z0-9]+\]\s*/gi, '').trim()
+  const subject = `[${displayId}] ${baseSubject || '(no subject)'}`
+
+  const threadingId = `<${displayId}@kinvox.com>`
+
+  const client = new ServerClient(token)
+
+  try {
+    const result = await client.sendEmail({
+      From:    fromAddress,
+      To:      lead.email,
+      Subject: subject,
+      TextBody: args.body,
+      Headers: [
+        { Name: 'References',  Value: threadingId },
+        { Name: 'In-Reply-To', Value: threadingId },
+      ],
+    })
+    console.log(`[ticket-email] dispatched ticket=${displayId} from="${fromAddress}" to=${lead.email} subject="${subject}" postmark_id=${result.MessageID}`)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error(`[ticket-email] FAILED ticket=${displayId} to=${lead.email}: ${msg}`)
+  }
+}

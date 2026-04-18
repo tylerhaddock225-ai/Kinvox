@@ -1,0 +1,21 @@
+<svg width="52" height="52" viewBox="0 0 52 52" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Kinvox mark">
+  <defs>
+    <linearGradient id="squareGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#34d399" />
+      <stop offset="100%" stop-color="#0d9488" />
+    </linearGradient>
+  </defs>
+  <path
+    fill-rule="evenodd"
+    clip-rule="evenodd"
+    fill="url(#squareGrad)"
+    d="M10,2 H42 Q50,2 50,10 V42 Q50,50 42,50 H10 Q2,50 2,42 V10 Q2,2 10,2 Z M27.5,11 L12.5,29 L26,29 L24.5,41 L39.5,23 L26,23 Z"
+  />
+  <path
+    d="M10,2 H42 Q50,2 50,10"
+    stroke="rgba(255,255,255,0.22)"
+    stroke-width="1"
+    stroke-linecap="round"
+    fill="none"
+  />
+</svg>
