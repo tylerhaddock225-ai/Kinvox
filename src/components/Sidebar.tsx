@@ -2,9 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Users, UserCircle, CalendarCheck, Ticket, LayoutDashboard, Settings, Shield } from "lucide-react";
+import { Users, UserCircle, CalendarCheck, Ticket, LayoutDashboard, Settings, Shield, LifeBuoy } from "lucide-react";
 import Logo from "./Logo";
-import HQSupportModal from "./HQSupportModal";
 
 const leadsNav = { href: "/leads", label: "Leads", icon: Users };
 
@@ -17,7 +16,7 @@ interface SidebarProps {
 
 // Top-level paths that are NOT org slugs — don't treat them as "current slug".
 const RESERVED_TOP = new Set([
-  "leads", "tickets", "customers", "appointments", "settings",
+  "leads", "tickets", "customers", "appointments", "settings", "support",
   "login", "signup", "forgot-password", "reset-password",
   "onboarding", "admin", "admin-hq", "api",
 ]);
@@ -118,7 +117,17 @@ export default function Sidebar({ canViewLeads = true, orgName = null, orgSlug =
           <Settings className="w-4 h-4 shrink-0" />
           Settings
         </Link>
-        <HQSupportModal />
+        <Link
+          href="/support"
+          className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
+            pathname.startsWith("/support")
+              ? "border-violet-400 bg-violet-500/15 text-violet-100"
+              : "border-violet-500/40 text-violet-300 hover:border-violet-400 hover:bg-violet-500/10 hover:text-violet-200"
+          }`}
+        >
+          <LifeBuoy className="w-4 h-4 shrink-0" />
+          Contact HQ Support
+        </Link>
       </div>
 
       {/* Footer */}

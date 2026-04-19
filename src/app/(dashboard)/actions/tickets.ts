@@ -102,6 +102,7 @@ export async function createHQSupportTicket(_prev: State, formData: FormData): P
 
   if (error) return { status: 'error', error: error.message }
 
+  revalidatePath('/support')
   revalidatePath('/admin-hq/tickets')
   return { status: 'success' }
 }

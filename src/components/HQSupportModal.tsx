@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useRef, useActionState } from 'react'
-import { LifeBuoy, X } from 'lucide-react'
+import { LifeBuoy, Plus, X } from 'lucide-react'
+import { useRouter } from 'next/navigation'
 import { createHQSupportTicket } from '@/app/(dashboard)/actions/tickets'
 
 const INITIAL = null as ReturnType<typeof useActionState<Awaited<ReturnType<typeof createHQSupportTicket>>, FormData>>[0]
@@ -14,6 +15,7 @@ const CATEGORIES = [
 ] as const
 
 export default function HQSupportModal() {
+  const router = useRouter()
   const [state, action, isPending] = useActionState(createHQSupportTicket, INITIAL)
   const dialogRef = useRef<HTMLDialogElement>(null)
   const formRef   = useRef<HTMLFormElement>(null)
@@ -22,8 +24,11 @@ export default function HQSupportModal() {
     if (state?.status === 'success') {
       dialogRef.current?.close()
       formRef.current?.reset()
+      // Refresh the server component so the new row appears on /support
+      // immediately. revalidatePath in the action covers cold reloads.
+      router.refresh()
     }
-  }, [state])
+  }, [state, router])
 
   function open() {
     formRef.current?.reset()
@@ -35,10 +40,10 @@ export default function HQSupportModal() {
       <button
         type="button"
         onClick={open}
-        className="w-full inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-violet-300 border border-violet-500/40 hover:border-violet-400 hover:bg-violet-500/10 hover:text-violet-200 transition-colors"
+        className="inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-2 text-sm font-medium text-white hover:bg-violet-500 transition-colors"
       >
-        <LifeBuoy className="w-4 h-4 shrink-0" />
-        Contact HQ Support
+        <Plus className="w-4 h-4" />
+        New HQ Request
       </button>
 
       <dialog
