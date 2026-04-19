@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Users, UserCircle, CalendarCheck, Ticket, LayoutDashboard, Settings } from "lucide-react";
+import { Users, UserCircle, CalendarCheck, Ticket, LayoutDashboard, Settings, Shield } from "lucide-react";
 import Logo from "./Logo";
 
 const staticNav = [
@@ -17,9 +17,10 @@ const leadsNav = { href: "/leads", label: "Leads", icon: Users };
 interface SidebarProps {
   canViewLeads?: boolean;
   orgName?: string | null;
+  isHqAdmin?: boolean;
 }
 
-export default function Sidebar({ canViewLeads = true, orgName = null }: SidebarProps) {
+export default function Sidebar({ canViewLeads = true, orgName = null, isHqAdmin = false }: SidebarProps) {
   const pathname = usePathname();
 
   const navItems = canViewLeads
@@ -65,6 +66,19 @@ export default function Sidebar({ canViewLeads = true, orgName = null }: Sidebar
           </p>
         )}
       </div>
+
+      {/* HQ return — only rendered for platform admins */}
+      {isHqAdmin && (
+        <div className="px-3 pt-3">
+          <Link
+            href="/admin-hq"
+            className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold uppercase tracking-wider text-indigo-200 bg-indigo-500/15 border border-indigo-500/30 hover:bg-indigo-500/25 hover:text-indigo-100 transition-colors"
+          >
+            <Shield className="w-3.5 h-3.5 shrink-0" />
+            Return to HQ
+          </Link>
+        </div>
+      )}
 
       {/* Main navigation */}
       <nav className="flex-1 px-3 pt-3 pb-4 space-y-1">

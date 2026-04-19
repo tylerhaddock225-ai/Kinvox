@@ -8,6 +8,8 @@ import type { Lead } from '@/lib/types/database.types'
 import { DEFAULT_PERMISSIONS, type Permissions } from '@/lib/permissions'
 import { WIDGET_DEFS } from '@/lib/widgets'
 import WidgetCustomizer from '@/components/WidgetCustomizer'
+import ImpersonationBanner from '@/components/ImpersonationBanner'
+import { resolveImpersonation } from '@/lib/impersonation'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -38,11 +40,19 @@ const STATUS_COLORS: Record<Lead['status'], string> = {
 
 // ── Page ─────────────────────────────────────────────────────────────────────
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ impersonate?: string }>
+}) {
   const supabase = await createClient()
 
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
+
+  // Resolve impersonation (no-op + safe fallback if caller is not an HQ admin).
+  const { impersonate } = await searchParams
+  const impersonation = await resolveImpersonation(impersonate)
 
   // Fetch profile (with role permissions) + widget config in one wave
   const [profileRes, dashConfigRes] = await Promise.all([
@@ -67,7 +77,9 @@ export default async function DashboardPage() {
 
   if (profileRes.error || !profileData?.organization_id) redirect('/onboarding')
 
-  const orgId = profileData.organization_id
+  // When a verified HQ admin is impersonating, queries target the impersonated org.
+  // Otherwise fall back to the caller's real org — RLS enforces both sides.
+  const orgId = impersonation.active ? impersonation.orgId : profileData.organization_id
 
   // Resolve permissions from the joined role (fall back to full access)
   const rawPerms = (profileData.roles as { permissions: Record<string, boolean> } | null)?.permissions
@@ -151,7 +163,9 @@ export default async function DashboardPage() {
   const permittedWidgetDefs = WIDGET_DEFS.filter(w => allCards.some(c => c.id === w.id))
 
   return (
-    <div className="px-8 py-8 space-y-8">
+    <>
+      {impersonation.active && <ImpersonationBanner orgName={impersonation.orgName} />}
+      <div className="px-8 py-8 space-y-8">
 
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
@@ -230,6 +244,7 @@ export default async function DashboardPage() {
           )}
         </div>
       )}
-    </div>
+      </div>
+    </>
   )
 }

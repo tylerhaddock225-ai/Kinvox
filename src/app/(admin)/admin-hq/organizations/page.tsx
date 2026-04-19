@@ -1,5 +1,7 @@
 import Link from 'next/link'
+import { Eye } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
+import { startImpersonation } from '@/app/actions/impersonation'
 
 export const dynamic = 'force-dynamic'
 
@@ -79,12 +81,24 @@ export default async function AdminOrganizationsPage() {
                       </span>
                     </td>
                     <td className="px-5 py-4 text-right">
-                      <Link
-                        href={`/admin-hq/organizations/${org.id}`}
-                        className="inline-flex items-center rounded-md border border-slate-700 bg-slate-800/60 px-3 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-700 hover:text-white transition-colors"
-                      >
-                        Manage
-                      </Link>
+                      <div className="inline-flex items-center gap-2">
+                        <form action={startImpersonation}>
+                          <input type="hidden" name="orgId" value={org.id} />
+                          <button
+                            type="submit"
+                            className="inline-flex items-center gap-1.5 rounded-md border border-indigo-500/40 bg-indigo-500/10 px-3 py-1.5 text-xs font-medium text-indigo-200 hover:bg-indigo-500/20 hover:text-indigo-100 transition-colors"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            View as Merchant
+                          </button>
+                        </form>
+                        <Link
+                          href={`/admin-hq/organizations/${org.id}`}
+                          className="inline-flex items-center rounded-md border border-slate-700 bg-slate-800/60 px-3 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-700 hover:text-white transition-colors"
+                        >
+                          Manage
+                        </Link>
+                      </div>
                     </td>
                   </tr>
                 )
