@@ -167,6 +167,11 @@ export async function updateTicketStatus(formData: FormData): Promise<void> {
 
   revalidatePath('/tickets')
   revalidatePath(`/tickets/${ticket_id}`)
+  // Mirror the revalidations for the HQ views so inline edits from
+  // /admin-hq/tickets refresh the grid counts + detail immediately.
+  revalidatePath('/admin-hq/tickets')
+  revalidatePath(`/admin-hq/tickets/${ticket_id}`)
+  revalidatePath('/support')
 }
 
 export async function updateTicketPriority(formData: FormData): Promise<void> {
@@ -186,6 +191,8 @@ export async function updateTicketPriority(formData: FormData): Promise<void> {
 
   revalidatePath('/tickets')
   revalidatePath(`/tickets/${ticket_id}`)
+  revalidatePath('/admin-hq/tickets')
+  revalidatePath(`/admin-hq/tickets/${ticket_id}`)
 }
 
 export async function updateTicketSubject(_prev: State, formData: FormData): Promise<State> {

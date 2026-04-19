@@ -85,3 +85,38 @@ export async function closeHQTicket(formData: FormData): Promise<void> {
   revalidatePath('/admin-hq/tickets')
   revalidatePath(`/admin-hq/tickets/${ticket_id}`)
 }
+
+const HQ_CATEGORIES = ['bug', 'billing', 'feature_request', 'question'] as const
+type HQCategory = typeof HQ_CATEGORIES[number]
+
+// Inline HQ category edit for the Admin HQ tickets grid. Gated on system_role;
+// only valid on platform_support tickets (hq_category is null on regular
+// merchant tickets per the CHECK + null-default). RLS "HQ admins can update
+// tickets" covers the cross-org update.
+export async function updateHQTicketCategory(formData: FormData): Promise<void> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('system_role')
+    .eq('id', user.id)
+    .single()
+
+  if (!profile?.system_role) return
+
+  const ticket_id = formData.get('ticket_id')  as string
+  const category  = formData.get('hq_category') as string
+  if (!ticket_id) return
+  if (!HQ_CATEGORIES.includes(category as HQCategory)) return
+
+  await supabase
+    .from('tickets')
+    .update({ hq_category: category as HQCategory })
+    .eq('id', ticket_id)
+    .eq('is_platform_support', true)
+
+  revalidatePath('/admin-hq/tickets')
+  revalidatePath(`/admin-hq/tickets/${ticket_id}`)
+}

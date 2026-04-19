@@ -1,37 +1,20 @@
 import Link from 'next/link'
-import { LifeBuoy, XCircle } from 'lucide-react'
+import { LifeBuoy } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
-import { closeHQTicket } from '@/app/(admin)/admin-hq/actions/tickets'
 import CopyId from '@/components/CopyId'
+import TicketStatusSelect from '@/components/TicketStatusSelect'
+import TicketPrioritySelect from '@/components/TicketPrioritySelect'
+import HQCategorySelect from '@/components/admin/HQCategorySelect'
 
 export const dynamic = 'force-dynamic'
 
-type TicketStatus = 'open' | 'pending' | 'closed'
-type HQCategory   = 'bug' | 'billing' | 'feature_request' | 'question'
-type Scope        = 'all' | 'merchant' | 'platform'
-type Queue        = 'active' | 'closed'
+type TicketStatus   = 'open' | 'pending' | 'closed'
+type TicketPriority = 'low' | 'medium' | 'high'
+type HQCategory     = 'bug' | 'billing' | 'feature_request' | 'question'
+type Scope          = 'all' | 'merchant' | 'platform'
+type Queue          = 'active' | 'closed'
 
 const ACTIVE_STATUSES: TicketStatus[] = ['open', 'pending']
-
-const STATUS_STYLE: Record<TicketStatus, string> = {
-  open:    'border-amber-700/60 bg-amber-950/40 text-amber-300',
-  pending: 'border-sky-700/60 bg-sky-950/40 text-sky-300',
-  closed:  'border-pvx-border bg-pvx-surface text-gray-400',
-}
-
-const CATEGORY_LABEL: Record<HQCategory, string> = {
-  bug:              'Bug',
-  billing:          'Billing',
-  feature_request:  'Feature',
-  question:         'Question',
-}
-
-const CATEGORY_STYLE: Record<HQCategory, string> = {
-  bug:              'border-rose-700/60 bg-rose-950/40 text-rose-300',
-  billing:          'border-emerald-700/60 bg-emerald-950/40 text-emerald-300',
-  feature_request:  'border-violet-700/60 bg-violet-950/40 text-violet-300',
-  question:         'border-sky-700/60 bg-sky-950/40 text-sky-300',
-}
 
 function hrefWith(params: Record<string, string | undefined>): string {
   const next = new URLSearchParams()
@@ -111,7 +94,7 @@ export default async function AdminTicketsPage({
   // ── Main listing, scoped by tabs ────────────────────────────────────────────
   let listingQ = supabase
     .from('tickets')
-    .select('id, display_id, subject, status, created_at, organization_id, is_platform_support, hq_category, organizations(name)')
+    .select('id, display_id, subject, status, priority, created_at, organization_id, is_platform_support, hq_category, organizations(name)')
     .order('created_at', { ascending: false })
     .limit(200)
 
@@ -132,6 +115,7 @@ export default async function AdminTicketsPage({
         display_id:           string | null
         subject:              string
         status:               TicketStatus
+        priority:             TicketPriority
         created_at:           string
         organization_id:      string
         is_platform_support:  boolean
@@ -205,9 +189,9 @@ export default async function AdminTicketsPage({
               <th className="px-5 py-3">Organization</th>
               <th className="px-5 py-3">Subject</th>
               <th className="px-5 py-3">Category</th>
+              <th className="px-5 py-3">Priority</th>
               <th className="px-5 py-3">Status</th>
               <th className="px-5 py-3 text-right">Created</th>
-              <th className="px-5 py-3 text-right">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-pvx-border">
@@ -233,40 +217,19 @@ export default async function AdminTicketsPage({
                   </td>
                   <td className="px-5 py-4">
                     {t.is_platform_support && t.hq_category ? (
-                      <span
-                        className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide ${CATEGORY_STYLE[t.hq_category]}`}
-                      >
-                        {CATEGORY_LABEL[t.hq_category]}
-                      </span>
+                      <HQCategorySelect ticketId={t.id} value={t.hq_category} />
                     ) : (
-                      <span className="text-xs text-gray-600">—</span>
+                      <span className="text-xs text-gray-600">\u2014</span>
                     )}
                   </td>
                   <td className="px-5 py-4">
-                    <span
-                      className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide ${STATUS_STYLE[t.status]}`}
-                    >
-                      {t.status}
-                    </span>
+                    <TicketPrioritySelect ticketId={t.id} value={t.priority} />
+                  </td>
+                  <td className="px-5 py-4">
+                    <TicketStatusSelect ticketId={t.id} value={t.status} />
                   </td>
                   <td className="px-5 py-4 text-right text-xs text-gray-500 font-mono">
                     {new Date(t.created_at).toLocaleString()}
-                  </td>
-                  <td className="px-5 py-4 text-right">
-                    {t.status === 'closed' ? (
-                      <span className="text-[11px] text-gray-600">—</span>
-                    ) : (
-                      <form action={closeHQTicket} className="inline-flex">
-                        <input type="hidden" name="ticket_id" value={t.id} />
-                        <button
-                          type="submit"
-                          className="inline-flex items-center gap-1 rounded-md border border-pvx-border px-2 py-1 text-[11px] font-medium text-gray-400 hover:border-rose-500/40 hover:text-rose-300 hover:bg-rose-500/10 transition-colors"
-                        >
-                          <XCircle className="w-3 h-3" />
-                          Close
-                        </button>
-                      </form>
-                    )}
                   </td>
                 </tr>
               ))
