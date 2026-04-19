@@ -136,12 +136,12 @@ export default async function AdminOrgDetailPage({
       {/* Edit form */}
       <section className="rounded-xl border border-pvx-border bg-gray-900 p-5">
         <h2 className="text-sm font-semibold text-white">Details</h2>
-        <p className="mt-1 text-xs text-gray-500">Updates apply platform-wide and are visible to the merchant.</p>
+        <p className="mt-1 text-xs text-gray-500">Updates apply platform-wide and are visible to the organization.</p>
 
         <form action={updateOrganization} className="mt-5 space-y-4">
           <input type="hidden" name="id" value={org.id} />
 
-          <Field label="Merchant Name">
+          <Field label="Organization Name">
             <input
               name="name"
               defaultValue={org.name}
@@ -195,13 +195,13 @@ export default async function AdminOrgDetailPage({
         {!isArchived ? (
           <>
             <p className="mt-2 text-xs text-rose-300/70">
-              Archiving hides this organization from the merchant app and blocks new logins.
+              Archiving hides this organization from their workspace and blocks new logins.
               The row is preserved and can be restored.
             </p>
             <form action={archiveOrganization} className="mt-4">
               <input type="hidden" name="id" value={org.id} />
               <ConfirmButton
-                message={`Archive "${org.name}"? Merchant members will lose access until restored.`}
+                message={`Archive "${org.name}"? Organization members will lose access until restored.`}
                 className="inline-flex items-center gap-1.5 rounded-md border border-rose-700/60 bg-rose-900/30 px-3 py-1.5 text-xs font-medium text-rose-100 hover:bg-rose-900/50 transition-colors"
               >
                 <Archive className="w-3.5 h-3.5" />
@@ -212,7 +212,7 @@ export default async function AdminOrgDetailPage({
         ) : (
           <>
             <p className="mt-2 text-xs text-rose-300/70">
-              This organization is currently archived. Restoring re-enables merchant access.
+              This organization is currently archived. Restoring re-enables access.
             </p>
             <form action={restoreOrganization} className="mt-4">
               <input type="hidden" name="id" value={org.id} />

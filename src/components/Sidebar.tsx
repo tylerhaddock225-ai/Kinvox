@@ -115,7 +115,7 @@ export default function Sidebar({ canViewLeads = true, orgName = null, orgSlug =
       <div className="px-3 pb-4 border-t border-pvx-border pt-3 space-y-2">
         <Link href="/settings/team" className={linkClass("/settings/team")}>
           <Settings className="w-4 h-4 shrink-0" />
-          Settings
+          Organization Settings
         </Link>
         <Link
           href="/support"

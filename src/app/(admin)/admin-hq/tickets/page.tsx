@@ -168,10 +168,10 @@ export default async function AdminTicketsPage({
           <h1 className="mt-1 text-2xl font-semibold text-white">Tickets</h1>
           <p className="mt-1 text-sm text-gray-400">
             {scope === 'platform'
-              ? 'Support requests from merchants to Kinvox HQ.'
+              ? 'Support requests from organizations to Kinvox HQ.'
               : scope === 'merchant'
-                ? 'Every merchant\u2019s own customer tickets. Showing the 200 most recent.'
-                : 'Every ticket across every merchant. Showing the 200 most recent.'}
+                ? 'Every organization\u2019s own customer tickets. Showing the 200 most recent.'
+                : 'Every ticket across every organization. Showing the 200 most recent.'}
           </p>
         </div>
         <div className="text-xs font-medium text-gray-400">
@@ -181,7 +181,7 @@ export default async function AdminTicketsPage({
 
       <div className="flex items-center gap-1 border-b border-pvx-border">
         <ScopeTab scope="all"      current={scope} queue={queue} count={allCountRes.count      ?? 0} label="All" />
-        <ScopeTab scope="merchant" current={scope} queue={queue} count={merchantCountRes.count ?? 0} label="Merchant" />
+        <ScopeTab scope="merchant" current={scope} queue={queue} count={merchantCountRes.count ?? 0} label="Organization" />
         <ScopeTab scope="platform" current={scope} queue={queue} count={platformCountRes.count ?? 0} label="Platform Support" />
       </div>
 

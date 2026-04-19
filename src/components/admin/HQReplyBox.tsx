@@ -61,7 +61,7 @@ export default function HQReplyBox({ ticketId }: { ticketId: string }) {
         name="body"
         required
         rows={4}
-        placeholder={isInternal ? 'Write a private HQ-only note…' : 'Write a reply to the merchant…'}
+        placeholder={isInternal ? 'Write a private HQ-only note…' : 'Write a reply to the organization…'}
         className={`w-full rounded-lg border px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 resize-none transition-colors ${
           isInternal
             ? 'border-yellow-500/40 bg-yellow-500/5 focus:ring-yellow-500'

@@ -27,7 +27,7 @@ export default async function AdminSettingsPage() {
         </div>
         <h1 className="mt-1 text-2xl font-semibold text-white">Settings</h1>
         <p className="mt-1 text-sm text-gray-400">
-          Global knobs that apply to every merchant on the platform.
+          Global knobs that apply to every organization on the platform.
         </p>
       </div>
       <SettingsTabs

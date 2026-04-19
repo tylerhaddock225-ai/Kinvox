@@ -75,7 +75,7 @@ export default function HQSupportModal({ showAffectedTab = false, showRecordId =
           </button>
         </div>
         <p className="text-xs text-gray-400 mb-5">
-          This goes straight to the Kinvox team — not your customers.
+          {'This goes straight to the Kinvox team \u2014 not your organization\u2019s customers.'}
         </p>
 
         <form ref={formRef} action={action} className="space-y-4">

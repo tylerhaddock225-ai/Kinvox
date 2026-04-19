@@ -91,9 +91,9 @@ export default async function TeamSettingsPage() {
   return (
     <div className="px-8 py-8 space-y-6 max-w-5xl">
       <div>
-        <h1 className="text-2xl font-bold text-white">Settings</h1>
+        <h1 className="text-2xl font-bold text-white">Organization Settings</h1>
         <p className="text-sm text-gray-400 mt-1">
-          Manage your team and how customers reach you.
+          Manage your organization, team, and how customers reach you.
         </p>
       </div>
       <TeamTabs members={members} roles={roles} orgSettings={orgSettings} />

@@ -47,7 +47,7 @@ export default async function AdminAiTemplatesPage() {
           </div>
           <h1 className="mt-1 text-2xl font-semibold text-white">AI Templates</h1>
           <p className="mt-1 text-sm text-gray-400">
-            Industry-specific prompts that merchants can adopt or fork.
+            Industry-specific prompts that organizations can adopt or fork.
           </p>
         </div>
         <button

@@ -49,8 +49,8 @@ export default async function AdminOrganizationsPage({
           <h1 className="text-2xl font-semibold text-white">Organizations</h1>
           <p className="mt-1 text-sm text-gray-400">
             {showArchived
-              ? 'All merchants on the Kinvox platform, including archived.'
-              : 'Live merchants on the Kinvox platform.'}
+              ? 'All organizations on the Kinvox platform, including archived.'
+              : 'Live organizations on the Kinvox platform.'}
           </p>
         </div>
         <div className="flex flex-col items-end gap-1 text-xs">
@@ -140,7 +140,7 @@ export default async function AdminOrganizationsPage({
                               className="inline-flex items-center gap-1.5 rounded-md border border-violet-500/40 bg-violet-500/10 px-3 py-1.5 text-xs font-medium text-violet-200 hover:bg-violet-500/20 hover:text-violet-100 transition-colors"
                             >
                               <Eye className="w-3.5 h-3.5" />
-                              View as Merchant
+                              View as Organization
                             </button>
                           </form>
                         )}

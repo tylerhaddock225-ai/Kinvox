@@ -114,7 +114,7 @@ export default async function HQTicketDetailPage({ params }: { params: Promise<{
       {isPlatform && (ticket.affected_tab || ticket.record_id) && (
         <div className="rounded-lg border border-violet-500/20 bg-violet-500/5 px-5 py-4">
           <div className="text-[11px] font-semibold uppercase tracking-wider text-violet-300 mb-3">
-            Merchant Context
+            Organization Context
           </div>
           <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
             {ticket.affected_tab && (

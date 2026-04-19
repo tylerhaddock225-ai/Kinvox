@@ -131,7 +131,7 @@ function SupportSettingsPanel({
           <div>
             <h3 className="text-sm font-semibold text-white">HQ Request Form Fields</h3>
             <p className="text-xs text-gray-500 mt-1">
-              Toggle optional fields on the merchant\u2019s &ldquo;New HQ Request&rdquo; modal.
+              Toggle optional fields on the organization\u2019s &ldquo;New HQ Request&rdquo; modal.
               Changes apply platform-wide on next load.
             </p>
           </div>
@@ -141,13 +141,13 @@ function SupportSettingsPanel({
           <ToggleRow
             settingKey="show_affected_tab_field"
             label={'Show \u201CAffected Tab\u201D dropdown'}
-            hint={'Lets merchants flag which merchant tab the issue is in (Dashboard, Leads, Customers, \u2026).'}
+            hint={'Lets organizations flag which tab the issue is in (Dashboard, Leads, Customers, \u2026).'}
             defaultChecked={showAffectedTab}
           />
           <ToggleRow
             settingKey="show_record_id_field"
             label={'Show \u201CRecord ID\u201D input'}
-            hint={'Free-form field for the merchant to paste the row they\u2019re reporting on (e.g. ld_123).'}
+            hint={'Free-form field for the organization to paste the row they\u2019re reporting on (e.g. ld_123).'}
             defaultChecked={showRecordId}
           />
         </div>
