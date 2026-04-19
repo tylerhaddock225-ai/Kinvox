@@ -176,7 +176,7 @@ export default function EditAppointmentModal({ members, leads, onClose, ref }: P
 
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-xs text-gray-400 mb-1">Assigned To</label>
+            <label className="block text-xs text-gray-400 mb-1">Meeting With (target user)</label>
             <select
               name="assigned_to"
               value={assignVal}

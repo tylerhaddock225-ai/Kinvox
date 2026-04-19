@@ -58,6 +58,7 @@ export type Database = {
           avatar_url: string | null
           role: 'admin' | 'agent' | 'viewer'
           role_id: string | null
+          calendar_email: string | null
           created_at: string
           updated_at: string
         }
@@ -68,6 +69,7 @@ export type Database = {
           avatar_url?: string | null
           role?: 'admin' | 'agent' | 'viewer'
           role_id?: string | null
+          calendar_email?: string | null
           created_at?: string
           updated_at?: string
         }

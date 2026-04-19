@@ -12,6 +12,7 @@ import EditAppointmentModal, {
 import DayOverviewModal, {
   type DayOverviewModalHandle,
 } from './DayOverviewModal'
+import { tintForAgent } from '@/lib/agent-colors'
 
 export type CalAppt = {
   id:          string
@@ -23,6 +24,7 @@ export type CalAppt = {
   description: string | null
   location:    string | null
   assigned_to: string | null
+  created_by:  string | null
   lead_id:     string | null
 }
 
@@ -32,9 +34,10 @@ type Lead   = { id: string; first_name: string; last_name: string | null }
 type View = 'day' | 'week' | 'month' | 'year' | 'decade'
 
 interface Props {
-  appointments: CalAppt[]
-  members:      Member[]
-  leads:        Lead[]
+  appointments:    CalAppt[]
+  members:         Member[]
+  leads:           Lead[]
+  colorByAgent?:   boolean
 }
 
 // ── Date helpers ─────────────────────────────────────────────────────────────
@@ -91,7 +94,7 @@ const VIEWS: { key: View; label: string }[] = [
 
 // ── Main component ───────────────────────────────────────────────────────────
 
-export default function CalendarCore({ appointments, members, leads }: Props) {
+export default function CalendarCore({ appointments, members, leads, colorByAgent = false }: Props) {
   const router       = useRouter()
   const searchParams = useSearchParams()
 
@@ -254,9 +257,9 @@ export default function CalendarCore({ appointments, members, leads }: Props) {
 
       {/* View body */}
       <div className="p-4">
-        {view === 'day'    && <DayView    cursor={cursor} byDay={byDay} onSlotClick={openSlot}  onEditAppt={openEdit} today={today} now={now} draft={draft} />}
-        {view === 'week'   && <WeekView   cursor={cursor} byDay={byDay} onSlotClick={openSlot}  onEditAppt={openEdit} today={today} now={now} draft={draft} />}
-        {view === 'month'  && <MonthView  cursor={cursor} byDay={byDay} onCellClick={openNewAt} onEditAppt={openEdit} onMorePill={openDayOverview} today={today} />}
+        {view === 'day'    && <DayView    cursor={cursor} byDay={byDay} onSlotClick={openSlot}  onEditAppt={openEdit} today={today} now={now} draft={draft} colorByAgent={colorByAgent} />}
+        {view === 'week'   && <WeekView   cursor={cursor} byDay={byDay} onSlotClick={openSlot}  onEditAppt={openEdit} today={today} now={now} draft={draft} colorByAgent={colorByAgent} />}
+        {view === 'month'  && <MonthView  cursor={cursor} byDay={byDay} onCellClick={openNewAt} onEditAppt={openEdit} onMorePill={openDayOverview} today={today} colorByAgent={colorByAgent} />}
         {view === 'year'   && <YearView   cursor={cursor} byDay={byDay} today={today} onMonthClick={(m) => { setCursor(new Date(cursor.getFullYear(), m, 1)); setView('month') }} />}
         {view === 'decade' && <DecadeView cursor={cursor} byYear={byYear} today={today} onYearClick={(y) => { setCursor(new Date(y, 0, 1)); setView('year') }} />}
       </div>
@@ -301,7 +304,7 @@ function HourLegend() {
 }
 
 function HourColumn({
-  date, byDay, onSlotClick, onEditAppt, today, now, draft,
+  date, byDay, onSlotClick, onEditAppt, today, now, draft, colorByAgent,
 }: {
   date: Date
   byDay: Map<string, CalAppt[]>
@@ -310,6 +313,7 @@ function HourColumn({
   today: Date
   now: Date
   draft: { dayKey: string; startMin: number; endMin: number } | null
+  colorByAgent: boolean
 }) {
   const isToday       = sameDay(date, today)
   const dayKeyStr     = dateKey(date)
@@ -376,12 +380,17 @@ function HourColumn({
           const top    = Math.max(0, (startMin / 60) * HOUR_PX)
           const bottom = Math.min(gridPx, (endMin / 60) * HOUR_PX)
           const height = Math.max(22, bottom - top - 2)
+          const tint   = colorByAgent ? tintForAgent(appt.assigned_to) : null
           return (
             <button
               key={appt.id}
               type="button"
               onClick={e => { e.stopPropagation(); onEditAppt(appt) }}
-              className="absolute left-1 right-1 z-10 text-left rounded bg-violet-500/30 border border-violet-500/50 text-violet-100 px-1.5 py-0.5 overflow-hidden hover:bg-violet-500/40 hover:border-violet-400 transition-colors"
+              className={`absolute left-1 right-1 z-10 text-left rounded border px-1.5 py-0.5 overflow-hidden transition-colors ${
+                tint
+                  ? `${tint.bg} ${tint.border} ${tint.text} hover:brightness-125`
+                  : 'bg-violet-500/30 border-violet-500/50 text-violet-100 hover:bg-violet-500/40 hover:border-violet-400'
+              }`}
               style={{ top: `${top}px`, height: `${height}px` }}
             >
               <div className="text-[10px] font-medium truncate">{appt.title}</div>
@@ -421,7 +430,7 @@ function HourColumn({
 
 // ── Day view ─────────────────────────────────────────────────────────────────
 
-function DayView({ cursor, byDay, onSlotClick, onEditAppt, today, now, draft }: { cursor: Date; byDay: Map<string, CalAppt[]>; onSlotClick: (d: Date) => void; onEditAppt: (a: CalAppt) => void; today: Date; now: Date; draft: { dayKey: string; startMin: number; endMin: number } | null }) {
+function DayView({ cursor, byDay, onSlotClick, onEditAppt, today, now, draft, colorByAgent }: { cursor: Date; byDay: Map<string, CalAppt[]>; onSlotClick: (d: Date) => void; onEditAppt: (a: CalAppt) => void; today: Date; now: Date; draft: { dayKey: string; startMin: number; endMin: number } | null; colorByAgent: boolean }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: DEFAULT_SCROLL_HOUR * HOUR_PX, behavior: 'auto' })
@@ -434,7 +443,7 @@ function DayView({ cursor, byDay, onSlotClick, onEditAppt, today, now, draft }: 
     >
       <div className="flex min-w-full">
         <HourLegend />
-        <HourColumn date={cursor} byDay={byDay} onSlotClick={onSlotClick} onEditAppt={onEditAppt} today={today} now={now} draft={draft} />
+        <HourColumn date={cursor} byDay={byDay} onSlotClick={onSlotClick} onEditAppt={onEditAppt} today={today} now={now} draft={draft} colorByAgent={colorByAgent} />
       </div>
     </div>
   )
@@ -442,7 +451,7 @@ function DayView({ cursor, byDay, onSlotClick, onEditAppt, today, now, draft }: 
 
 // ── Week view ────────────────────────────────────────────────────────────────
 
-function WeekView({ cursor, byDay, onSlotClick, onEditAppt, today, now, draft }: { cursor: Date; byDay: Map<string, CalAppt[]>; onSlotClick: (d: Date) => void; onEditAppt: (a: CalAppt) => void; today: Date; now: Date; draft: { dayKey: string; startMin: number; endMin: number } | null }) {
+function WeekView({ cursor, byDay, onSlotClick, onEditAppt, today, now, draft, colorByAgent }: { cursor: Date; byDay: Map<string, CalAppt[]>; onSlotClick: (d: Date) => void; onEditAppt: (a: CalAppt) => void; today: Date; now: Date; draft: { dayKey: string; startMin: number; endMin: number } | null; colorByAgent: boolean }) {
   const start = startOfWeek(cursor)
   const days = Array.from({ length: 7 }, (_, i) => addDays(start, i))
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -458,7 +467,7 @@ function WeekView({ cursor, byDay, onSlotClick, onEditAppt, today, now, draft }:
       <div className="flex min-w-full">
         <HourLegend />
         {days.map(d => (
-          <HourColumn key={dateKey(d)} date={d} byDay={byDay} onSlotClick={onSlotClick} onEditAppt={onEditAppt} today={today} now={now} draft={draft} />
+          <HourColumn key={dateKey(d)} date={d} byDay={byDay} onSlotClick={onSlotClick} onEditAppt={onEditAppt} today={today} now={now} draft={draft} colorByAgent={colorByAgent} />
         ))}
       </div>
     </div>
@@ -468,7 +477,7 @@ function WeekView({ cursor, byDay, onSlotClick, onEditAppt, today, now, draft }:
 // ── Month view ───────────────────────────────────────────────────────────────
 
 function MonthView({
-  cursor, byDay, onCellClick, onEditAppt, onMorePill, today,
+  cursor, byDay, onCellClick, onEditAppt, onMorePill, today, colorByAgent,
 }: {
   cursor: Date
   byDay: Map<string, CalAppt[]>
@@ -476,6 +485,7 @@ function MonthView({
   onEditAppt:  (a: CalAppt) => void
   onMorePill:  (d: Date, appts: CalAppt[]) => void
   today: Date
+  colorByAgent: boolean
 }) {
   const start = startOfWeek(startOfMonth(cursor))
   const cells = Array.from({ length: 42 }, (_, i) => addDays(start, i))
@@ -512,24 +522,31 @@ function MonthView({
                 {d.getDate()}
               </div>
               <div className="space-y-0.5">
-                {visible.map(a => (
-                  <div
-                    key={a.id}
-                    role="button"
-                    tabIndex={0}
-                    onClick={e => { e.stopPropagation(); onEditAppt(a) }}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault()
-                        e.stopPropagation()
-                        onEditAppt(a)
-                      }
-                    }}
-                    className="text-[10px] bg-violet-500/15 border border-violet-500/25 text-violet-100 rounded px-1 py-0.5 truncate cursor-pointer hover:bg-violet-500/30 hover:border-violet-400 transition-colors"
-                  >
-                    {a.title}
-                  </div>
-                ))}
+                {visible.map(a => {
+                  const tint = colorByAgent ? tintForAgent(a.assigned_to) : null
+                  return (
+                    <div
+                      key={a.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={e => { e.stopPropagation(); onEditAppt(a) }}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          e.stopPropagation()
+                          onEditAppt(a)
+                        }
+                      }}
+                      className={`text-[10px] rounded border px-1 py-0.5 truncate cursor-pointer transition-colors ${
+                        tint
+                          ? `${tint.bg} ${tint.border} ${tint.text} hover:brightness-125`
+                          : 'bg-violet-500/15 border-violet-500/25 text-violet-100 hover:bg-violet-500/30 hover:border-violet-400'
+                      }`}
+                    >
+                      {a.title}
+                    </div>
+                  )
+                })}
                 {overflow > 0 && (
                   <div
                     role="button"

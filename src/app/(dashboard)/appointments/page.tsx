@@ -3,11 +3,12 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import CreateAppointmentModal from '@/components/CreateAppointmentModal'
 import CalendarCore, { type CalAppt } from '@/components/calendar/CalendarCore'
+import CalendarViewToggle from '@/components/calendar/CalendarViewToggle'
 import MiniCalendar from '@/components/calendar/MiniCalendar'
 
 type SearchParamsP = Promise<{ [key: string]: string | string[] | undefined }>
 
-const APPT_COLS = 'id, display_id, title, start_at, end_at, status, description, location, assigned_to, lead_id'
+const APPT_COLS = 'id, display_id, title, start_at, end_at, status, description, location, assigned_to, created_by, lead_id'
 
 export default async function AppointmentsPage({ searchParams }: { searchParams: SearchParamsP }) {
   const params   = await searchParams
@@ -18,23 +19,42 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('organization_id')
+    .select('organization_id, role')
     .eq('id', user.id)
     .single()
 
   if (!profile?.organization_id) redirect('/onboarding')
 
-  const orgId = profile.organization_id
-  const openId = typeof params.open === 'string' ? params.open : null
+  const orgId         = profile.organization_id
+  const isAdmin       = profile.role === 'admin'
+  const openId        = typeof params.open    === 'string' ? params.open    : null
+  const requestedView = typeof params.view    === 'string' ? params.view    : null
+  const agentParam    = typeof params.agent   === 'string' ? params.agent   : null
+
+  // Resolve the view: anyone can see Mine + By-agent; Global is admin-only.
+  const view: 'mine' | 'agent' | 'global' =
+      requestedView === 'global' && isAdmin ? 'global'
+    : requestedView === 'agent'             ? 'agent'
+    :                                         'mine'
+
+  let apptsQ = supabase
+    .from('appointments')
+    .select(APPT_COLS)
+    .eq('organization_id', orgId)
+    .is('deleted_at', null)
+    .order('start_at', { ascending: true })
+    .limit(1000)
+
+  if (view === 'mine') {
+    // Creator OR target. PostgREST OR syntax.
+    apptsQ = apptsQ.or(`created_by.eq.${user.id},assigned_to.eq.${user.id}`)
+  } else if (view === 'agent' && agentParam) {
+    apptsQ = apptsQ.eq('assigned_to', agentParam)
+  }
+  // view === 'global' applies no extra filter; full org list.
 
   const [apptsRes, membersRes, leadsRes] = await Promise.all([
-    supabase
-      .from('appointments')
-      .select(APPT_COLS)
-      .eq('organization_id', orgId)
-      .is('deleted_at', null)
-      .order('start_at', { ascending: true })
-      .limit(1000),
+    apptsQ,
     supabase
       .from('profiles')
       .select('id, full_name')
@@ -75,9 +95,16 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
         <CreateAppointmentModal members={members} leads={leads} />
       </div>
 
+      <CalendarViewToggle members={members} canSeeGlobal={isAdmin} />
+
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_280px] gap-6">
         <Suspense fallback={<div className="rounded-xl border border-pvx-border bg-pvx-surface h-96" />}>
-          <CalendarCore appointments={appointments} members={members} leads={leads} />
+          <CalendarCore
+            appointments={appointments}
+            members={members}
+            leads={leads}
+            colorByAgent={view === 'global'}
+          />
         </Suspense>
         <aside className="space-y-4">
           <MiniCalendar appointments={appointments} />

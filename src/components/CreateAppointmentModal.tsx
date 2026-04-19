@@ -141,13 +141,16 @@ export default function CreateAppointmentModal({ members, leads, hideTrigger, on
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs text-gray-400 mb-1">Assigned To</label>
+              <label className="block text-xs text-gray-400 mb-1">Meeting With (target user)</label>
               <select name="assigned_to" defaultValue="" className="w-full rounded-lg border border-pvx-border bg-gray-900 px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-violet-500">
                 <option value="">— Unassigned —</option>
                 {members.map(m => (
                   <option key={m.id} value={m.id}>{m.full_name ?? 'Unknown'}</option>
                 ))}
               </select>
+              <p className="text-[10px] text-gray-500 mt-1">
+                Invite goes to this user&rsquo;s calendar. You&rsquo;ll get a confirmation copy.
+              </p>
             </div>
             <div>
               <label className="block text-xs text-gray-400 mb-1">Related Lead</label>
