@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Users, UserCircle, CalendarCheck, Ticket, LayoutDashboard, Settings, Shield } from "lucide-react";
 import Logo from "./Logo";
+import HQSupportModal from "./HQSupportModal";
 
 const leadsNav = { href: "/leads", label: "Leads", icon: Users };
 
@@ -112,11 +113,12 @@ export default function Sidebar({ canViewLeads = true, orgName = null, orgSlug =
       </nav>
 
       {/* Settings section */}
-      <div className="px-3 pb-4 border-t border-pvx-border pt-3 space-y-1">
+      <div className="px-3 pb-4 border-t border-pvx-border pt-3 space-y-2">
         <Link href="/settings/team" className={linkClass("/settings/team")}>
           <Settings className="w-4 h-4 shrink-0" />
           Settings
         </Link>
+        <HQSupportModal />
       </div>
 
       {/* Footer */}

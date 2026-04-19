@@ -55,8 +55,56 @@ export async function createTicket(_prev: State, formData: FormData): Promise<St
 
 const STATUS_VALUES   = ['open', 'pending', 'closed'] as const
 const PRIORITY_VALUES = ['low', 'medium', 'high']     as const
+const HQ_CATEGORIES   = ['bug', 'billing', 'feature_request', 'question'] as const
 type TicketStatus   = typeof STATUS_VALUES[number]
 type TicketPriority = typeof PRIORITY_VALUES[number]
+type HQCategory     = typeof HQ_CATEGORIES[number]
+
+// HQ support tickets live in the merchant's own org (so insert RLS passes
+// without bypass) and are flagged is_platform_support=true. Merchant-facing
+// ticket queries filter the flag out; Admin HQ's /admin-hq/tickets surfaces
+// them via ?scope=platform.
+export async function createHQSupportTicket(_prev: State, formData: FormData): Promise<State> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { status: 'error', error: 'Not authenticated' }
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('organization_id')
+    .eq('id', user.id)
+    .single()
+
+  if (!profile?.organization_id) return { status: 'error', error: 'No organization' }
+
+  const subject         = formData.get('subject')        as string
+  const description     = formData.get('description')    as string | null
+  const category        = formData.get('hq_category')    as string
+  const screenshot_url  = formData.get('screenshot_url') as string | null
+
+  if (!subject?.trim()) return { status: 'error', error: 'Subject is required' }
+  if (!HQ_CATEGORIES.includes(category as HQCategory)) {
+    return { status: 'error', error: 'Invalid category' }
+  }
+
+  const { error } = await supabase.from('tickets').insert({
+    organization_id:     profile.organization_id,
+    created_by:          user.id,
+    subject:             subject.trim(),
+    description:         description?.trim() || null,
+    priority:            'medium',
+    status:              'open',
+    channel:             'portal',
+    is_platform_support: true,
+    hq_category:         category as HQCategory,
+    screenshot_url:      screenshot_url?.trim() || null,
+  })
+
+  if (error) return { status: 'error', error: error.message }
+
+  revalidatePath('/admin-hq/tickets')
+  return { status: 'success' }
+}
 
 export async function updateTicketStatus(formData: FormData): Promise<void> {
   const supabase = await createClient()

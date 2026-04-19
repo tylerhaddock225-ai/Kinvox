@@ -266,6 +266,9 @@ export type Database = {
           deleted_at: string | null
           created_at: string
           updated_at: string
+          is_platform_support: boolean
+          hq_category: 'bug' | 'billing' | 'feature_request' | 'question' | null
+          screenshot_url: string | null
         }
         Insert: {
           id?: string
@@ -287,6 +290,9 @@ export type Database = {
           deleted_at?: string | null
           created_at?: string
           updated_at?: string
+          is_platform_support?: boolean
+          hq_category?: 'bug' | 'billing' | 'feature_request' | 'question' | null
+          screenshot_url?: string | null
         }
         Update: Partial<Database['public']['Tables']['tickets']['Insert']>
       }

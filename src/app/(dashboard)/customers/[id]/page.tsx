@@ -87,6 +87,7 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
       .from('tickets')
       .select('id, display_id, subject, status, updated_at')
       .eq('customer_id', id)
+      .eq('is_platform_support', false)
       .is('deleted_at', null)
       .order('updated_at', { ascending: false })
       .limit(50),

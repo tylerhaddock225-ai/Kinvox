@@ -158,6 +158,7 @@ export default async function TicketsPage({
     .from('tickets')
     .select('id, display_id, subject, status, priority, created_at, updated_at, assigned_to, profiles!tickets_assigned_to_fkey(full_name)')
     .eq('organization_id', orgId)
+    .eq('is_platform_support', false)
     .is('deleted_at', null)
     // For JS-sorted columns we still need a deterministic DB order so the 200-row
     // window we fetch is stable; default to updated_at desc inside that.
@@ -197,12 +198,14 @@ export default async function TicketsPage({
       .from('tickets')
       .select('id', { count: 'exact', head: true })
       .eq('organization_id', orgId)
+      .eq('is_platform_support', false)
       .is('deleted_at', null)
       .in('status', ACTIVE_STATUSES),
     supabase
       .from('tickets')
       .select('id', { count: 'exact', head: true })
       .eq('organization_id', orgId)
+      .eq('is_platform_support', false)
       .is('deleted_at', null)
       .eq('status', 'closed'),
   ])
