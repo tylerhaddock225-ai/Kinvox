@@ -44,15 +44,16 @@ function splitName(full: string): { first: string; last: string | null } {
 }
 
 export async function POST(request: NextRequest) {
-  // 1. Shared-secret header guard.
+  // 1. Shared-secret query-param guard. Postmark appends `?token=...` to the
+  //    inbound webhook URL; we compare it against POSTMARK_INBOUND_SECRET.
   const expected = process.env.POSTMARK_INBOUND_SECRET
   if (!expected) {
     console.error(`${LOG} POSTMARK_INBOUND_SECRET is not set — refusing to process inbound mail`)
     return NextResponse.json({ error: 'Server not configured' }, { status: 500 })
   }
-  const provided = request.headers.get('x-postmark-secret') ?? ''
+  const provided = request.nextUrl.searchParams.get('token') ?? ''
   if (!safeEqual(provided, expected)) {
-    console.warn(`${LOG} unauthorized request — bad or missing X-Postmark-Secret`)
+    console.warn(`${LOG} unauthorized request — bad or missing token query param`)
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
