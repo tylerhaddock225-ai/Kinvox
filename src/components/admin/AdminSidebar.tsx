@@ -30,7 +30,7 @@ export default function AdminSidebar({ systemRole }: AdminSidebarProps) {
     const active = pathname === href || pathname.startsWith(href + "/");
     return `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors border-l-2 ${
       active
-        ? "bg-slate-700/60 text-slate-50 border-sky-400"
+        ? "bg-slate-700/60 text-slate-50 border-indigo-400"
         : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-100 border-transparent"
     }`;
   }
@@ -38,12 +38,12 @@ export default function AdminSidebar({ systemRole }: AdminSidebarProps) {
   return (
     <aside className="flex flex-col w-64 min-h-screen bg-slate-950 text-slate-100 border-r border-slate-800 shrink-0">
       <div className="px-5 pt-6 pb-4 border-b border-slate-800">
-        <div className="text-[10px] font-bold tracking-[0.2em] text-sky-400 uppercase">
+        <div className="text-[10px] font-bold tracking-[0.2em] text-indigo-400 uppercase">
           Kinvox HQ
         </div>
         <div className="mt-1 text-lg font-semibold text-slate-100">Command Center</div>
         <div className="mt-3 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-slate-800/80 border border-slate-700 text-[10px] font-medium text-slate-300 uppercase tracking-wider">
-          <span className="w-1.5 h-1.5 rounded-full bg-sky-400" />
+          <span className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
           {systemRole === "platform_owner" ? "Platform Owner" : "Platform Support"}
         </div>
       </div>
