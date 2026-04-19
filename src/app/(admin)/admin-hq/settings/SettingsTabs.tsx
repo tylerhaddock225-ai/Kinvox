@@ -1,8 +1,8 @@
 'use client'
 
-import { useActionState, useEffect, useState } from 'react'
-import { CheckCircle2, Hash } from 'lucide-react'
-import { updateTicketIdPrefix } from '@/app/(admin)/admin-hq/actions/platform-settings'
+import { useActionState, useEffect, useRef, useState, useTransition } from 'react'
+import { CheckCircle2, Hash, ToggleRight } from 'lucide-react'
+import { updateTicketIdPrefix, updatePlatformToggle } from '@/app/(admin)/admin-hq/actions/platform-settings'
 
 const INPUT = 'w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-violet-500'
 const LABEL = 'block text-xs font-medium text-gray-400 mb-1'
@@ -28,7 +28,49 @@ function Toast({ message, onDone }: { message: string; onDone: () => void }) {
   )
 }
 
-function SupportSettingsPanel({ currentPrefix }: { currentPrefix: string }) {
+// Auto-submit checkbox that flips a single platform_settings boolean on change.
+// Own-form so one toggle toggling doesn\u2019t re-submit the sibling.
+function ToggleRow({
+  settingKey,
+  label,
+  hint,
+  defaultChecked,
+}: {
+  settingKey: string
+  label:      string
+  hint:       string
+  defaultChecked: boolean
+}) {
+  const formRef = useRef<HTMLFormElement>(null)
+  const [_pending, startTransition] = useTransition()
+
+  return (
+    <form ref={formRef} action={updatePlatformToggle} className="flex items-start gap-3">
+      <input type="hidden" name="key" value={settingKey} />
+      <input
+        type="checkbox"
+        name="value"
+        defaultChecked={defaultChecked}
+        onChange={() => startTransition(() => formRef.current?.requestSubmit())}
+        className="mt-0.5 w-4 h-4 rounded border-gray-600 bg-gray-800 text-violet-500 focus:ring-violet-500 focus:ring-offset-gray-900"
+      />
+      <div className="min-w-0">
+        <div className="text-sm text-gray-200 font-medium">{label}</div>
+        <div className="text-xs text-gray-500 mt-0.5">{hint}</div>
+      </div>
+    </form>
+  )
+}
+
+function SupportSettingsPanel({
+  currentPrefix,
+  showAffectedTab,
+  showRecordId,
+}: {
+  currentPrefix:   string
+  showAffectedTab: boolean
+  showRecordId:    boolean
+}) {
   const [state, action, pending] = useActionState(updateTicketIdPrefix, null)
   const [toast, setToast] = useState<string | null>(null)
   const [preview, setPreview] = useState<string>(currentPrefix)
@@ -83,12 +125,48 @@ function SupportSettingsPanel({ currentPrefix }: { currentPrefix: string }) {
         </form>
       </div>
 
+      <div className="rounded-xl border border-pvx-border bg-pvx-surface p-5 space-y-4">
+        <div className="flex items-start gap-3">
+          <ToggleRight className="w-4 h-4 text-violet-400 mt-1 shrink-0" />
+          <div>
+            <h3 className="text-sm font-semibold text-white">HQ Request Form Fields</h3>
+            <p className="text-xs text-gray-500 mt-1">
+              Toggle optional fields on the merchant\u2019s &ldquo;New HQ Request&rdquo; modal.
+              Changes apply platform-wide on next load.
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-3 pl-7">
+          <ToggleRow
+            settingKey="show_affected_tab_field"
+            label={'Show \u201CAffected Tab\u201D dropdown'}
+            hint={'Lets merchants flag which merchant tab the issue is in (Dashboard, Leads, Customers, \u2026).'}
+            defaultChecked={showAffectedTab}
+          />
+          <ToggleRow
+            settingKey="show_record_id_field"
+            label={'Show \u201CRecord ID\u201D input'}
+            hint={'Free-form field for the merchant to paste the row they\u2019re reporting on (e.g. ld_123).'}
+            defaultChecked={showRecordId}
+          />
+        </div>
+      </div>
+
       {toast && <Toast message={toast} onDone={() => setToast(null)} />}
     </div>
   )
 }
 
-export default function SettingsTabs({ currentPrefix }: { currentPrefix: string }) {
+export default function SettingsTabs({
+  currentPrefix,
+  showAffectedTab,
+  showRecordId,
+}: {
+  currentPrefix:   string
+  showAffectedTab: boolean
+  showRecordId:    boolean
+}) {
   const [activeTab, setActiveTab] = useState<TabId>('support')
 
   return (
@@ -109,7 +187,13 @@ export default function SettingsTabs({ currentPrefix }: { currentPrefix: string 
         ))}
       </div>
 
-      {activeTab === 'support' && <SupportSettingsPanel currentPrefix={currentPrefix} />}
+      {activeTab === 'support' && (
+        <SupportSettingsPanel
+          currentPrefix={currentPrefix}
+          showAffectedTab={showAffectedTab}
+          showRecordId={showRecordId}
+        />
+      )}
     </div>
   )
 }

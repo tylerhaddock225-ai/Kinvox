@@ -56,9 +56,13 @@ export async function createTicket(_prev: State, formData: FormData): Promise<St
 const STATUS_VALUES   = ['open', 'pending', 'closed'] as const
 const PRIORITY_VALUES = ['low', 'medium', 'high']     as const
 const HQ_CATEGORIES   = ['bug', 'billing', 'feature_request', 'question'] as const
+// Must track tickets_affected_tab_check in 20260419222000_hq_form_toggles.sql
+// and AFFECTED_TABS in HQSupportModal.tsx.
+const AFFECTED_TABS   = ['dashboard', 'leads', 'customers', 'appointments', 'tickets', 'settings'] as const
 type TicketStatus   = typeof STATUS_VALUES[number]
 type TicketPriority = typeof PRIORITY_VALUES[number]
 type HQCategory     = typeof HQ_CATEGORIES[number]
+type AffectedTab    = typeof AFFECTED_TABS[number]
 
 // HQ support tickets live in the merchant's own org (so insert RLS passes
 // without bypass) and are flagged is_platform_support=true. Merchant-facing
@@ -81,11 +85,24 @@ export async function createHQSupportTicket(_prev: State, formData: FormData): P
   const description     = formData.get('description')    as string | null
   const category        = formData.get('hq_category')    as string
   const screenshot_url  = formData.get('screenshot_url') as string | null
+  const affected_tab    = formData.get('affected_tab')   as string | null
+  const record_id_raw   = formData.get('record_id')      as string | null
 
   if (!subject?.trim()) return { status: 'error', error: 'Subject is required' }
   if (!HQ_CATEGORIES.includes(category as HQCategory)) {
     return { status: 'error', error: 'Invalid category' }
   }
+
+  // affected_tab is optional; validate only when the merchant actually sent one.
+  // Silently treats the empty-string "\u2014 None \u2014" selection as null.
+  const tabTrimmed = affected_tab?.trim() || ''
+  if (tabTrimmed && !AFFECTED_TABS.includes(tabTrimmed as AffectedTab)) {
+    return { status: 'error', error: 'Invalid affected tab' }
+  }
+  const normalizedTab: AffectedTab | null = tabTrimmed ? (tabTrimmed as AffectedTab) : null
+
+  // record_id is free-form; cap length so a pathological paste can't bloat rows.
+  const recordId = record_id_raw?.trim().slice(0, 64) || null
 
   const { error } = await supabase.from('tickets').insert({
     organization_id:     profile.organization_id,
@@ -98,6 +115,8 @@ export async function createHQSupportTicket(_prev: State, formData: FormData): P
     is_platform_support: true,
     hq_category:         category as HQCategory,
     screenshot_url:      screenshot_url?.trim() || null,
+    affected_tab:        normalizedTab,
+    record_id:           recordId,
   })
 
   if (error) return { status: 'error', error: error.message }

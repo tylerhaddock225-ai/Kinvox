@@ -14,7 +14,22 @@ const CATEGORIES = [
   { value: 'question',         label: 'Question' },
 ] as const
 
-export default function HQSupportModal() {
+// Must track tickets_affected_tab_check in 20260419222000_hq_form_toggles.sql.
+const AFFECTED_TABS = [
+  { value: 'dashboard',    label: 'Dashboard' },
+  { value: 'leads',        label: 'Leads' },
+  { value: 'customers',    label: 'Customers' },
+  { value: 'appointments', label: 'Appointments' },
+  { value: 'tickets',      label: 'Tickets' },
+  { value: 'settings',     label: 'Settings' },
+] as const
+
+interface Props {
+  showAffectedTab?: boolean
+  showRecordId?:    boolean
+}
+
+export default function HQSupportModal({ showAffectedTab = false, showRecordId = false }: Props) {
   const router = useRouter()
   const [state, action, isPending] = useActionState(createHQSupportTicket, INITIAL)
   const dialogRef = useRef<HTMLDialogElement>(null)
@@ -99,13 +114,43 @@ export default function HQSupportModal() {
             />
           </div>
 
+          {showAffectedTab && (
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Affected Tab (optional)</label>
+              <select
+                name="affected_tab"
+                defaultValue=""
+                className="w-full rounded-lg border border-pvx-border bg-gray-900 px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-violet-500"
+              >
+                <option value="">\u2014 None \u2014</option>
+                {AFFECTED_TABS.map(t => (
+                  <option key={t.value} value={t.value}>{t.label}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {showRecordId && (
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Record ID (optional)</label>
+              <input
+                name="record_id"
+                type="text"
+                className="w-full rounded-lg border border-pvx-border bg-gray-900 px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-violet-500 font-mono"
+                placeholder="e.g. ld_123"
+                maxLength={64}
+              />
+              <p className="text-[10px] text-gray-500 mt-1">Paste the ID of the specific record this is about.</p>
+            </div>
+          )}
+
           <div>
             <label className="block text-xs text-gray-400 mb-1">Screenshot URL (optional)</label>
             <input
               name="screenshot_url"
               type="url"
               className="w-full rounded-lg border border-pvx-border bg-gray-900 px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
-              placeholder="https://…"
+              placeholder="https://\u2026"
             />
             <p className="text-[10px] text-gray-500 mt-1">Paste a link from your clipboard or a shared drive.</p>
           </div>

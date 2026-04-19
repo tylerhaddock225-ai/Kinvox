@@ -13,13 +13,23 @@ type MessageRow = Pick<TicketMessage, 'id' | 'body' | 'type' | 'created_at' | 's
   profiles: { full_name: string | null } | null
 }
 
-type HQCategory = 'bug' | 'billing' | 'feature_request' | 'question'
+type HQCategory  = 'bug' | 'billing' | 'feature_request' | 'question'
+type AffectedTab = 'dashboard' | 'leads' | 'customers' | 'appointments' | 'tickets' | 'settings'
 
 const CATEGORY_LABEL: Record<HQCategory, string> = {
   bug:              'Bug',
   billing:          'Billing',
   feature_request:  'Feature Request',
   question:         'Question',
+}
+
+const TAB_LABEL: Record<AffectedTab, string> = {
+  dashboard:    'Dashboard',
+  leads:        'Leads',
+  customers:    'Customers',
+  appointments: 'Appointments',
+  tickets:      'Tickets',
+  settings:     'Settings',
 }
 
 function initials(name: string | null | undefined) {
@@ -35,7 +45,7 @@ export default async function HQTicketDetailPage({ params }: { params: Promise<{
   // so the caller here is an HQ admin. RLS lets them read across orgs.
   const { data: ticketData } = await supabase
     .from('tickets')
-    .select('id, display_id, subject, description, status, priority, created_at, organization_id, is_platform_support, hq_category, screenshot_url, organizations(name)')
+    .select('id, display_id, subject, description, status, priority, created_at, organization_id, is_platform_support, hq_category, screenshot_url, affected_tab, record_id, organizations(name)')
     .eq('id', id)
     .is('deleted_at', null)
     .maybeSingle()
@@ -44,7 +54,7 @@ export default async function HQTicketDetailPage({ params }: { params: Promise<{
 
   const ticket = ticketData as unknown as Pick<
     Ticket,
-    'id' | 'display_id' | 'subject' | 'description' | 'status' | 'priority' | 'created_at' | 'organization_id' | 'is_platform_support' | 'hq_category' | 'screenshot_url'
+    'id' | 'display_id' | 'subject' | 'description' | 'status' | 'priority' | 'created_at' | 'organization_id' | 'is_platform_support' | 'hq_category' | 'screenshot_url' | 'affected_tab' | 'record_id'
   > & { organizations: { name: string } | null }
 
   const { data: messagesData } = await supabase
@@ -100,6 +110,28 @@ export default async function HQTicketDetailPage({ params }: { params: Promise<{
           )}
         </div>
       </div>
+
+      {isPlatform && (ticket.affected_tab || ticket.record_id) && (
+        <div className="rounded-lg border border-violet-500/20 bg-violet-500/5 px-5 py-4">
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-violet-300 mb-3">
+            Merchant Context
+          </div>
+          <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
+            {ticket.affected_tab && (
+              <div>
+                <dt className="text-xs text-gray-500">Affected Tab</dt>
+                <dd className="text-gray-200 mt-0.5">{TAB_LABEL[ticket.affected_tab as AffectedTab]}</dd>
+              </div>
+            )}
+            {ticket.record_id && (
+              <div>
+                <dt className="text-xs text-gray-500">Record ID</dt>
+                <dd className="text-gray-200 mt-0.5 font-mono text-xs break-all">{ticket.record_id}</dd>
+              </div>
+            )}
+          </dl>
+        </div>
+      )}
 
       {ticket.description && (
         <div className="bg-pvx-surface/50 border border-pvx-border rounded-lg p-6">

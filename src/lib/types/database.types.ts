@@ -269,6 +269,8 @@ export type Database = {
           is_platform_support: boolean
           hq_category: 'bug' | 'billing' | 'feature_request' | 'question' | null
           screenshot_url: string | null
+          affected_tab: 'dashboard' | 'leads' | 'customers' | 'appointments' | 'tickets' | 'settings' | null
+          record_id: string | null
         }
         Insert: {
           id?: string
@@ -293,6 +295,8 @@ export type Database = {
           is_platform_support?: boolean
           hq_category?: 'bug' | 'billing' | 'feature_request' | 'question' | null
           screenshot_url?: string | null
+          affected_tab?: 'dashboard' | 'leads' | 'customers' | 'appointments' | 'tickets' | 'settings' | null
+          record_id?: string | null
         }
         Update: Partial<Database['public']['Tables']['tickets']['Insert']>
       }

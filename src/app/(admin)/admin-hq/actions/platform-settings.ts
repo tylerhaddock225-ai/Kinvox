@@ -10,6 +10,9 @@ type State = { status: 'success'; message?: string } | { status: 'error'; error:
 // like whitespace, SQL quotes, or anything that'd corrupt the display_id.
 const PREFIX_RE = /^[A-Za-z][A-Za-z0-9_-]{0,11}$/
 
+const TOGGLE_KEYS = ['show_affected_tab_field', 'show_record_id_field'] as const
+type ToggleKey = typeof TOGGLE_KEYS[number]
+
 export async function updateTicketIdPrefix(_prev: State, formData: FormData): Promise<State> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -44,4 +47,38 @@ export async function updateTicketIdPrefix(_prev: State, formData: FormData): Pr
 
   revalidatePath('/admin-hq/settings')
   return { status: 'success', message: `Saved — new tickets will use "${prefix}123".` }
+}
+
+// Generic boolean toggle writer used by the Support Settings checkboxes.
+// Auto-submits from each checkbox (no explicit Save button) to match the
+// inline MemberRoleSelect pattern in team settings.
+export async function updatePlatformToggle(formData: FormData): Promise<void> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('system_role')
+    .eq('id', user.id)
+    .single()
+
+  if (!profile?.system_role) return
+
+  const key = formData.get('key') as string | null
+  if (!key || !TOGGLE_KEYS.includes(key as ToggleKey)) return
+
+  // Checkbox emits "on" when checked, nothing when unchecked.
+  const value = formData.get('value') === 'on'
+
+  await supabase
+    .from('platform_settings')
+    .upsert({
+      key,
+      value,
+      updated_at: new Date().toISOString(),
+      updated_by: user.id,
+    })
+
+  revalidatePath('/admin-hq/settings')
 }

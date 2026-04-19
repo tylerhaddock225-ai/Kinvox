@@ -106,7 +106,7 @@ export default async function SupportPage({
     ? ticketsQ.eq('status', 'closed')
     : ticketsQ.in('status', ACTIVE_STATUSES)
 
-  const [ticketsRes, activeCountRes, closedCountRes] = await Promise.all([
+  const [ticketsRes, activeCountRes, closedCountRes, settingsRes] = await Promise.all([
     ticketsQ,
     supabase
       .from('tickets')
@@ -122,7 +122,15 @@ export default async function SupportPage({
       .eq('is_platform_support', true)
       .is('deleted_at', null)
       .eq('status', 'closed'),
+    supabase
+      .from('platform_settings')
+      .select('key, value')
+      .in('key', ['show_affected_tab_field', 'show_record_id_field']),
   ])
+
+  const settingsMap = new Map<string, unknown>((settingsRes.data ?? []).map(r => [r.key, r.value]))
+  const showAffectedTab = settingsMap.get('show_affected_tab_field') === true
+  const showRecordId    = settingsMap.get('show_record_id_field')    === true
 
   const rows = (ticketsRes.data ?? []) as Row[]
   const activeCount = activeCountRes.count ?? 0
@@ -141,7 +149,7 @@ export default async function SupportPage({
             Support requests you\u2019ve sent to the Kinvox team. Replies thread in here.
           </p>
         </div>
-        <HQSupportModal />
+        <HQSupportModal showAffectedTab={showAffectedTab} showRecordId={showRecordId} />
       </div>
 
       <div className="flex items-center gap-1 border-b border-pvx-border">
