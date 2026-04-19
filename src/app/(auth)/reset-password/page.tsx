@@ -1,10 +1,26 @@
 'use client'
 
-import { useState } from 'react'
+import { Suspense, useState } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 
 export default function ResetPasswordPage() {
+  // useSearchParams() must live under a Suspense boundary or `next build`
+  // bails out with "missing-suspense-with-csr-bailout" on this route.
+  return (
+    <Suspense fallback={<ResetPasswordFallback />}>
+      <ResetPasswordForm />
+    </Suspense>
+  )
+}
+
+function ResetPasswordFallback() {
+  return (
+    <div className="w-full max-w-sm text-center text-sm text-gray-500">Loading…</div>
+  )
+}
+
+function ResetPasswordForm() {
   const router       = useRouter()
   const searchParams = useSearchParams()
   const token        = searchParams.get('token') ?? ''
