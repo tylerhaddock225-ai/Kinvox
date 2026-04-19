@@ -1,6 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 
 // ── Types (shared with client components) ───────────────────────────────────
@@ -18,6 +19,48 @@ export type AddNoteState =
   | { status: 'success' }
   | { status: 'error'; error: string }
   | null
+
+// Creation redirects on success, so there's no 'success' branch to render.
+export type CreateCustomerState =
+  | { status: 'error'; error: string }
+  | null
+
+
+// ── createNewCustomer ───────────────────────────────────────────────────────
+
+export async function createNewCustomer(
+  _prev: CreateCustomerState,
+  formData: FormData,
+): Promise<CreateCustomerState> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { status: 'error', error: 'Unauthorized' }
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('organization_id')
+    .eq('id', user.id)
+    .single()
+
+  if (!profile?.organization_id) return { status: 'error', error: 'No organization found' }
+
+  const firstName = ((formData.get('first_name') as string) ?? '').trim()
+  if (!firstName) return { status: 'error', error: 'First name is required' }
+
+  const { data: inserted, error } = await supabase.from('customers').insert({
+    organization_id: profile.organization_id,
+    first_name: firstName,
+    last_name:  ((formData.get('last_name') as string) ?? '').trim() || null,
+    company:    ((formData.get('company')   as string) ?? '').trim() || null,
+    email:      ((formData.get('email')     as string) ?? '').trim() || null,
+    phone:      ((formData.get('phone')     as string) ?? '').trim() || null,
+  }).select('id').single()
+
+  if (error) return { status: 'error', error: error.message }
+
+  revalidatePath('/customers')
+  redirect(`/customers/${inserted.id}`)
+}
 
 
 // ── updateCustomer ──────────────────────────────────────────────────────────

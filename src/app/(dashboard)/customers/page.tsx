@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import type { Customer } from '@/lib/types/database.types'
 import CopyId from '@/components/CopyId'
+import NewCustomerModal from '@/components/NewCustomerModal'
 import CustomerRow from './CustomerRow'
 
 type CustomerRow = Pick<
@@ -35,9 +36,12 @@ export default async function CustomersPage() {
 
   return (
     <div className="px-8 py-8 space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-white">Customers</h1>
-        <p className="text-sm text-gray-400 mt-1">People you support. Created automatically when leads are added.</p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-white">Customers</h1>
+          <p className="text-sm text-gray-400 mt-1">People you support. Created automatically when leads are added, or add one manually.</p>
+        </div>
+        <NewCustomerModal />
       </div>
 
       <div className="rounded-xl border border-pvx-border bg-pvx-surface overflow-hidden">
