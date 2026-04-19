@@ -27,11 +27,15 @@ export async function updateSession(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
 
   const { pathname } = request.nextUrl
-  const isAuthRoute  = pathname.startsWith('/login') || pathname.startsWith('/signup')
+  const isAuthRoute  = pathname.startsWith('/login')
+                    || pathname.startsWith('/signup')
+                    || pathname.startsWith('/forgot-password')
+                    || pathname.startsWith('/reset-password')
   const isOnboarding = pathname.startsWith('/onboarding')
   const isAdmin      = pathname.startsWith('/admin')
   const isWebhook    = pathname.startsWith('/api/webhooks/')
-  const isPublic     = isAuthRoute || isWebhook || pathname.startsWith('/_next') || pathname === '/favicon.ico'
+  const isAuthApi    = pathname.startsWith('/api/auth/')
+  const isPublic     = isAuthRoute || isWebhook || isAuthApi || pathname.startsWith('/_next') || pathname === '/favicon.ico'
 
   // Unauthenticated → login
   if (!user && !isPublic) {
