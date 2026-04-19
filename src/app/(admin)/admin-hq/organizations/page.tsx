@@ -2,11 +2,13 @@ import Link from 'next/link'
 import { Eye, Archive } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { startImpersonation } from '@/app/actions/impersonation'
+import CopyId from '@/components/CopyId'
 
 export const dynamic = 'force-dynamic'
 
 type Row = {
   id:         string
+  display_id: string | null
   name:       string
   vertical:   string | null
   status:     string | null
@@ -27,7 +29,7 @@ export default async function AdminOrganizationsPage({
   // Default: live merchants only. ?show=all includes archived rows.
   const baseQuery = supabase
     .from('organizations')
-    .select('id, name, vertical, status, deleted_at, created_at')
+    .select('id, display_id, name, vertical, status, deleted_at, created_at')
     .order('created_at', { ascending: false })
 
   const [{ data: orgs, error }, { count: archivedCount }] = await Promise.all([
@@ -82,6 +84,7 @@ export default async function AdminOrganizationsPage({
         <table className="w-full text-sm">
           <thead className="bg-pvx-surface/80 border-b border-pvx-border">
             <tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-gray-400">
+              <th className="px-5 py-3 w-32">ID</th>
               <th className="px-5 py-3">Name</th>
               <th className="px-5 py-3">Vertical</th>
               <th className="px-5 py-3">Status</th>
@@ -103,6 +106,9 @@ export default async function AdminOrganizationsPage({
                         : 'hover:bg-violet-400/[0.05]'
                     }`}
                   >
+                    <td className="px-5 py-4 text-xs">
+                      <CopyId id={org.display_id} />
+                    </td>
                     <td className="px-5 py-4 font-medium text-gray-100">{org.name}</td>
                     <td className="px-5 py-4 text-gray-300">
                       {org.vertical ?? <span className="text-gray-500">—</span>}
@@ -157,7 +163,7 @@ export default async function AdminOrganizationsPage({
               })
             ) : (
               <tr>
-                <td colSpan={4} className="px-5 py-10 text-center text-sm text-gray-500">
+                <td colSpan={5} className="px-5 py-10 text-center text-sm text-gray-500">
                   {showArchived ? 'No organizations yet.' : 'No live organizations.'}
                 </td>
               </tr>

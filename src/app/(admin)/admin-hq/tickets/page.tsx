@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { LifeBuoy, XCircle } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { closeHQTicket } from '@/app/(admin)/admin-hq/actions/tickets'
+import CopyId from '@/components/CopyId'
 
 export const dynamic = 'force-dynamic'
 
@@ -200,6 +201,7 @@ export default async function AdminTicketsPage({
         <table className="w-full text-sm">
           <thead className="bg-pvx-surface/80 border-b border-pvx-border">
             <tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-gray-400">
+              <th className="px-5 py-3 w-32">ID</th>
               <th className="px-5 py-3">Organization</th>
               <th className="px-5 py-3">Subject</th>
               <th className="px-5 py-3">Category</th>
@@ -212,6 +214,9 @@ export default async function AdminTicketsPage({
             {tickets?.length ? (
               tickets.map((t) => (
                 <tr key={t.id} className="hover:bg-violet-400/[0.05] transition-colors">
+                  <td className="px-5 py-4 text-xs">
+                    <CopyId id={t.display_id} />
+                  </td>
                   <td className="px-5 py-4 text-gray-100 font-medium">
                     {t.organizations?.name ?? <span className="text-gray-500">Unknown</span>}
                   </td>
@@ -267,7 +272,7 @@ export default async function AdminTicketsPage({
               ))
             ) : (
               <tr>
-                <td colSpan={6} className="px-5 py-10 text-center text-sm text-gray-500">
+                <td colSpan={7} className="px-5 py-10 text-center text-sm text-gray-500">
                   {queue === 'closed'
                     ? 'No closed tickets in this scope.'
                     : scope === 'platform'

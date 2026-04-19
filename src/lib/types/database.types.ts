@@ -6,6 +6,7 @@ export type Database = {
       organizations: {
         Row: {
           id: string
+          display_id: string | null
           name: string
           slug: string
           plan: 'free' | 'pro' | 'enterprise'
@@ -28,6 +29,7 @@ export type Database = {
         }
         Insert: {
           id?: string
+          display_id?: string | null
           name: string
           slug: string
           plan?: 'free' | 'pro' | 'enterprise'
