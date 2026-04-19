@@ -42,14 +42,23 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
   if (!lead) notFound()
   const l = lead as Lead
 
-  const { data: activities } = await supabase
-    .from('lead_activities')
-    .select('id, lead_id, user_id, content, created_at, profiles(full_name, avatar_url)')
-    .eq('lead_id', id)
-    .order('created_at', { ascending: false })
-    .limit(100)
+  const [activitiesRes, customerRes] = await Promise.all([
+    supabase
+      .from('lead_activities')
+      .select('id, lead_id, user_id, content, created_at, profiles(full_name, avatar_url)')
+      .eq('lead_id', id)
+      .order('created_at', { ascending: false })
+      .limit(100),
+    supabase
+      .from('customers')
+      .select('id')
+      .eq('lead_id', id)
+      .is('deleted_at', null)
+      .maybeSingle(),
+  ])
 
-  const rows = (activities ?? []) as unknown as ActivityRow[]
+  const rows = (activitiesRes.data ?? []) as unknown as ActivityRow[]
+  const linkedCustomerId = customerRes.data?.id ?? null
   const feed: Activity[] = rows.map(a => ({
     id:         a.id,
     content:    a.content,
@@ -67,9 +76,19 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
           <ArrowLeft className="w-3.5 h-3.5" />
           Back to Leads
         </Link>
-        <h1 className="mt-2 text-2xl font-bold text-white">
-          {l.first_name} {l.last_name ?? ''}
-        </h1>
+        <div className="mt-2 flex items-center justify-between gap-4">
+          <h1 className="text-2xl font-bold text-white">
+            {l.first_name} {l.last_name ?? ''}
+          </h1>
+          {linkedCustomerId && (
+            <Link
+              href={`/customers/${linkedCustomerId}`}
+              className="text-violet-400 hover:text-violet-300 text-sm font-medium transition-colors shrink-0"
+            >
+              View Customer Profile →
+            </Link>
+          )}
+        </div>
         {l.display_id && (
           <div className="mt-0.5 text-xs">
             <CopyId id={l.display_id} />

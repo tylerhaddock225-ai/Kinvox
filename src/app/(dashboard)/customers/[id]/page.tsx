@@ -121,7 +121,17 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
           <ArrowLeft className="w-3.5 h-3.5" />
           Back to Customers
         </Link>
-        <h1 className="mt-2 text-2xl font-bold text-white">{fullName}</h1>
+        <div className="mt-2 flex items-center justify-between gap-4">
+          <h1 className="text-2xl font-bold text-white">{fullName}</h1>
+          {c.lead_id && (
+            <Link
+              href={`/leads/${c.lead_id}`}
+              className="text-violet-400 hover:text-violet-300 text-sm font-medium transition-colors shrink-0"
+            >
+              View Lead Profile →
+            </Link>
+          )}
+        </div>
         {c.display_id && (
           <div className="mt-0.5 text-xs">
             <CopyId id={c.display_id} />
@@ -153,15 +163,6 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
               <Field icon={Phone}      label="Phone"   value={c.phone} />
               <Field icon={Calendar}   label="Created" value={new Date(c.created_at).toLocaleDateString()} />
             </div>
-
-            {c.lead_id && (
-              <Link
-                href={`/leads/${c.lead_id}`}
-                className="inline-flex items-center text-xs text-violet-300 hover:text-violet-200 underline decoration-dotted underline-offset-4"
-              >
-                View source lead →
-              </Link>
-            )}
           </div>
 
           {/* Related records — kept condensed in left column */}
