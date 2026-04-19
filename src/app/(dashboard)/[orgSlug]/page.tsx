@@ -1,7 +1,8 @@
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import {
-  Users, CalendarCheck, Ticket, TrendingUp,
+  Users, CalendarCheck, Ticket, TrendingUp, Percent,
   CheckCircle2, Clock, type LucideIcon,
 } from 'lucide-react'
 import type { Lead } from '@/lib/types/database.types'
@@ -107,8 +108,19 @@ export default async function DashboardPage({
   const canViewLeads    = permissions.view_leads    !== false
   const canViewTickets  = permissions.view_tickets  !== false
 
-  // Fetch data only for what the user is permitted to see
-  const [leadsRes, supportRes] = await Promise.all([
+  // Row-type counts need head+count queries so we don't derive totals from
+  // the display-sized slices below. ISO string is stable across the server
+  // + Postgres timestamptz comparison.
+  const nowIso = new Date().toISOString()
+
+  const [
+    recentLeadsRes,
+    totalLeadsRes,
+    customerCountRes,
+    supportRes,
+    upcomingApptsCountRes,
+    upcomingApptsRes,
+  ] = await Promise.all([
     canViewLeads
       ? supabase
           .from('leads')
@@ -119,23 +131,72 @@ export default async function DashboardPage({
           .limit(5)
       : Promise.resolve({ data: [], error: null }),
 
+    canViewLeads
+      ? supabase
+          .from('leads')
+          .select('id', { count: 'exact', head: true })
+          .eq('organization_id', orgId)
+          .is('deleted_at', null)
+      : Promise.resolve({ count: 0, error: null }),
+
+    canViewLeads
+      ? supabase
+          .from('customers')
+          .select('id', { count: 'exact', head: true })
+          .eq('organization_id', orgId)
+          .is('deleted_at', null)
+          .is('archived_at', null)
+      : Promise.resolve({ count: 0, error: null }),
+
     canViewTickets
       ? supabase.rpc('get_support_stats', { p_org_id: orgId })
       : Promise.resolve({ data: [], error: null }),
+
+    supabase
+      .from('appointments')
+      .select('id', { count: 'exact', head: true })
+      .eq('organization_id', orgId)
+      .is('deleted_at', null)
+      .gt('start_at', nowIso),
+
+    supabase
+      .from('appointments')
+      .select('id, title, start_at, location, status')
+      .eq('organization_id', orgId)
+      .is('deleted_at', null)
+      .gt('start_at', nowIso)
+      .order('start_at', { ascending: true })
+      .limit(5),
   ])
 
-  const leads          = (leadsRes.data   ?? []) as Lead[]
-  const convertedLeads = leads.filter(l => l.status === 'converted').length
-  const supportArr     = (supportRes.data ?? []) as SupportStats[]
-  const ss             = supportArr[0] ?? { open_count: 0, closed_week: 0, avg_hours: null }
+  const leads           = (recentLeadsRes.data ?? []) as Lead[]
+  const totalLeads      = totalLeadsRes.count    ?? 0
+  const customerCount   = customerCountRes.count ?? 0
+  const supportArr      = (supportRes.data ?? []) as SupportStats[]
+  const ss              = supportArr[0] ?? { open_count: 0, closed_week: 0, avg_hours: null }
+  const upcomingCount   = upcomingApptsCountRes.count ?? 0
+  const upcomingAppts   = (upcomingApptsRes.data ?? []) as Array<{
+    id:        string
+    title:     string
+    start_at:  string
+    location:  string | null
+    status:    'scheduled' | 'completed' | 'cancelled'
+  }>
+
+  // Conversion Rate = alive customers / total leads. Guarded so a fresh
+  // org with zero leads displays 0% instead of NaN.
+  const conversionRate = totalLeads > 0
+    ? Math.round((customerCount / totalLeads) * 100)
+    : 0
 
   // Build the full set of permitted stat cards
   const allCards: StatCard[] = []
 
   if (canViewLeads) {
     allCards.push(
-      { id: 'total_leads',     label: 'Total Leads', value: String(leads.length),   icon: Users,       color: 'text-indigo-400',  bg: 'bg-indigo-500/10'  },
-      { id: 'converted_leads', label: 'Converted',   value: String(convertedLeads), icon: TrendingUp,  color: 'text-emerald-400', bg: 'bg-emerald-500/10' },
+      { id: 'total_leads',     label: 'Total Leads',     value: String(totalLeads),       icon: Users,       color: 'text-indigo-400',  bg: 'bg-indigo-500/10'  },
+      { id: 'converted_leads', label: 'Converted',       value: String(customerCount),    icon: TrendingUp,  color: 'text-emerald-400', bg: 'bg-emerald-500/10' },
+      { id: 'conversion_rate', label: 'Conversion Rate', value: `${conversionRate}%`,     icon: Percent,     color: 'text-fuchsia-400', bg: 'bg-fuchsia-500/10' },
     )
   }
 
@@ -160,7 +221,7 @@ export default async function DashboardPage({
       {
         id:    'avg_resolution_time',
         label: 'Avg Resolution',
-        value: ss.avg_hours != null ? `${ss.avg_hours}h` : '—',
+        value: ss.avg_hours != null ? `${ss.avg_hours}h` : '\u2014',
         icon:  Clock,
         color: 'text-rose-400',
         bg:    'bg-rose-500/10',
@@ -169,7 +230,7 @@ export default async function DashboardPage({
   }
 
   allCards.push(
-    { id: 'appointments', label: 'Appointments', value: '—', icon: CalendarCheck, color: 'text-violet-400', bg: 'bg-violet-500/10' },
+    { id: 'appointments', label: 'Appointments', value: String(upcomingCount), icon: CalendarCheck, color: 'text-violet-400', bg: 'bg-violet-500/10' },
   )
 
   // Apply user's hidden-widget preferences
@@ -219,47 +280,89 @@ export default async function DashboardPage({
         </div>
       )}
 
-      {/* Recent Leads */}
-      {canViewLeads && (
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Recent Leads */}
+        {canViewLeads && (
+          <div className="rounded-xl border border-pvx-border bg-gray-900 overflow-hidden">
+            <div className="px-6 py-4 border-b border-pvx-border">
+              <h2 className="text-sm font-semibold text-white">Recent Leads</h2>
+            </div>
+
+            {leads.length === 0 ? (
+              <div className="px-6 py-12 text-center text-gray-500 text-sm">
+                No leads yet. Add your first lead to get started.
+              </div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-xs text-gray-500 border-b border-pvx-border">
+                    <th className="px-6 py-3 text-left font-medium">Name</th>
+                    <th className="px-6 py-3 text-left font-medium">Company</th>
+                    <th className="px-6 py-3 text-left font-medium">Source</th>
+                    <th className="px-6 py-3 text-left font-medium">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-pvx-border">
+                  {leads.map(lead => (
+                    <tr key={lead.id} className="hover:bg-violet-400/[0.05] transition-colors">
+                      <td className="px-6 py-3 text-gray-200 font-medium">
+                        {lead.first_name} {lead.last_name ?? ''}
+                      </td>
+                      <td className="px-6 py-3 text-gray-400">{lead.company ?? '\u2014'}</td>
+                      <td className="px-6 py-3 text-gray-400 capitalize">{lead.source ?? '\u2014'}</td>
+                      <td className="px-6 py-3">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border capitalize ${STATUS_COLORS[lead.status]}`}>
+                          {lead.status}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+
+        {/* Upcoming Appointments */}
         <div className="rounded-xl border border-pvx-border bg-gray-900 overflow-hidden">
-          <div className="px-6 py-4 border-b border-pvx-border">
-            <h2 className="text-sm font-semibold text-white">Recent Leads</h2>
+          <div className="px-6 py-4 border-b border-pvx-border flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-white">Upcoming Appointments</h2>
+            <Link href="/appointments" className="text-xs text-violet-300 hover:text-violet-200 transition-colors">
+              View all \u2192
+            </Link>
           </div>
 
-          {leads.length === 0 ? (
+          {upcomingAppts.length === 0 ? (
             <div className="px-6 py-12 text-center text-gray-500 text-sm">
-              No leads yet. Add your first lead to get started.
+              No upcoming appointments.
             </div>
           ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-xs text-gray-500 border-b border-pvx-border">
-                  <th className="px-6 py-3 text-left font-medium">Name</th>
-                  <th className="px-6 py-3 text-left font-medium">Company</th>
-                  <th className="px-6 py-3 text-left font-medium">Source</th>
-                  <th className="px-6 py-3 text-left font-medium">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-pvx-border">
-                {leads.map(lead => (
-                  <tr key={lead.id} className="hover:bg-violet-400/[0.05] transition-colors">
-                    <td className="px-6 py-3 text-gray-200 font-medium">
-                      {lead.first_name} {lead.last_name ?? ''}
-                    </td>
-                    <td className="px-6 py-3 text-gray-400">{lead.company ?? '—'}</td>
-                    <td className="px-6 py-3 text-gray-400 capitalize">{lead.source ?? '—'}</td>
-                    <td className="px-6 py-3">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border capitalize ${STATUS_COLORS[lead.status]}`}>
-                        {lead.status}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <ul className="divide-y divide-pvx-border">
+              {upcomingAppts.map(a => {
+                const when = new Date(a.start_at)
+                return (
+                  <li key={a.id} className="px-6 py-3 hover:bg-violet-400/[0.05] transition-colors">
+                    <Link href={`/appointments?open=${a.id}`} className="flex items-center justify-between gap-4">
+                      <div className="min-w-0">
+                        <p className="text-sm text-gray-200 font-medium truncate">{a.title}</p>
+                        {a.location && <p className="text-xs text-gray-500 truncate">{a.location}</p>}
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <p className="text-xs text-gray-300">
+                          {when.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}
+                        </p>
+                        <p className="text-[11px] text-gray-500">
+                          {when.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+                        </p>
+                      </div>
+                    </Link>
+                  </li>
+                )
+              })}
+            </ul>
           )}
         </div>
-      )}
+      </div>
       </div>
     </>
   )

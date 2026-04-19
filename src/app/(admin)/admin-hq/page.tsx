@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { Building2, Ticket, Activity } from 'lucide-react'
+import { Building2, LifeBuoy, Users, Activity } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 
 type SystemRole = 'platform_owner' | 'platform_support'
@@ -11,26 +11,46 @@ export default async function AdminHqOverviewPage() {
 
   const [{ data: { user } }] = await Promise.all([supabase.auth.getUser()])
 
-  const [profileResp, orgsCountResp, ticketsCountResp] = await Promise.all([
+  const [
+    profileResp,
+    activeOrgsResp,
+    platformLeadsResp,
+    pendingHQSupportResp,
+  ] = await Promise.all([
     supabase
       .from('profiles')
       .select('system_role')
       .eq('id', user!.id)
       .single<{ system_role: SystemRole | null }>(),
+
+    // Organizations: active (not inactive/archived). RLS is_admin_hq() lets
+    // this see every row across tenants.
     supabase
       .from('organizations')
-      .select('*', { count: 'exact', head: true })
+      .select('id', { count: 'exact', head: true })
+      .is('deleted_at', null)
+      .eq('status', 'active'),
+
+    // Platform Leads: global count across every org.
+    supabase
+      .from('leads')
+      .select('id', { count: 'exact', head: true })
       .is('deleted_at', null),
+
+    // Pending HQ Support: merchant-to-HQ tickets still awaiting action.
     supabase
       .from('tickets')
-      .select('*', { count: 'exact', head: true })
-      .in('status', ['open', 'pending']),
+      .select('id', { count: 'exact', head: true })
+      .eq('is_platform_support', true)
+      .eq('status', 'open')
+      .is('deleted_at', null),
   ])
 
-  const systemRole = profileResp.data?.system_role ?? 'platform_support'
-  const roleLabel = systemRole === 'platform_owner' ? 'Platform Owner' : 'Platform Support'
-  const orgsCount = orgsCountResp.count ?? 0
-  const activeTicketsCount = ticketsCountResp.count ?? 0
+  const systemRole           = profileResp.data?.system_role ?? 'platform_support'
+  const roleLabel            = systemRole === 'platform_owner' ? 'Platform Owner' : 'Platform Support'
+  const activeOrgsCount      = activeOrgsResp.count      ?? 0
+  const platformLeadsCount   = platformLeadsResp.count   ?? 0
+  const pendingHQSupportCount = pendingHQSupportResp.count ?? 0
 
   return (
     <div className="space-y-8">
@@ -46,21 +66,30 @@ export default async function AdminHqOverviewPage() {
         </p>
       </header>
 
-      <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
+      <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         <SummaryCard
-          label="Total Organizations"
-          value={orgsCount.toLocaleString()}
+          label="Organizations"
+          value={activeOrgsCount.toLocaleString()}
           icon={Building2}
           href="/admin-hq/organizations"
           cta="Manage organizations"
+          hint="active"
         />
         <SummaryCard
-          label="Active Tickets"
-          value={activeTicketsCount.toLocaleString()}
-          icon={Ticket}
+          label="Platform Leads"
+          value={platformLeadsCount.toLocaleString()}
+          icon={Users}
           href="/admin-hq/tickets"
-          cta="Review queue"
-          hint="open + pending"
+          cta="Explore"
+          hint="all organizations"
+        />
+        <SummaryCard
+          label="Pending HQ Support"
+          value={pendingHQSupportCount.toLocaleString()}
+          icon={LifeBuoy}
+          href="/admin-hq/tickets?scope=platform"
+          cta="Triage queue"
+          hint="open requests"
         />
         <SystemStatusCard />
       </section>
