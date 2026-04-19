@@ -31,6 +31,47 @@ const SORT_COLUMNS = {
 const PRIORITY_RANK: Record<Ticket['priority'], number> = { high: 0, medium: 1, low: 2 }
 const STATUS_RANK:   Record<Ticket['status'],   number> = { open: 0, pending: 1, closed: 2 }
 
+function QueueTab({
+  queue,
+  current,
+  count,
+  params,
+  label,
+}: {
+  queue:   'active' | 'closed'
+  current: 'active' | 'closed'
+  count:   number
+  params:  Record<string, string | undefined>
+  label:   string
+}) {
+  // Preserve sort/order/priority/assigned across tab switches; drop a stale
+  // `status` filter (it'd usually conflict with the new queue).
+  const next = new URLSearchParams()
+  for (const [k, v] of Object.entries(params)) {
+    if (!v) continue
+    if (k === 'queue' || k === 'status') continue
+    next.set(k, v)
+  }
+  if (queue !== 'active') next.set('queue', queue)
+
+  const href = `/tickets${next.toString() ? `?${next.toString()}` : ''}`
+  const isActive = current === queue
+
+  return (
+    <Link
+      href={href}
+      className={`px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px ${
+        isActive
+          ? 'border-violet-500 text-white'
+          : 'border-transparent text-gray-400 hover:text-gray-200'
+      }`}
+    >
+      {label}
+      <span className="ml-1.5 text-xs text-gray-500">({count})</span>
+    </Link>
+  )
+}
+
 function formatRelative(iso: string): string {
   const then = new Date(iso).getTime()
   const diff = Date.now() - then
@@ -44,6 +85,10 @@ function formatRelative(iso: string): string {
   return new Date(iso).toLocaleDateString()
 }
 
+type Queue = 'active' | 'closed'
+
+const ACTIVE_STATUSES: Ticket['status'][] = ['open', 'pending']
+
 export default async function TicketsPage({
   searchParams,
 }: {
@@ -53,6 +98,7 @@ export default async function TicketsPage({
     assigned?: string
     sort?:     string
     order?:    string
+    queue?:    string
   }>
 }) {
   const supabase = await createClient()
@@ -70,6 +116,27 @@ export default async function TicketsPage({
 
   const orgId   = profile.organization_id
   const params  = await searchParams
+  const requestedQueue: Queue = params.queue === 'closed' ? 'closed' : 'active'
+
+  // If the URL carries a `status` filter that contradicts the requested queue,
+  // bounce to the matching queue (preserving every other param). Avoids the
+  // "No tickets match" empty state for `?status=closed` on the Active tab and
+  // vice versa for `?status=open|pending` on the Closed tab.
+  const requestedStatus = params.status ?? ''
+  const conflictingActive = requestedQueue === 'active' && requestedStatus === 'closed'
+  const conflictingClosed = requestedQueue === 'closed' && (requestedStatus === 'open' || requestedStatus === 'pending')
+  if (conflictingActive || conflictingClosed) {
+    const correctQueue: Queue = conflictingActive ? 'closed' : 'active'
+    const next = new URLSearchParams()
+    for (const [k, v] of Object.entries(params)) {
+      if (!v || k === 'queue') continue
+      next.set(k, v)
+    }
+    if (correctQueue !== 'active') next.set('queue', correctQueue)
+    redirect(`/tickets${next.toString() ? `?${next.toString()}` : ''}`)
+  }
+
+  const queue: Queue = requestedQueue
   const fStatus = STATUSES.includes(params.status as (typeof STATUSES)[number])
     ? (params.status as (typeof STATUSES)[number])
     : null
@@ -97,12 +164,18 @@ export default async function TicketsPage({
     .order(isJsSort ? 'updated_at' : dbSortCol, { ascending: isJsSort ? false : sortOrder === 'asc' })
     .limit(200)
 
+  // Queue constraint always applies — it's the tab the user is on.
+  ticketsQ = queue === 'closed'
+    ? ticketsQ.eq('status', 'closed')
+    : ticketsQ.in('status', ACTIVE_STATUSES)
+
+  // The status filter narrows further within the queue.
   if (fStatus) ticketsQ = ticketsQ.eq('status', fStatus)
   if (fPrio)   ticketsQ = ticketsQ.eq('priority', fPrio)
   if (fAssigned === 'unassigned') ticketsQ = ticketsQ.is('assigned_to', null)
   else if (fAssigned)             ticketsQ = ticketsQ.eq('assigned_to', fAssigned)
 
-  const [ticketsRes, membersRes, leadsRes, orgRes] = await Promise.all([
+  const [ticketsRes, membersRes, leadsRes, orgRes, activeCountRes, closedCountRes] = await Promise.all([
     ticketsQ,
     supabase
       .from('profiles')
@@ -120,7 +193,22 @@ export default async function TicketsPage({
       .select('verified_support_email')
       .eq('id', orgId)
       .single(),
+    supabase
+      .from('tickets')
+      .select('id', { count: 'exact', head: true })
+      .eq('organization_id', orgId)
+      .is('deleted_at', null)
+      .in('status', ACTIVE_STATUSES),
+    supabase
+      .from('tickets')
+      .select('id', { count: 'exact', head: true })
+      .eq('organization_id', orgId)
+      .is('deleted_at', null)
+      .eq('status', 'closed'),
   ])
+
+  const activeCount = activeCountRes.count ?? 0
+  const closedCount = closedCountRes.count ?? 0
 
   const rawRows = (ticketsRes.data ?? []) as unknown as TicketRow[]
   const rows    = isJsSort
@@ -158,14 +246,21 @@ export default async function TicketsPage({
         </div>
       )}
 
-      <TicketsFilterBar members={members} />
+      <div className="flex items-center gap-1 border-b border-pvx-border">
+        <QueueTab queue="active" current={queue} count={activeCount} params={params} label="Active" />
+        <QueueTab queue="closed" current={queue} count={closedCount} params={params} label="Closed" />
+      </div>
+
+      <TicketsFilterBar members={members} queue={queue} />
 
       <div className="rounded-xl border border-pvx-border bg-pvx-surface overflow-hidden">
         {rows.length === 0 ? (
           <div className="px-6 py-16 text-center text-gray-500 text-sm">
             {fStatus || fPrio || fAssigned
               ? 'No tickets match the current filters.'
-              : 'No tickets yet. Create your first ticket to get started.'}
+              : queue === 'closed'
+                ? 'No closed tickets.'
+                : 'No active tickets. Create one to get started.'}
           </div>
         ) : (
           <table className="w-full text-sm">

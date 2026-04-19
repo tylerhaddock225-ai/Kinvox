@@ -62,11 +62,34 @@ export async function updateTicketStatus(formData: FormData): Promise<void> {
   if (!ticket_id) return
   if (!STATUS_VALUES.includes(status as TicketStatus)) return
 
+  // Pull the prior state so we can detect open→closed transitions for the
+  // closure-notification email below.
+  const { data: prior } = await supabase
+    .from('tickets')
+    .select('status, display_id, subject, lead_id')
+    .eq('id', ticket_id)
+    .single()
+
   // RLS already prevents cross-org updates; the trigger refreshes updated_at.
-  await supabase
+  const { error: updErr } = await supabase
     .from('tickets')
     .update({ status: status as TicketStatus })
     .eq('id', ticket_id)
+
+  if (updErr) {
+    console.error(`[ticket-status] update failed ticket=${ticket_id}: ${updErr.message}`)
+    return
+  }
+
+  if (status === 'closed' && prior && prior.status !== 'closed') {
+    await dispatchClosureEmail({
+      supabase,
+      ticketId:        ticket_id,
+      ticketLeadId:    prior.lead_id,
+      ticketSubject:   prior.subject,
+      ticketDisplayId: prior.display_id,
+    })
+  }
 
   revalidatePath('/tickets')
   revalidatePath(`/tickets/${ticket_id}`)
@@ -255,5 +278,62 @@ async function dispatchOutboundEmail(args: DispatchArgs) {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error(`[ticket-email] FAILED ticket=${displayId} to=${lead.email}: ${msg}`)
+  }
+}
+
+type ClosureArgs = {
+  supabase:        Awaited<ReturnType<typeof createClient>>
+  ticketId:        string
+  ticketLeadId:    string | null
+  ticketSubject:   string
+  ticketDisplayId: string | null
+}
+
+async function dispatchClosureEmail(args: ClosureArgs) {
+  const token = process.env.POSTMARK_SERVER_TOKEN
+  if (!token) {
+    console.error('[ticket-email] POSTMARK_SERVER_TOKEN not set — skipping closure notification')
+    return
+  }
+
+  if (!args.ticketLeadId) {
+    console.warn(`[ticket-email] ticket ${args.ticketId} has no lead — skipping closure notification`)
+    return
+  }
+
+  const { data: lead } = await args.supabase
+    .from('leads')
+    .select('email')
+    .eq('id', args.ticketLeadId)
+    .single()
+
+  if (!lead?.email) {
+    console.warn(`[ticket-email] lead ${args.ticketLeadId} has no email — skipping closure notification`)
+    return
+  }
+
+  const displayId   = args.ticketDisplayId ?? args.ticketId
+  const baseSubject = args.ticketSubject.replace(/\[tk_[a-z0-9]+\]\s*/gi, '').trim()
+  const subject     = `[${displayId}] ${baseSubject || '(no subject)'}`
+  const threadingId = `<${displayId}@kinvox.com>`
+
+  const text = `Your ticket (${displayId}) has been marked as resolved. If you have further questions, simply reply to this email to reopen it.`
+
+  const client = new ServerClient(token)
+  try {
+    const result = await client.sendEmail({
+      From:    'Kinvox Support <support@kinvoxtech.com>',
+      To:      lead.email,
+      Subject: subject,
+      TextBody: text,
+      Headers: [
+        { Name: 'References',  Value: threadingId },
+        { Name: 'In-Reply-To', Value: threadingId },
+      ],
+    })
+    console.log(`[ticket-email] closure notice dispatched ticket=${displayId} to=${lead.email} postmark_id=${result.MessageID}`)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error(`[ticket-email] closure notice FAILED ticket=${displayId} to=${lead.email}: ${msg}`)
   }
 }

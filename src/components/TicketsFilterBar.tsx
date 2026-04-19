@@ -5,11 +5,18 @@ import { useTransition } from 'react'
 import { X } from 'lucide-react'
 
 type Member = { id: string; full_name: string | null }
+type Queue  = 'active' | 'closed'
 
 const SELECT_CLASS =
   'rounded-lg border border-pvx-border bg-pvx-surface px-3 py-1.5 text-xs text-gray-200 focus:outline-none focus:ring-1 focus:ring-violet-500'
 
-export default function TicketsFilterBar({ members }: { members: Member[] }) {
+export default function TicketsFilterBar({
+  members,
+  queue,
+}: {
+  members: Member[]
+  queue:   Queue
+}) {
   const router       = useRouter()
   const searchParams = useSearchParams()
   const [pending, startTransition] = useTransition()
@@ -27,23 +34,27 @@ export default function TicketsFilterBar({ members }: { members: Member[] }) {
     })
   }
 
-  const hasAny = !!(status || priority || assigned)
+  // On the Closed tab the status select is hidden, so a stale `status` URL
+  // value shouldn't keep the Clear button visible — it'd be unclickable.
+  const visibleStatus = queue === 'active' ? status : ''
+  const hasAny = !!(visibleStatus || priority || assigned)
 
   return (
     <div className="flex flex-wrap items-center gap-2">
       <span className="text-xs uppercase tracking-wider text-gray-500 mr-1">Filter</span>
 
-      <select
-        value={status}
-        onChange={e => update('status', e.target.value)}
-        className={SELECT_CLASS}
-        disabled={pending}
-      >
-        <option value="">All statuses</option>
-        <option value="open">Open</option>
-        <option value="pending">Pending</option>
-        <option value="closed">Closed</option>
-      </select>
+      {queue === 'active' && (
+        <select
+          value={status}
+          onChange={e => update('status', e.target.value)}
+          className={SELECT_CLASS}
+          disabled={pending}
+        >
+          <option value="">All statuses</option>
+          <option value="open">Open</option>
+          <option value="pending">Pending</option>
+        </select>
+      )}
 
       <select
         value={priority}
@@ -73,7 +84,17 @@ export default function TicketsFilterBar({ members }: { members: Member[] }) {
       {hasAny && (
         <button
           type="button"
-          onClick={() => startTransition(() => router.replace('/tickets', { scroll: false }))}
+          onClick={() => {
+            // Keep the user on the same queue; only strip the column filters.
+            const next = new URLSearchParams()
+            const sort  = searchParams.get('sort')
+            const order = searchParams.get('order')
+            if (queue === 'closed') next.set('queue', 'closed')
+            if (sort)  next.set('sort', sort)
+            if (order) next.set('order', order)
+            const qs = next.toString()
+            startTransition(() => router.replace(`/tickets${qs ? `?${qs}` : ''}`, { scroll: false }))
+          }}
           className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
           disabled={pending}
         >

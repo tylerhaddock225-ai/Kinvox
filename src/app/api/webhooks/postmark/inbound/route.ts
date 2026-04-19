@@ -123,7 +123,7 @@ export async function POST(request: NextRequest) {
     const displayId = tagMatch[1].toLowerCase()
     const { data: ticket, error: tErr } = await supabase
       .from('tickets')
-      .select('id')
+      .select('id, status')
       .eq('organization_id', orgId)
       .eq('display_id', displayId)
       .maybeSingle()
@@ -147,13 +147,29 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: insErr.message }, { status: 500 })
       }
 
+      // Auto-reopen: a customer reply on a closed ticket bounces it back to
+      // the Active queue so the team sees it again.
+      let reopened = false
+      if (ticket.status === 'closed') {
+        const { error: reopenErr } = await supabase
+          .from('tickets')
+          .update({ status: 'open' })
+          .eq('id', ticket.id)
+        if (reopenErr) {
+          console.error(`${LOG} auto-reopen failed for ticket=${displayId}:`, reopenErr.message)
+        } else {
+          reopened = true
+          console.log(`${LOG} auto-reopened ticket ${displayId} on inbound reply`)
+        }
+      }
+
       // TODO: persist payload.Attachments to Supabase Storage and link rows
       //       (e.g. a `ticket_message_attachments` table) once that surface
       //       lands. Postmark provides each attachment as base64 `Content`
       //       with `Name`, `ContentType`, `ContentLength`.
 
-      console.log(`${LOG} appended message to ticket ${displayId} (${ticket.id}) from=${fromEmail}`)
-      return NextResponse.json({ status: 'appended', ticket_id: ticket.id }, { status: 200 })
+      console.log(`${LOG} appended message to ticket ${displayId} (${ticket.id}) from=${fromEmail}${reopened ? ' [reopened]' : ''}`)
+      return NextResponse.json({ status: 'appended', ticket_id: ticket.id, reopened }, { status: 200 })
     }
 
     console.warn(`${LOG} subject tag ${displayId} not in org ${orgId} — falling through to new ticket`)
