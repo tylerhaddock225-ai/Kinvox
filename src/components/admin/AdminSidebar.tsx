@@ -24,7 +24,6 @@ const baseNav: NavItem[] = [
   { href: "/admin-hq/organizations", label: "Organizations", icon: Building2 },
   { href: "/admin-hq/tickets",       label: "Tickets",       icon: Ticket },
   { href: "/admin-hq/ai-templates",  label: "AI Templates",  icon: Sparkles },
-  { href: "/admin-hq/settings",      label: "Settings",      icon: Settings },
 ];
 
 const ownerOnlyNav: NavItem[] = [
@@ -51,6 +50,18 @@ export default function AdminSidebar({ systemRole }: AdminSidebarProps) {
         : "text-gray-400 hover:bg-white/5 hover:text-gray-100 border-transparent"
     }`;
   }
+
+  // Settings sits in the footer with a violet active state to distinguish it
+  // visually from the emerald primary nav — spacing/hover match the merchant
+  // sidebar's footer Settings link.
+  const settingsHref = "/admin-hq/settings";
+  const settingsActive =
+    pathname === settingsHref || pathname.startsWith(settingsHref + "/");
+  const settingsClass = `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors border-l-2 ${
+    settingsActive
+      ? "bg-violet-500/10 text-violet-300 border-violet-500"
+      : "text-gray-400 hover:bg-white/5 hover:text-gray-100 border-transparent"
+  }`;
 
   return (
     <aside className="flex flex-col w-64 min-h-screen bg-pvx-surface text-gray-100 border-r border-pvx-border shrink-0">
@@ -89,6 +100,14 @@ export default function AdminSidebar({ systemRole }: AdminSidebarProps) {
           </form>
         </div>
       )}
+
+      {/* Footer Settings — mirrors the merchant sidebar's bottom Settings block */}
+      <div className="px-3 pb-4 border-t border-pvx-border pt-3 space-y-1">
+        <Link href={settingsHref} className={settingsClass}>
+          <Settings className="w-4 h-4 shrink-0" />
+          Settings
+        </Link>
+      </div>
 
       <div className="px-6 py-4 border-t border-pvx-border text-xs text-gray-600">
         Kinvox HQ © {new Date().getFullYear()}
