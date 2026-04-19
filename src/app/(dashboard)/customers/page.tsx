@@ -1,16 +1,21 @@
+import { Suspense } from 'react'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import type { Customer } from '@/lib/types/database.types'
 import CopyId from '@/components/CopyId'
 import NewCustomerModal from '@/components/NewCustomerModal'
 import CustomerRow from './CustomerRow'
+import CustomersFilters from './CustomersFilters'
 
 type CustomerRow = Pick<
   Customer,
   'id' | 'display_id' | 'first_name' | 'last_name' | 'email' | 'phone' | 'company' | 'created_at' | 'lead_id'
 >
 
-export default async function CustomersPage() {
+type SearchParams = Promise<{ q?: string }>
+
+export default async function CustomersPage({ searchParams }: { searchParams: SearchParams }) {
+  const params   = await searchParams
   const supabase = await createClient()
 
   const { data: { user } } = await supabase.auth.getUser()
@@ -24,7 +29,9 @@ export default async function CustomersPage() {
 
   if (!profile?.organization_id) redirect('/onboarding')
 
-  const { data } = await supabase
+  const q = params.q?.trim() ?? ''
+
+  let query = supabase
     .from('customers')
     .select('id, display_id, first_name, last_name, email, phone, company, created_at, lead_id')
     .eq('organization_id', profile.organization_id)
@@ -32,6 +39,15 @@ export default async function CustomersPage() {
     .order('created_at', { ascending: false })
     .limit(500)
 
+  if (q) {
+    // Strip characters that break Supabase's .or() grammar before interpolating.
+    const safe = q.replace(/[%,()]/g, '')
+    query = query.or(
+      `first_name.ilike.%${safe}%,last_name.ilike.%${safe}%,company.ilike.%${safe}%,email.ilike.%${safe}%`
+    )
+  }
+
+  const { data } = await query
   const rows = (data ?? []) as CustomerRow[]
 
   return (
@@ -44,10 +60,16 @@ export default async function CustomersPage() {
         <NewCustomerModal />
       </div>
 
+      <Suspense fallback={<div className="h-10" />}>
+        <CustomersFilters />
+      </Suspense>
+
       <div className="rounded-xl border border-pvx-border bg-pvx-surface overflow-hidden">
         {rows.length === 0 ? (
           <div className="px-6 py-16 text-center text-gray-500 text-sm">
-            No customers yet. Create a lead and one will appear here.
+            {q
+              ? 'No customers match your search.'
+              : 'No customers yet. Create a lead and one will appear here.'}
           </div>
         ) : (
           <table className="w-full text-sm">

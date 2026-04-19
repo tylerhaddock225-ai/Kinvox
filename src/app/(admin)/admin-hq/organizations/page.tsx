@@ -1,8 +1,10 @@
+import { Suspense } from 'react'
 import Link from 'next/link'
 import { Eye, Archive } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { startImpersonation } from '@/app/actions/impersonation'
 import CopyId from '@/components/CopyId'
+import OrgFilters from './OrgFilters'
 
 export const dynamic = 'force-dynamic'
 
@@ -19,18 +21,25 @@ type Row = {
 export default async function AdminOrganizationsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ show?: string }>
+  searchParams: Promise<{ show?: string; q?: string }>
 }) {
-  const { show } = await searchParams
+  const { show, q: rawQ } = await searchParams
   const showArchived = show === 'all'
+  const q = rawQ?.trim() ?? ''
 
   const supabase = await createClient()
 
   // Default: live merchants only. ?show=all includes archived rows.
-  const baseQuery = supabase
+  let baseQuery = supabase
     .from('organizations')
     .select('id, display_id, name, vertical, status, deleted_at, created_at')
     .order('created_at', { ascending: false })
+
+  if (q) {
+    // Strip characters that break Supabase's .or() grammar before interpolating.
+    const safe = q.replace(/[%,()]/g, '')
+    baseQuery = baseQuery.or(`name.ilike.%${safe}%,vertical.ilike.%${safe}%`)
+  }
 
   const [{ data: orgs, error }, { count: archivedCount }] = await Promise.all([
     (showArchived ? baseQuery : baseQuery.is('deleted_at', null)).returns<Row[]>(),
@@ -73,6 +82,10 @@ export default async function AdminOrganizationsPage({
           )}
         </div>
       </header>
+
+      <Suspense fallback={<div className="h-10" />}>
+        <OrgFilters />
+      </Suspense>
 
       {error && (
         <div className="rounded-lg border border-rose-900/60 bg-rose-950/40 px-4 py-3 text-sm text-rose-200">
@@ -164,7 +177,9 @@ export default async function AdminOrganizationsPage({
             ) : (
               <tr>
                 <td colSpan={5} className="px-5 py-10 text-center text-sm text-gray-500">
-                  {showArchived ? 'No organizations yet.' : 'No live organizations.'}
+                  {q
+                    ? 'No organizations match your search.'
+                    : showArchived ? 'No organizations yet.' : 'No live organizations.'}
                 </td>
               </tr>
             )}
