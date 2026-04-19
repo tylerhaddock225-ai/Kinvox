@@ -47,6 +47,50 @@ export async function createTicket(_prev: State, formData: FormData): Promise<St
   return { status: 'success' }
 }
 
+const STATUS_VALUES   = ['open', 'pending', 'closed'] as const
+const PRIORITY_VALUES = ['low', 'medium', 'high']     as const
+type TicketStatus   = typeof STATUS_VALUES[number]
+type TicketPriority = typeof PRIORITY_VALUES[number]
+
+export async function updateTicketStatus(formData: FormData): Promise<void> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return
+
+  const ticket_id = formData.get('ticket_id') as string
+  const status    = formData.get('status')    as string
+  if (!ticket_id) return
+  if (!STATUS_VALUES.includes(status as TicketStatus)) return
+
+  // RLS already prevents cross-org updates; the trigger refreshes updated_at.
+  await supabase
+    .from('tickets')
+    .update({ status: status as TicketStatus })
+    .eq('id', ticket_id)
+
+  revalidatePath('/tickets')
+  revalidatePath(`/tickets/${ticket_id}`)
+}
+
+export async function updateTicketPriority(formData: FormData): Promise<void> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return
+
+  const ticket_id = formData.get('ticket_id') as string
+  const priority  = formData.get('priority')  as string
+  if (!ticket_id) return
+  if (!PRIORITY_VALUES.includes(priority as TicketPriority)) return
+
+  await supabase
+    .from('tickets')
+    .update({ priority: priority as TicketPriority })
+    .eq('id', ticket_id)
+
+  revalidatePath('/tickets')
+  revalidatePath(`/tickets/${ticket_id}`)
+}
+
 export async function updateTicketSubject(_prev: State, formData: FormData): Promise<State> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()

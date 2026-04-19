@@ -4,18 +4,8 @@ import type { Ticket, TicketMessage } from '@/lib/types/database.types'
 import CopyId from '@/components/CopyId'
 import EditableSubject from '@/components/EditableSubject'
 import ReplyBox from '@/components/ReplyBox'
-
-const STATUS_COLORS: Record<Ticket['status'], string> = {
-  open:    'bg-amber-500/10 text-amber-400 border-amber-500/20',
-  pending: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-  closed:  'bg-gray-500/10 text-gray-400 border-gray-500/20',
-}
-
-const PRIORITY_COLORS: Record<Ticket['priority'], string> = {
-  low:    'bg-gray-500/10 text-gray-400 border-gray-500/20',
-  medium: 'bg-sky-500/10 text-sky-400 border-sky-500/20',
-  high:   'bg-orange-500/10 text-orange-400 border-orange-500/20',
-}
+import TicketStatusSelect from '@/components/TicketStatusSelect'
+import TicketPrioritySelect from '@/components/TicketPrioritySelect'
 
 type MessageRow = Pick<TicketMessage, 'id' | 'body' | 'type' | 'created_at' | 'sender_id'> & {
   profiles: { full_name: string | null } | null
@@ -69,12 +59,8 @@ export default async function TicketDetailPage({ params }: { params: Promise<{ i
             <EditableSubject ticketId={ticket.id} initial={ticket.subject} />
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border capitalize ${PRIORITY_COLORS[ticket.priority]}`}>
-              {ticket.priority}
-            </span>
-            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border capitalize ${STATUS_COLORS[ticket.status]}`}>
-              {ticket.status}
-            </span>
+            <TicketPrioritySelect ticketId={ticket.id} value={ticket.priority} size="md" />
+            <TicketStatusSelect   ticketId={ticket.id} value={ticket.status}   size="md" />
           </div>
         </div>
         <div className="text-xs">
