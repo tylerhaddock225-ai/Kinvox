@@ -8,6 +8,7 @@ import LeadNotesForm from '@/components/LeadNotesForm'
 import LeadActivityList, { type Activity } from '@/components/LeadActivityList'
 import EditLeadModal from '@/components/EditLeadModal'
 import CopyId from '@/components/CopyId'
+import QuickScheduleModal from '@/components/QuickScheduleModal'
 
 type ActivityRow = LeadActivity & {
   profiles: { full_name: string | null; avatar_url: string | null } | null
@@ -77,24 +78,31 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
           Back to Leads
         </Link>
         <div className="mt-2 flex items-center justify-between gap-4">
-          <h1 className="text-2xl font-bold text-white">
+          <h1 className="text-2xl font-bold text-white truncate">
             {l.first_name} {l.last_name ?? ''}
+            {l.company && (
+              <span className="ml-3 text-xl font-normal text-gray-400">{l.company}</span>
+            )}
           </h1>
-          {linkedCustomerId && (
-            <Link
-              href={`/customers/${linkedCustomerId}`}
-              className="text-violet-400 hover:text-violet-300 text-sm font-medium transition-colors shrink-0"
-            >
-              View Customer Profile →
-            </Link>
-          )}
+          <div className="shrink-0">
+            <QuickScheduleModal leadId={l.id} />
+          </div>
         </div>
         {l.display_id && (
           <div className="mt-0.5 text-xs">
             <CopyId id={l.display_id} />
           </div>
         )}
-        {l.company && <p className="text-sm text-gray-400 mt-0.5">{l.company}</p>}
+        {linkedCustomerId && (
+          <div className="mt-1">
+            <Link
+              href={`/customers/${linkedCustomerId}`}
+              className="text-violet-400 hover:text-violet-300 text-xs font-medium transition-colors"
+            >
+              View Customer Profile →
+            </Link>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

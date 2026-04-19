@@ -8,6 +8,7 @@ import CustomerNotesForm from '@/components/CustomerNotesForm'
 import LeadActivityList, { type Activity } from '@/components/LeadActivityList'
 import EditCustomerModal from '@/components/EditCustomerModal'
 import CopyId from '@/components/CopyId'
+import QuickScheduleModal from '@/components/QuickScheduleModal'
 import type { CustomerStatus } from '@/app/(dashboard)/actions/customers'
 
 type CustomerRowWithStatus = Customer & { status: CustomerStatus | null }
@@ -122,22 +123,31 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
           Back to Customers
         </Link>
         <div className="mt-2 flex items-center justify-between gap-4">
-          <h1 className="text-2xl font-bold text-white">{fullName}</h1>
-          {c.lead_id && (
-            <Link
-              href={`/leads/${c.lead_id}`}
-              className="text-violet-400 hover:text-violet-300 text-sm font-medium transition-colors shrink-0"
-            >
-              View Lead Profile →
-            </Link>
-          )}
+          <h1 className="text-2xl font-bold text-white truncate">
+            {fullName}
+            {c.company && (
+              <span className="ml-3 text-xl font-normal text-gray-400">{c.company}</span>
+            )}
+          </h1>
+          <div className="shrink-0">
+            <QuickScheduleModal customerId={c.id} />
+          </div>
         </div>
         {c.display_id && (
           <div className="mt-0.5 text-xs">
             <CopyId id={c.display_id} />
           </div>
         )}
-        {c.company && <p className="text-sm text-gray-400 mt-0.5">{c.company}</p>}
+        {c.lead_id && (
+          <div className="mt-1">
+            <Link
+              href={`/leads/${c.lead_id}`}
+              className="text-violet-400 hover:text-violet-300 text-xs font-medium transition-colors"
+            >
+              View Lead Profile →
+            </Link>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
