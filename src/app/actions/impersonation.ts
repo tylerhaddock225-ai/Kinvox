@@ -18,6 +18,14 @@ export async function startImpersonation(formData: FormData) {
   const { data: isAdmin } = await supabase.rpc('is_admin_hq')
   if (!isAdmin) redirect('/login')
 
+  // Fetch slug up-front so we can land directly on the merchant's slugged URL.
+  const { data: org } = await supabase
+    .from('organizations')
+    .select('slug')
+    .eq('id', orgId)
+    .single<{ slug: string | null }>()
+  if (!org?.slug) redirect('/admin-hq/organizations')
+
   const jar = await cookies()
   jar.set(IMPERSONATION_COOKIE, orgId, {
     httpOnly: true,
@@ -28,7 +36,7 @@ export async function startImpersonation(formData: FormData) {
   })
 
   revalidatePath('/', 'layout')
-  redirect('/')
+  redirect(`/${org.slug}`)
 }
 
 export async function stopImpersonation() {

@@ -35,7 +35,7 @@ export default async function AdminHqOverviewPage() {
   return (
     <div className="space-y-8">
       <header>
-        <div className="text-[10px] font-bold tracking-[0.2em] text-indigo-400 uppercase">
+        <div className="text-[10px] font-bold tracking-[0.2em] text-emerald-400 uppercase">
           Command Center
         </div>
         <h1 className="mt-1 text-3xl font-semibold text-slate-50">
@@ -84,12 +84,12 @@ function SummaryCard({
   hint?: string
 }) {
   return (
-    <div className="group rounded-xl border border-slate-800 bg-slate-950/60 p-5 shadow-sm hover:border-indigo-500/40 transition-colors">
+    <div className="group rounded-xl border border-slate-800 bg-slate-950/60 p-5 shadow-sm hover:border-emerald-500/40 transition-colors">
       <div className="flex items-start justify-between">
         <div className="text-xs font-medium uppercase tracking-wider text-slate-400">
           {label}
         </div>
-        <div className="rounded-lg bg-indigo-500/10 p-2 text-indigo-300 ring-1 ring-inset ring-indigo-500/20">
+        <div className="rounded-lg bg-emerald-500/10 p-2 text-emerald-300 ring-1 ring-inset ring-emerald-500/20">
           <Icon className="w-4 h-4" />
         </div>
       </div>
@@ -99,7 +99,7 @@ function SummaryCard({
       </div>
       <Link
         href={href}
-        className="mt-4 inline-flex items-center text-xs font-medium text-indigo-300 hover:text-indigo-200"
+        className="mt-4 inline-flex items-center text-xs font-medium text-emerald-300 hover:text-emerald-200"
       >
         {cta} →
       </Link>

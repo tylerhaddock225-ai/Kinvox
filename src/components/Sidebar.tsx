@@ -5,30 +5,38 @@ import { usePathname } from "next/navigation";
 import { Users, UserCircle, CalendarCheck, Ticket, LayoutDashboard, Settings, Shield } from "lucide-react";
 import Logo from "./Logo";
 
-const staticNav = [
-  { href: "/",             label: "Dashboard",   icon: LayoutDashboard },
-  { href: "/customers",    label: "Customers",   icon: UserCircle },
-  { href: "/appointments", label: "Appointments", icon: CalendarCheck },
-  { href: "/tickets",      label: "Tickets",      icon: Ticket },
-];
-
 const leadsNav = { href: "/leads", label: "Leads", icon: Users };
 
 interface SidebarProps {
   canViewLeads?: boolean;
   orgName?: string | null;
+  orgSlug?: string | null;
   isHqAdmin?: boolean;
 }
 
-export default function Sidebar({ canViewLeads = true, orgName = null, isHqAdmin = false }: SidebarProps) {
+export default function Sidebar({ canViewLeads = true, orgName = null, orgSlug = null, isHqAdmin = false }: SidebarProps) {
   const pathname = usePathname();
+
+  // Dashboard link targets the merchant's slugged URL when available.
+  const dashboardHref = orgSlug ? `/${orgSlug}` : "/";
+
+  const staticNav = [
+    { href: dashboardHref,   label: "Dashboard",    icon: LayoutDashboard },
+    { href: "/customers",    label: "Customers",    icon: UserCircle },
+    { href: "/appointments", label: "Appointments", icon: CalendarCheck },
+    { href: "/tickets",      label: "Tickets",      icon: Ticket },
+  ];
 
   const navItems = canViewLeads
     ? [staticNav[0], leadsNav, ...staticNav.slice(1)]
     : staticNav;
 
   function linkClass(href: string) {
-    const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
+    // Dashboard link is active only on exact slug match (or "/" when no slug),
+    // not on every subpath — sub-routes match their own static hrefs instead.
+    const active = href === dashboardHref
+      ? pathname === dashboardHref
+      : pathname.startsWith(href);
     return `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors border-l-2 ${
       active
         ? "bg-emerald-500/15 text-emerald-400 border-emerald-400"
@@ -72,7 +80,7 @@ export default function Sidebar({ canViewLeads = true, orgName = null, isHqAdmin
         <div className="px-3 pt-3">
           <Link
             href="/admin-hq"
-            className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold uppercase tracking-wider text-indigo-200 bg-indigo-500/15 border border-indigo-500/30 hover:bg-indigo-500/25 hover:text-indigo-100 transition-colors"
+            className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold uppercase tracking-wider text-emerald-200 bg-emerald-500/15 border border-emerald-500/30 hover:bg-emerald-500/25 hover:text-emerald-100 transition-colors"
           >
             <Shield className="w-3.5 h-3.5 shrink-0" />
             Return to HQ

@@ -86,7 +86,7 @@ export default async function AdminOrganizationsPage() {
                           <input type="hidden" name="orgId" value={org.id} />
                           <button
                             type="submit"
-                            className="inline-flex items-center gap-1.5 rounded-md border border-indigo-500/40 bg-indigo-500/10 px-3 py-1.5 text-xs font-medium text-indigo-200 hover:bg-indigo-500/20 hover:text-indigo-100 transition-colors"
+                            className="inline-flex items-center gap-1.5 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-200 hover:bg-emerald-500/20 hover:text-emerald-100 transition-colors"
                           >
                             <Eye className="w-3.5 h-3.5" />
                             View as Merchant

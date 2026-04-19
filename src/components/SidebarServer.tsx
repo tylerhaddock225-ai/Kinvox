@@ -17,16 +17,25 @@ export default async function SidebarServer() {
   ])
 
   let orgName: string | null = null
+  let orgSlug: string | null = null
   if (profile?.organization_id) {
     const { data: org } = await supabase
       .from('organizations')
-      .select('name')
+      .select('name, slug')
       .eq('id', profile.organization_id)
-      .single()
+      .single<{ name: string | null; slug: string | null }>()
     orgName = org?.name ?? null
+    orgSlug = org?.slug ?? null
   }
 
   const isHqAdmin = !!profile?.system_role
 
-  return <Sidebar canViewLeads={canView ?? true} orgName={orgName} isHqAdmin={isHqAdmin} />
+  return (
+    <Sidebar
+      canViewLeads={canView ?? true}
+      orgName={orgName}
+      orgSlug={orgSlug}
+      isHqAdmin={isHqAdmin}
+    />
+  )
 }

@@ -41,8 +41,10 @@ const STATUS_COLORS: Record<Lead['status'], string> = {
 // ── Page ─────────────────────────────────────────────────────────────────────
 
 export default async function DashboardPage({
+  params,
   searchParams,
 }: {
+  params: Promise<{ orgSlug: string }>
   searchParams: Promise<{ impersonate?: string }>
 }) {
   const supabase = await createClient()
@@ -50,7 +52,7 @@ export default async function DashboardPage({
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  // Resolve impersonation (no-op + safe fallback if caller is not an HQ admin).
+  const { orgSlug } = await params
   const { impersonate } = await searchParams
   const impersonation = await resolveImpersonation(impersonate)
 
@@ -72,7 +74,7 @@ export default async function DashboardPage({
     organization_id: string | null
     full_name:       string | null
     role:            string
-    roles:           unknown   // join result — cast below
+    roles:           unknown
   } | null
 
   if (profileRes.error || !profileData?.organization_id) redirect('/onboarding')
@@ -80,6 +82,20 @@ export default async function DashboardPage({
   // When a verified HQ admin is impersonating, queries target the impersonated org.
   // Otherwise fall back to the caller's real org — RLS enforces both sides.
   const orgId = impersonation.active ? impersonation.orgId : profileData.organization_id
+
+  // URL-slug verification: the `/:orgSlug` segment must match the effective org.
+  // If it doesn't, redirect to the correct slug rather than render misleading
+  // data under the wrong URL. (Admins without impersonation are pinned to their
+  // own slug — URL-based org switching goes through the impersonation cookie.)
+  const { data: effectiveOrg } = await supabase
+    .from('organizations')
+    .select('slug')
+    .eq('id', orgId)
+    .single<{ slug: string | null }>()
+
+  if (effectiveOrg?.slug && effectiveOrg.slug !== orgSlug) {
+    redirect(`/${effectiveOrg.slug}`)
+  }
 
   // Resolve permissions from the joined role (fall back to full access)
   const rawPerms = (profileData.roles as { permissions: Record<string, boolean> } | null)?.permissions

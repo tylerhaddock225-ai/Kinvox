@@ -14,16 +14,25 @@ export async function login(formData: FormData) {
 
   if (error) return { error: error.message }
 
-  // HQ admins go straight to the Command Center; merchants to the dashboard.
+  // HQ admins → Command Center. Merchants → their org's slugged dashboard.
   let destination = '/'
   if (data.user) {
     const { data: profile } = await supabase
       .from('profiles')
-      .select('system_role')
+      .select('system_role, organizations(slug)')
       .eq('id', data.user.id)
-      .single<{ system_role: 'platform_owner' | 'platform_support' | null }>()
+      .single<{
+        system_role: 'platform_owner' | 'platform_support' | null
+        organizations: { slug: string | null } | null
+      }>()
 
-    if (profile?.system_role) destination = '/admin-hq'
+    if (profile?.system_role) {
+      destination = '/admin-hq'
+    } else if (profile?.organizations?.slug) {
+      destination = `/${profile.organizations.slug}`
+    } else {
+      destination = '/onboarding'
+    }
   }
 
   revalidatePath('/', 'layout')

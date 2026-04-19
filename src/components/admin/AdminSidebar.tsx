@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Building2, Ticket, Sparkles, CreditCard, ArrowLeft } from "lucide-react";
+import { Building2, Ticket, Sparkles, CreditCard, Zap, Eye } from "lucide-react";
+import { startImpersonation } from "@/app/actions/impersonation";
 
 type SystemRole = "platform_owner" | "platform_support";
 
@@ -20,17 +21,23 @@ const ownerOnlyNav = [
   { href: "/admin-hq/billing", label: "Billing", icon: CreditCard },
 ];
 
+// Matches /admin-hq/organizations/:id — captures the id. Does NOT match
+// the listing page (/admin-hq/organizations) or any deeper subpath.
+const ORG_DETAIL_RE = /^\/admin-hq\/organizations\/([^/]+)\/?$/;
+
 export default function AdminSidebar({ systemRole }: AdminSidebarProps) {
   const pathname = usePathname();
 
   const navItems =
     systemRole === "platform_owner" ? [...baseNav, ...ownerOnlyNav] : baseNav;
 
+  const managingOrgId = pathname.match(ORG_DETAIL_RE)?.[1] ?? null;
+
   function linkClass(href: string) {
     const active = pathname === href || pathname.startsWith(href + "/");
     return `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors border-l-2 ${
       active
-        ? "bg-slate-700/60 text-slate-50 border-indigo-400"
+        ? "bg-slate-700/60 text-slate-50 border-emerald-400"
         : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-100 border-transparent"
     }`;
   }
@@ -38,12 +45,13 @@ export default function AdminSidebar({ systemRole }: AdminSidebarProps) {
   return (
     <aside className="flex flex-col w-64 min-h-screen bg-slate-950 text-slate-100 border-r border-slate-800 shrink-0">
       <div className="px-5 pt-6 pb-4 border-b border-slate-800">
-        <div className="text-[10px] font-bold tracking-[0.2em] text-indigo-400 uppercase">
+        <div className="flex items-center gap-1.5 text-[10px] font-bold tracking-[0.2em] text-emerald-400 uppercase">
+          <Zap className="w-3.5 h-3.5 text-emerald-400 fill-emerald-400" />
           Kinvox HQ
         </div>
         <div className="mt-1 text-lg font-semibold text-slate-100">Command Center</div>
         <div className="mt-3 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-slate-800/80 border border-slate-700 text-[10px] font-medium text-slate-300 uppercase tracking-wider">
-          <span className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
           {systemRole === "platform_owner" ? "Platform Owner" : "Platform Support"}
         </div>
       </div>
@@ -57,15 +65,20 @@ export default function AdminSidebar({ systemRole }: AdminSidebarProps) {
         ))}
       </nav>
 
-      <div className="px-3 pb-4 border-t border-slate-800 pt-3">
-        <Link
-          href="/"
-          className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-slate-400 hover:bg-slate-800/60 hover:text-slate-100 transition-colors"
-        >
-          <ArrowLeft className="w-4 h-4 shrink-0" />
-          Back to merchant app
-        </Link>
-      </div>
+      {managingOrgId && (
+        <div className="px-3 pb-4 border-t border-slate-800 pt-3">
+          <form action={startImpersonation}>
+            <input type="hidden" name="orgId" value={managingOrgId} />
+            <button
+              type="submit"
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-emerald-200 bg-emerald-500/15 border border-emerald-500/30 hover:bg-emerald-500/25 hover:text-emerald-100 transition-colors"
+            >
+              <Eye className="w-4 h-4 shrink-0" />
+              Launch Impersonation
+            </button>
+          </form>
+        </div>
+      )}
 
       <div className="px-6 py-4 border-t border-slate-800 text-xs text-slate-600">
         Kinvox HQ © {new Date().getFullYear()}
