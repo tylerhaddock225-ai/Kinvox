@@ -91,14 +91,26 @@ export default async function AdminOrgDetailPage({
         <div className="flex items-center justify-between gap-4">
           <div>
             <div className="text-xs font-medium uppercase tracking-wider text-gray-400">Status</div>
-            <div className="mt-1 flex items-center gap-2">
-              <span
-                className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-emerald-400' : 'bg-gray-500'}`}
-              />
-              <span className={`text-sm font-medium ${isActive ? 'text-emerald-300' : 'text-gray-400'}`}>
-                {status}
-              </span>
+            <div className="mt-1">
+              {isArchived ? (
+                <span className="inline-flex items-center gap-1.5 rounded-md border border-pvx-border bg-pvx-surface px-2.5 py-0.5 text-[11px] font-medium uppercase tracking-wide text-gray-400">
+                  <span className="w-1.5 h-1.5 rounded-full bg-gray-500" />
+                  Archived
+                </span>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <span className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-emerald-400' : 'bg-gray-500'}`} />
+                  <span className={`text-sm font-medium ${isActive ? 'text-emerald-300' : 'text-gray-400'}`}>
+                    {status}
+                  </span>
+                </div>
+              )}
             </div>
+            {isArchived && (
+              <p className="mt-2 text-[11px] text-gray-500">
+                Toggle disabled while archived. Restore the organization below to re-enable.
+              </p>
+            )}
           </div>
           <form action={setOrgStatus}>
             <input type="hidden" name="id"     value={org.id} />
@@ -106,9 +118,10 @@ export default async function AdminOrgDetailPage({
             <button
               type="submit"
               disabled={isArchived}
+              aria-disabled={isArchived}
               className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
                 isArchived
-                  ? 'border-pvx-border bg-pvx-surface text-gray-600 cursor-not-allowed'
+                  ? 'border-pvx-border bg-pvx-surface text-gray-600 cursor-not-allowed opacity-60'
                   : isActive
                     ? 'border-amber-700/60 bg-amber-950/40 text-amber-200 hover:bg-amber-900/40'
                     : 'border-emerald-700/60 bg-emerald-950/40 text-emerald-200 hover:bg-emerald-900/40'
