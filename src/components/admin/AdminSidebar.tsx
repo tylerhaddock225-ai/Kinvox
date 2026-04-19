@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Building2, Ticket, Sparkles, CreditCard, Zap, Eye, LayoutDashboard } from "lucide-react";
+import { Building2, Ticket, Sparkles, CreditCard, Zap, Eye, LayoutDashboard, Settings } from "lucide-react";
 import { startImpersonation } from "@/app/actions/impersonation";
 
 type SystemRole = "platform_owner" | "platform_support";
@@ -24,6 +24,7 @@ const baseNav: NavItem[] = [
   { href: "/admin-hq/organizations", label: "Organizations", icon: Building2 },
   { href: "/admin-hq/tickets",       label: "Tickets",       icon: Ticket },
   { href: "/admin-hq/ai-templates",  label: "AI Templates",  icon: Sparkles },
+  { href: "/admin-hq/settings",      label: "Settings",      icon: Settings },
 ];
 
 const ownerOnlyNav: NavItem[] = [

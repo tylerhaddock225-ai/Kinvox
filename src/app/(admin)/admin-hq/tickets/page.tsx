@@ -1,12 +1,16 @@
 import Link from 'next/link'
-import { LifeBuoy } from 'lucide-react'
+import { LifeBuoy, XCircle } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
+import { closeHQTicket } from '@/app/(admin)/admin-hq/actions/tickets'
 
 export const dynamic = 'force-dynamic'
 
 type TicketStatus = 'open' | 'pending' | 'closed'
 type HQCategory   = 'bug' | 'billing' | 'feature_request' | 'question'
 type Scope        = 'all' | 'merchant' | 'platform'
+type Queue        = 'active' | 'closed'
+
+const ACTIVE_STATUSES: TicketStatus[] = ['open', 'pending']
 
 const STATUS_STYLE: Record<TicketStatus, string> = {
   open:    'border-amber-700/60 bg-amber-950/40 text-amber-300',
@@ -28,17 +32,29 @@ const CATEGORY_STYLE: Record<HQCategory, string> = {
   question:         'border-sky-700/60 bg-sky-950/40 text-sky-300',
 }
 
-function ScopeTab({ scope, current, count, label }: {
+function hrefWith(params: Record<string, string | undefined>): string {
+  const next = new URLSearchParams()
+  for (const [k, v] of Object.entries(params)) {
+    if (v) next.set(k, v)
+  }
+  const qs = next.toString()
+  return qs ? `/admin-hq/tickets?${qs}` : '/admin-hq/tickets'
+}
+
+function ScopeTab({ scope, current, count, label, queue }: {
   scope:   Scope
   current: Scope
   count:   number
   label:   string
+  queue:   Queue
 }) {
-  const href = scope === 'all' ? '/admin-hq/tickets' : `/admin-hq/tickets?scope=${scope}`
   const isActive = current === scope
   return (
     <Link
-      href={href}
+      href={hrefWith({
+        scope: scope === 'all' ? undefined : scope,
+        queue: queue === 'active' ? undefined : queue,
+      })}
       className={`px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px ${
         isActive
           ? 'border-violet-500 text-white'
@@ -51,10 +67,36 @@ function ScopeTab({ scope, current, count, label }: {
   )
 }
 
+function QueueTab({ queue, current, scope, count, label }: {
+  queue:   Queue
+  current: Queue
+  scope:   Scope
+  count:   number
+  label:   string
+}) {
+  const isActive = current === queue
+  return (
+    <Link
+      href={hrefWith({
+        scope: scope === 'all' ? undefined : scope,
+        queue: queue === 'active' ? undefined : queue,
+      })}
+      className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+        isActive
+          ? 'bg-violet-600 text-white'
+          : 'text-gray-400 hover:text-white hover:bg-white/5'
+      }`}
+    >
+      {label}
+      <span className="ml-1.5 text-[10px] opacity-70">({count})</span>
+    </Link>
+  )
+}
+
 export default async function AdminTicketsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ scope?: string }>
+  searchParams: Promise<{ scope?: string; queue?: string }>
 }) {
   const supabase = await createClient()
 
@@ -63,22 +105,30 @@ export default async function AdminTicketsPage({
     params.scope === 'platform' ? 'platform'
     : params.scope === 'merchant' ? 'merchant'
     : 'all'
+  const queue: Queue = params.queue === 'closed' ? 'closed' : 'active'
 
-  // Main listing query — narrowed by scope. RLS (is_admin_hq()) lets an
-  // HQ admin see every row across orgs; the FK join pulls merchant name.
+  // ── Main listing, scoped by tabs ────────────────────────────────────────────
   let listingQ = supabase
     .from('tickets')
-    .select('id, subject, status, created_at, organization_id, is_platform_support, hq_category, organizations(name)')
+    .select('id, display_id, subject, status, created_at, organization_id, is_platform_support, hq_category, organizations(name)')
     .order('created_at', { ascending: false })
     .limit(200)
+
+  listingQ = queue === 'closed'
+    ? listingQ.eq('status', 'closed')
+    : listingQ.in('status', ACTIVE_STATUSES)
 
   if (scope === 'platform') listingQ = listingQ.eq('is_platform_support', true)
   if (scope === 'merchant') listingQ = listingQ.eq('is_platform_support', false)
 
-  const [listingRes, allCountRes, merchantCountRes, platformCountRes] = await Promise.all([
+  // ── Tab counts (queue-aware so tab labels match what the user will see) ─────
+  const statusFilter = queue === 'closed' ? ['closed'] : ACTIVE_STATUSES
+
+  const [listingRes, allCountRes, merchantCountRes, platformCountRes, activeCountRes, closedCountRes] = await Promise.all([
     listingQ.returns<
       Array<{
         id:                   string
+        display_id:           string | null
         subject:              string
         status:               TicketStatus
         created_at:           string
@@ -88,9 +138,21 @@ export default async function AdminTicketsPage({
         organizations:        { name: string } | null
       }>
     >(),
-    supabase.from('tickets').select('id', { count: 'exact', head: true }),
-    supabase.from('tickets').select('id', { count: 'exact', head: true }).eq('is_platform_support', false),
-    supabase.from('tickets').select('id', { count: 'exact', head: true }).eq('is_platform_support', true),
+    supabase.from('tickets').select('id', { count: 'exact', head: true }).in('status', statusFilter),
+    supabase.from('tickets').select('id', { count: 'exact', head: true }).eq('is_platform_support', false).in('status', statusFilter),
+    supabase.from('tickets').select('id', { count: 'exact', head: true }).eq('is_platform_support', true).in('status', statusFilter),
+    (() => {
+      let q = supabase.from('tickets').select('id', { count: 'exact', head: true }).in('status', ACTIVE_STATUSES)
+      if (scope === 'platform') q = q.eq('is_platform_support', true)
+      if (scope === 'merchant') q = q.eq('is_platform_support', false)
+      return q
+    })(),
+    (() => {
+      let q = supabase.from('tickets').select('id', { count: 'exact', head: true }).eq('status', 'closed')
+      if (scope === 'platform') q = q.eq('is_platform_support', true)
+      if (scope === 'merchant') q = q.eq('is_platform_support', false)
+      return q
+    })(),
   ])
 
   const tickets = listingRes.data
@@ -118,9 +180,14 @@ export default async function AdminTicketsPage({
       </header>
 
       <div className="flex items-center gap-1 border-b border-pvx-border">
-        <ScopeTab scope="all"      current={scope} count={allCountRes.count      ?? 0} label="All" />
-        <ScopeTab scope="merchant" current={scope} count={merchantCountRes.count ?? 0} label="Merchant" />
-        <ScopeTab scope="platform" current={scope} count={platformCountRes.count ?? 0} label="Platform Support" />
+        <ScopeTab scope="all"      current={scope} queue={queue} count={allCountRes.count      ?? 0} label="All" />
+        <ScopeTab scope="merchant" current={scope} queue={queue} count={merchantCountRes.count ?? 0} label="Merchant" />
+        <ScopeTab scope="platform" current={scope} queue={queue} count={platformCountRes.count ?? 0} label="Platform Support" />
+      </div>
+
+      <div className="flex items-center gap-1">
+        <QueueTab queue="active" current={queue} scope={scope} count={activeCountRes.count ?? 0} label="Active" />
+        <QueueTab queue="closed" current={queue} scope={scope} count={closedCountRes.count ?? 0} label="Closed" />
       </div>
 
       {error && (
@@ -138,6 +205,7 @@ export default async function AdminTicketsPage({
               <th className="px-5 py-3">Category</th>
               <th className="px-5 py-3">Status</th>
               <th className="px-5 py-3 text-right">Created</th>
+              <th className="px-5 py-3 text-right">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-pvx-border">
@@ -148,12 +216,15 @@ export default async function AdminTicketsPage({
                     {t.organizations?.name ?? <span className="text-gray-500">Unknown</span>}
                   </td>
                   <td className="px-5 py-4 text-gray-300 truncate max-w-md">
-                    <span className="inline-flex items-center gap-2">
+                    <Link
+                      href={`/admin-hq/tickets/${t.id}`}
+                      className="inline-flex items-center gap-2 hover:text-violet-300 transition-colors"
+                    >
                       {t.is_platform_support && (
                         <LifeBuoy className="w-3.5 h-3.5 text-violet-400 shrink-0" aria-label="Platform support" />
                       )}
-                      {t.subject}
-                    </span>
+                      <span className="truncate">{t.subject}</span>
+                    </Link>
                   </td>
                   <td className="px-5 py-4">
                     {t.is_platform_support && t.hq_category ? (
@@ -176,14 +247,32 @@ export default async function AdminTicketsPage({
                   <td className="px-5 py-4 text-right text-xs text-gray-500 font-mono">
                     {new Date(t.created_at).toLocaleString()}
                   </td>
+                  <td className="px-5 py-4 text-right">
+                    {t.status === 'closed' ? (
+                      <span className="text-[11px] text-gray-600">—</span>
+                    ) : (
+                      <form action={closeHQTicket} className="inline-flex">
+                        <input type="hidden" name="ticket_id" value={t.id} />
+                        <button
+                          type="submit"
+                          className="inline-flex items-center gap-1 rounded-md border border-pvx-border px-2 py-1 text-[11px] font-medium text-gray-400 hover:border-rose-500/40 hover:text-rose-300 hover:bg-rose-500/10 transition-colors"
+                        >
+                          <XCircle className="w-3 h-3" />
+                          Close
+                        </button>
+                      </form>
+                    )}
+                  </td>
                 </tr>
               ))
             ) : (
               <tr>
-                <td colSpan={5} className="px-5 py-10 text-center text-sm text-gray-500">
-                  {scope === 'platform'
-                    ? 'No platform-support tickets yet.'
-                    : 'No tickets across the platform yet.'}
+                <td colSpan={6} className="px-5 py-10 text-center text-sm text-gray-500">
+                  {queue === 'closed'
+                    ? 'No closed tickets in this scope.'
+                    : scope === 'platform'
+                      ? 'No platform-support tickets yet.'
+                      : 'No active tickets.'}
                 </td>
               </tr>
             )}

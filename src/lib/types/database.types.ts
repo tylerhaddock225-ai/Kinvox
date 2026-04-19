@@ -319,6 +319,21 @@ export type Database = {
         }
         Update: Partial<Database['public']['Tables']['ticket_messages']['Insert']>
       }
+      platform_settings: {
+        Row: {
+          key: string
+          value: unknown
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          key: string
+          value: unknown
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: Partial<Database['public']['Tables']['platform_settings']['Insert']>
+      }
     }
   }
 }
