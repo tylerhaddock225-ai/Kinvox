@@ -1,8 +1,8 @@
-import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import type { Customer } from '@/lib/types/database.types'
 import CopyId from '@/components/CopyId'
+import CustomerRow from './CustomerRow'
 
 type CustomerRow = Pick<
   Customer,
@@ -59,14 +59,12 @@ export default async function CustomersPage() {
             </thead>
             <tbody className="divide-y divide-pvx-border">
               {rows.map(c => (
-                <tr key={c.id} className="hover:bg-violet-400/[0.07] transition-colors">
+                <CustomerRow key={c.id} id={c.id}>
                   <td className="pl-6 pr-3 py-3 text-xs">
                     <CopyId id={c.display_id} />
                   </td>
                   <td className="px-3 py-3 text-gray-200 font-medium">
-                    <Link href={`/customers/${c.id}`} className="hover:text-violet-400 transition-colors">
-                      {[c.first_name, c.last_name].filter(Boolean).join(' ') || '—'}
-                    </Link>
+                    {[c.first_name, c.last_name].filter(Boolean).join(' ') || '—'}
                   </td>
                   <td className="px-3 py-3 text-gray-400">{c.email ?? '—'}</td>
                   <td className="px-3 py-3 text-gray-400">{c.phone ?? '—'}</td>
@@ -74,7 +72,7 @@ export default async function CustomersPage() {
                   <td className="px-3 py-3 pr-6 text-gray-500">
                     {new Date(c.created_at).toLocaleDateString()}
                   </td>
-                </tr>
+                </CustomerRow>
               ))}
             </tbody>
           </table>

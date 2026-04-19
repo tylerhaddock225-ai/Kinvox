@@ -1,9 +1,27 @@
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
-import { Mail, Phone, Building2, ArrowLeft, Ticket as TicketIcon, CalendarCheck } from 'lucide-react'
+import { ArrowLeft, Mail, Phone, Building2, User, Calendar, Ticket as TicketIcon, CalendarCheck } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import type { Customer, Ticket, Appointment } from '@/lib/types/database.types'
+import CustomerStatusSelect from '@/components/CustomerStatusSelect'
+import CustomerNotesForm from '@/components/CustomerNotesForm'
+import LeadActivityList, { type Activity } from '@/components/LeadActivityList'
+import EditCustomerModal from '@/components/EditCustomerModal'
 import CopyId from '@/components/CopyId'
+import type { CustomerStatus } from '@/app/(dashboard)/actions/customers'
+
+type CustomerRowWithStatus = Customer & { status: CustomerStatus | null }
+
+type ActivityRow = {
+  id:         string
+  content:    string
+  created_at: string
+  user_id:    string
+  profiles:   { full_name: string | null; avatar_url: string | null } | null
+}
+
+type TicketRow = Pick<Ticket, 'id' | 'display_id' | 'subject' | 'status' | 'updated_at'>
+type ApptRow   = Pick<Appointment, 'id' | 'display_id' | 'title' | 'start_at' | 'status'>
 
 const TICKET_STATUS_COLORS: Record<Ticket['status'], string> = {
   open:    'bg-amber-500/10 text-amber-300 border-amber-500/30',
@@ -17,8 +35,17 @@ const APPT_STATUS_COLORS: Record<Appointment['status'], string> = {
   cancelled: 'bg-gray-500/10 text-gray-400 border-gray-500/30',
 }
 
-type TicketRow = Pick<Ticket, 'id' | 'display_id' | 'subject' | 'status' | 'priority' | 'updated_at'>
-type ApptRow   = Pick<Appointment, 'id' | 'display_id' | 'title' | 'start_at' | 'end_at' | 'status' | 'location'>
+function Field({ icon: Icon, label, value }: { icon: typeof Mail; label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex items-start gap-3">
+      <Icon className="w-4 h-4 text-gray-500 mt-0.5 shrink-0" />
+      <div className="min-w-0 flex-1">
+        <p className="text-xs text-gray-500">{label}</p>
+        <p className="text-sm text-gray-200 truncate">{value ?? <span className="text-gray-600">—</span>}</p>
+      </div>
+    </div>
+  )
+}
 
 export default async function CustomerDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -37,175 +64,174 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
 
   const { data: customerData } = await supabase
     .from('customers')
-    .select('id, display_id, first_name, last_name, email, phone, company, notes, created_at, lead_id, organization_id')
+    .select('*')
     .eq('id', id)
     .eq('organization_id', profile.organization_id)
     .is('deleted_at', null)
-    .single()
+    .maybeSingle()
 
   if (!customerData) notFound()
-  const customer = customerData as Customer
+  const c = customerData as CustomerRowWithStatus
+  const currentStatus: CustomerStatus = (c.status ?? 'active') as CustomerStatus
 
-  const [ticketsRes, apptsRes] = await Promise.all([
+  // Activity feed + related records in a single round trip
+  const [actsRes, ticketsRes, apptsRes] = await Promise.all([
+    supabase
+      .from('customer_activities')
+      .select('id, content, created_at, user_id, profiles(full_name, avatar_url)')
+      .eq('customer_id', id)
+      .order('created_at', { ascending: false })
+      .limit(100),
     supabase
       .from('tickets')
-      .select('id, display_id, subject, status, priority, updated_at')
+      .select('id, display_id, subject, status, updated_at')
       .eq('customer_id', id)
       .is('deleted_at', null)
       .order('updated_at', { ascending: false })
-      .limit(100),
+      .limit(50),
     supabase
       .from('appointments')
-      .select('id, display_id, title, start_at, end_at, status, location')
+      .select('id, display_id, title, start_at, status')
       .eq('customer_id', id)
       .is('deleted_at', null)
       .order('start_at', { ascending: false })
-      .limit(100),
+      .limit(50),
   ])
+
+  const rows = (actsRes.data ?? []) as unknown as ActivityRow[]
+  const feed: Activity[] = rows.map(a => ({
+    id:         a.id,
+    content:    a.content,
+    created_at: a.created_at,
+    author:     a.profiles?.full_name ?? null,
+  }))
 
   const tickets = (ticketsRes.data ?? []) as TicketRow[]
   const appts   = (apptsRes.data   ?? []) as ApptRow[]
 
-  const fullName = [customer.first_name, customer.last_name].filter(Boolean).join(' ') || '—'
+  const fullName = [c.first_name, c.last_name].filter(Boolean).join(' ') || '—'
 
   return (
-    <div className="px-8 py-8 max-w-5xl mx-auto space-y-6">
-      <Link href="/customers" className="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-gray-300 transition-colors">
-        <ArrowLeft className="w-3 h-3" />
-        Back to Customers
-      </Link>
-
-      <div className="space-y-2">
-        <h1 className="text-2xl font-bold text-white">{fullName}</h1>
-        <div className="flex flex-wrap items-center gap-3 text-xs text-gray-400">
-          <CopyId id={customer.display_id} />
-          {customer.email && (
-            <span className="inline-flex items-center gap-1">
-              <Mail className="w-3 h-3" /> {customer.email}
-            </span>
-          )}
-          {customer.phone && (
-            <span className="inline-flex items-center gap-1">
-              <Phone className="w-3 h-3" /> {customer.phone}
-            </span>
-          )}
-          {customer.company && (
-            <span className="inline-flex items-center gap-1">
-              <Building2 className="w-3 h-3" /> {customer.company}
-            </span>
-          )}
-          {customer.lead_id && (
-            <Link href={`/leads/${customer.lead_id}`} className="text-violet-400 hover:text-violet-300 underline decoration-dotted underline-offset-4">
-              View source lead
-            </Link>
-          )}
-        </div>
+    <div className="px-8 py-8 space-y-6">
+      <div>
+        <Link
+          href="/customers"
+          className="inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-300 transition-colors"
+        >
+          <ArrowLeft className="w-3.5 h-3.5" />
+          Back to Customers
+        </Link>
+        <h1 className="mt-2 text-2xl font-bold text-white">{fullName}</h1>
+        {c.display_id && (
+          <div className="mt-0.5 text-xs">
+            <CopyId id={c.display_id} />
+          </div>
+        )}
+        {c.company && <p className="text-sm text-gray-400 mt-0.5">{c.company}</p>}
       </div>
 
-      <section className="space-y-3">
-        <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-300">
-          <TicketIcon className="w-4 h-4 text-violet-400" />
-          Tickets
-          <span className="text-xs text-gray-500 font-normal">({tickets.length})</span>
-        </h2>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
-        {tickets.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-pvx-border bg-pvx-surface/30 px-6 py-8 text-center text-sm text-gray-500">
-            No tickets for this customer yet.
+        {/* Left column — Info (1/3) */}
+        <aside className="lg:col-span-1 space-y-6">
+
+          <div className="rounded-xl border border-pvx-border bg-pvx-surface p-5 space-y-4">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-400">Status</h2>
+            <CustomerStatusSelect customerId={c.id} initialStatus={currentStatus} />
           </div>
-        ) : (
+
+          <div className="rounded-xl border border-pvx-border bg-pvx-surface p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-400">Details</h2>
+              <EditCustomerModal customer={c} />
+            </div>
+
+            <div className="space-y-3">
+              <Field icon={User}       label="Name"    value={fullName} />
+              <Field icon={Building2}  label="Company" value={c.company} />
+              <Field icon={Mail}       label="Email"   value={c.email} />
+              <Field icon={Phone}      label="Phone"   value={c.phone} />
+              <Field icon={Calendar}   label="Created" value={new Date(c.created_at).toLocaleDateString()} />
+            </div>
+
+            {c.lead_id && (
+              <Link
+                href={`/leads/${c.lead_id}`}
+                className="inline-flex items-center text-xs text-violet-300 hover:text-violet-200 underline decoration-dotted underline-offset-4"
+              >
+                View source lead →
+              </Link>
+            )}
+          </div>
+
+          {/* Related records — kept condensed in left column */}
+          {(tickets.length > 0 || appts.length > 0) && (
+            <div className="rounded-xl border border-pvx-border bg-pvx-surface p-5 space-y-4">
+              <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-400">Related</h2>
+
+              {tickets.length > 0 && (
+                <div className="space-y-2">
+                  <h3 className="flex items-center gap-1.5 text-[11px] font-medium text-gray-500">
+                    <TicketIcon className="w-3 h-3 text-violet-400" />
+                    Tickets ({tickets.length})
+                  </h3>
+                  <ul className="space-y-1">
+                    {tickets.slice(0, 5).map(t => (
+                      <li key={t.id} className="flex items-center justify-between gap-2 text-xs">
+                        <Link href={`/tickets/${t.id}`} className="text-gray-200 hover:text-violet-300 truncate">
+                          {t.subject}
+                        </Link>
+                        <span className={`shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium border capitalize ${TICKET_STATUS_COLORS[t.status]}`}>
+                          {t.status}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {appts.length > 0 && (
+                <div className="space-y-2">
+                  <h3 className="flex items-center gap-1.5 text-[11px] font-medium text-gray-500">
+                    <CalendarCheck className="w-3 h-3 text-violet-400" />
+                    Appointments ({appts.length})
+                  </h3>
+                  <ul className="space-y-1">
+                    {appts.slice(0, 5).map(a => (
+                      <li key={a.id} className="flex items-center justify-between gap-2 text-xs">
+                        <Link href={`/appointments?open=${a.id}`} className="text-gray-200 hover:text-violet-300 truncate">
+                          {a.title}
+                        </Link>
+                        <span className={`shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium border capitalize ${APPT_STATUS_COLORS[a.status]}`}>
+                          {a.status}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </aside>
+
+        {/* Right column — Activity (2/3) */}
+        <section className="lg:col-span-2 space-y-6">
+
+          <div className="rounded-xl border border-pvx-border bg-pvx-surface p-5">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-4">Add Note</h2>
+            <CustomerNotesForm customerId={c.id} />
+          </div>
+
           <div className="rounded-xl border border-pvx-border bg-pvx-surface overflow-hidden">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-xs text-gray-500 border-b border-pvx-border bg-pvx-bg/40">
-                  <th className="pl-6 pr-3 py-3 text-left font-medium w-28">ID</th>
-                  <th className="px-3 py-3 text-left font-medium">Subject</th>
-                  <th className="px-3 py-3 text-left font-medium">Status</th>
-                  <th className="px-3 py-3 pr-6 text-left font-medium">Updated</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-pvx-border">
-                {tickets.map(t => (
-                  <tr key={t.id} className="hover:bg-violet-400/[0.07] transition-colors">
-                    <td className="pl-6 pr-3 py-3 text-xs">
-                      <CopyId id={t.display_id} />
-                    </td>
-                    <td className="px-3 py-3 text-gray-200">
-                      <Link href={`/tickets/${t.id}`} className="hover:text-violet-400 transition-colors">
-                        {t.subject}
-                      </Link>
-                    </td>
-                    <td className="px-3 py-3">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border capitalize ${TICKET_STATUS_COLORS[t.status]}`}>
-                        {t.status}
-                      </span>
-                    </td>
-                    <td className="px-3 py-3 pr-6 text-gray-500">
-                      {new Date(t.updated_at).toLocaleDateString()}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
+            <div className="px-5 py-4 border-b border-pvx-border flex items-center justify-between">
+              <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-400">Activity</h2>
+              <span className="text-xs text-gray-500">{rows.length} note{rows.length === 1 ? '' : 's'}</span>
+            </div>
 
-      <section className="space-y-3">
-        <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-300">
-          <CalendarCheck className="w-4 h-4 text-violet-400" />
-          Appointments
-          <span className="text-xs text-gray-500 font-normal">({appts.length})</span>
-        </h2>
-
-        {appts.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-pvx-border bg-pvx-surface/30 px-6 py-8 text-center text-sm text-gray-500">
-            No appointments for this customer yet.
+            <LeadActivityList activities={feed} />
           </div>
-        ) : (
-          <div className="rounded-xl border border-pvx-border bg-pvx-surface overflow-hidden">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-xs text-gray-500 border-b border-pvx-border bg-pvx-bg/40">
-                  <th className="pl-6 pr-3 py-3 text-left font-medium w-28">ID</th>
-                  <th className="px-3 py-3 text-left font-medium">Title</th>
-                  <th className="px-3 py-3 text-left font-medium">Status</th>
-                  <th className="px-3 py-3 pr-6 text-left font-medium">When</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-pvx-border">
-                {appts.map(a => (
-                  <tr key={a.id} className="hover:bg-violet-400/[0.07] transition-colors">
-                    <td className="pl-6 pr-3 py-3 text-xs">
-                      <CopyId id={a.display_id} />
-                    </td>
-                    <td className="px-3 py-3 text-gray-200">
-                      <Link href={`/appointments?open=${a.id}`} className="hover:text-violet-400 transition-colors">
-                        {a.title}
-                      </Link>
-                    </td>
-                    <td className="px-3 py-3">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border capitalize ${APPT_STATUS_COLORS[a.status]}`}>
-                        {a.status}
-                      </span>
-                    </td>
-                    <td className="px-3 py-3 pr-6 text-gray-500">
-                      {new Date(a.start_at).toLocaleString()}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-
-      {customer.notes && (
-        <section className="rounded-xl border border-pvx-border bg-pvx-surface/50 p-5">
-          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-2">Notes</h3>
-          <p className="text-sm text-gray-200 whitespace-pre-wrap">{customer.notes}</p>
         </section>
-      )}
+      </div>
     </div>
   )
 }
