@@ -35,13 +35,13 @@ export default async function AdminHqOverviewPage() {
   return (
     <div className="space-y-8">
       <header>
-        <div className="text-[10px] font-bold tracking-[0.2em] text-emerald-400 uppercase">
+        <div className="text-[10px] font-bold tracking-[0.2em] text-violet-300 uppercase">
           Command Center
         </div>
-        <h1 className="mt-1 text-3xl font-semibold text-slate-50">
+        <h1 className="mt-1 text-3xl font-semibold text-white">
           Welcome back, {roleLabel}.
         </h1>
-        <p className="mt-2 text-sm text-slate-400">
+        <p className="mt-2 text-sm text-gray-400">
           Platform-wide snapshot of Kinvox operations.
         </p>
       </header>
@@ -84,22 +84,22 @@ function SummaryCard({
   hint?: string
 }) {
   return (
-    <div className="group rounded-xl border border-slate-800 bg-slate-950/60 p-5 shadow-sm hover:border-emerald-500/40 transition-colors">
+    <div className="group rounded-xl border border-pvx-border bg-gray-900 p-5 shadow-sm transition-all hover:border-violet-500/40 hover:shadow-lg hover:shadow-violet-500/15">
       <div className="flex items-start justify-between">
-        <div className="text-xs font-medium uppercase tracking-wider text-slate-400">
+        <div className="text-xs font-medium uppercase tracking-wider text-gray-400">
           {label}
         </div>
-        <div className="rounded-lg bg-emerald-500/10 p-2 text-emerald-300 ring-1 ring-inset ring-emerald-500/20">
+        <div className="rounded-lg bg-violet-500/10 p-2 text-violet-300 ring-1 ring-inset ring-violet-500/20">
           <Icon className="w-4 h-4" />
         </div>
       </div>
       <div className="mt-4 flex items-baseline gap-2">
-        <div className="text-3xl font-semibold text-slate-50">{value}</div>
-        {hint && <div className="text-[11px] text-slate-500">{hint}</div>}
+        <div className="text-3xl font-semibold text-white">{value}</div>
+        {hint && <div className="text-[11px] text-gray-500">{hint}</div>}
       </div>
       <Link
         href={href}
-        className="mt-4 inline-flex items-center text-xs font-medium text-emerald-300 hover:text-emerald-200"
+        className="mt-4 inline-flex items-center text-xs font-medium text-violet-300 hover:text-violet-200"
       >
         {cta} →
       </Link>
@@ -109,9 +109,9 @@ function SummaryCard({
 
 function SystemStatusCard() {
   return (
-    <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-5 shadow-sm">
+    <div className="rounded-xl border border-pvx-border bg-gray-900 p-5 shadow-sm transition-all hover:border-violet-500/40 hover:shadow-lg hover:shadow-violet-500/15">
       <div className="flex items-start justify-between">
-        <div className="text-xs font-medium uppercase tracking-wider text-slate-400">
+        <div className="text-xs font-medium uppercase tracking-wider text-gray-400">
           System Status
         </div>
         <div className="rounded-lg bg-emerald-500/10 p-2 text-emerald-300 ring-1 ring-inset ring-emerald-500/20">
@@ -123,9 +123,9 @@ function SystemStatusCard() {
           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400/60" />
           <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400" />
         </span>
-        <span className="text-xl font-semibold text-slate-50">Operational</span>
+        <span className="text-xl font-semibold text-white">Operational</span>
       </div>
-      <div className="mt-4 text-xs text-slate-500">
+      <div className="mt-4 text-xs text-gray-500">
         All services reporting normal.
       </div>
     </div>

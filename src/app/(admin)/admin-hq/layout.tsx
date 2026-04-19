@@ -18,7 +18,7 @@ export default async function AdminHqLayout({ children }: { children: React.Reac
   if (!profile?.system_role) redirect('/dashboard')
 
   return (
-    <div className="flex h-full min-h-screen bg-slate-900 text-slate-100">
+    <div className="flex h-full min-h-screen bg-pvx-bg text-slate-100">
       <AdminSidebar systemRole={profile.system_role} />
       <main className="flex-1 overflow-y-auto">
         <div className="px-8 py-8">{children}</div>

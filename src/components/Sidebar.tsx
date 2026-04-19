@@ -14,11 +14,24 @@ interface SidebarProps {
   isHqAdmin?: boolean;
 }
 
+// Top-level paths that are NOT org slugs — don't treat them as "current slug".
+const RESERVED_TOP = new Set([
+  "leads", "tickets", "customers", "appointments", "settings",
+  "login", "signup", "forgot-password", "reset-password",
+  "onboarding", "admin", "admin-hq", "api",
+]);
+
 export default function Sidebar({ canViewLeads = true, orgName = null, orgSlug = null, isHqAdmin = false }: SidebarProps) {
   const pathname = usePathname();
 
-  // Dashboard link targets the merchant's slugged URL when available.
-  const dashboardHref = orgSlug ? `/${orgSlug}` : "/";
+  // The "current slug" is whatever non-reserved segment is first in the URL.
+  // That makes the Dashboard link follow the user across impersonation too —
+  // an admin on /other-merchant sees a Dashboard link back to /other-merchant,
+  // and the active highlight still matches on exact pathname.
+  const firstSeg = pathname === "/" ? "" : pathname.split("/")[1] ?? "";
+  const currentSlug = firstSeg && !RESERVED_TOP.has(firstSeg) ? firstSeg : null;
+  const dashboardSlug = currentSlug ?? orgSlug;
+  const dashboardHref = dashboardSlug ? `/${dashboardSlug}` : "/";
 
   const staticNav = [
     { href: dashboardHref,   label: "Dashboard",    icon: LayoutDashboard },
@@ -39,7 +52,7 @@ export default function Sidebar({ canViewLeads = true, orgName = null, orgSlug =
       : pathname.startsWith(href);
     return `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors border-l-2 ${
       active
-        ? "bg-emerald-500/15 text-emerald-400 border-emerald-400"
+        ? "bg-emerald-500/10 text-emerald-400 border-emerald-500"
         : "text-gray-400 hover:bg-white/5 hover:text-gray-100 border-transparent"
     }`;
   }
@@ -80,7 +93,7 @@ export default function Sidebar({ canViewLeads = true, orgName = null, orgSlug =
         <div className="px-3 pt-3">
           <Link
             href="/admin-hq"
-            className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold uppercase tracking-wider text-emerald-200 bg-emerald-500/15 border border-emerald-500/30 hover:bg-emerald-500/25 hover:text-emerald-100 transition-colors"
+            className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold uppercase tracking-wider text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 hover:bg-emerald-500/20 hover:text-emerald-200 hover:border-emerald-400 transition-colors"
           >
             <Shield className="w-3.5 h-3.5 shrink-0" />
             Return to HQ

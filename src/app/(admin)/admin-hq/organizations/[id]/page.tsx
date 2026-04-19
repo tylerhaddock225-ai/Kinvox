@@ -43,30 +43,30 @@ export default async function AdminOrgDetailPage({
     <div className="space-y-6">
       <Link
         href="/admin-hq/organizations"
-        className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-slate-200 transition-colors"
+        className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-400 hover:text-gray-200 transition-colors"
       >
         <ArrowLeft className="w-3.5 h-3.5" />
         All organizations
       </Link>
 
       <header>
-        <div className="text-[10px] font-bold tracking-[0.2em] text-emerald-400 uppercase">
+        <div className="text-[10px] font-bold tracking-[0.2em] text-violet-300 uppercase">
           Managing Organization
         </div>
-        <h1 className="mt-1 text-2xl font-semibold text-slate-50">{org.name}</h1>
+        <h1 className="mt-1 text-2xl font-semibold text-white">{org.name}</h1>
       </header>
 
-      <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2 rounded-xl border border-slate-800 bg-slate-950/60 p-5">
+      <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2 rounded-xl border border-pvx-border bg-gray-900 p-5">
         {fields.map(([label, value]) => (
           <div key={label}>
-            <dt className="text-[11px] font-medium uppercase tracking-wider text-slate-500">{label}</dt>
-            <dd className="mt-1 text-sm text-slate-200 font-mono break-all">{value}</dd>
+            <dt className="text-[11px] font-medium uppercase tracking-wider text-gray-500">{label}</dt>
+            <dd className="mt-1 text-sm text-gray-200 font-mono break-all">{value}</dd>
           </div>
         ))}
       </dl>
 
-      <p className="text-xs text-slate-500">
-        Use <span className="text-emerald-300 font-medium">Launch Impersonation</span> in the sidebar
+      <p className="text-xs text-gray-500">
+        Use <span className="text-violet-300 font-medium">Launch Impersonation</span> in the sidebar
         to view this organization as a merchant.
       </p>
     </div>
