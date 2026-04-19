@@ -1,6 +1,7 @@
 import { cookies } from 'next/headers'
 import { createClient } from '@/lib/supabase/server'
-import { IMPERSONATION_COOKIE } from '@/app/actions/impersonation'
+
+export const IMPERSONATION_COOKIE = 'kinvox_impersonate_id'
 
 export type ImpersonationContext =
   | { active: false; orgId: null; orgName: null }

@@ -4,8 +4,7 @@ import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
-
-export const IMPERSONATION_COOKIE = 'kinvox_impersonate_id'
+import { IMPERSONATION_COOKIE } from '@/lib/impersonation'
 
 // 4h — impersonation sessions auto-expire so a forgotten "View as Merchant"
 // click doesn't leave the cookie set indefinitely.
