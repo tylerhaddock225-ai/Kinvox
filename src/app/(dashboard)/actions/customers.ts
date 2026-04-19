@@ -112,6 +112,64 @@ export async function updateCustomerStatus(customerId: string, status: string): 
 }
 
 
+// ── archiveCustomer / restoreCustomer ───────────────────────────────────────
+//
+// Archive is distinct from the legacy deleted_at soft-delete: archived rows
+// remain visible in the grid via the \u201CShow Archived\u201D toggle and are always
+// restorable. We org-scope the update so RLS can\u2019t silently no-op on a row
+// that belongs to another tenant.
+
+async function assertCustomerInOrg(customerId: string): Promise<string | null> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return null
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('organization_id')
+    .eq('id', user.id)
+    .single()
+
+  return profile?.organization_id ?? null
+}
+
+export async function archiveCustomer(formData: FormData): Promise<void> {
+  const customerId = String(formData.get('customer_id') ?? '').trim()
+  if (!customerId) return
+
+  const orgId = await assertCustomerInOrg(customerId)
+  if (!orgId) return
+
+  const supabase = await createClient()
+  await supabase
+    .from('customers')
+    .update({ archived_at: new Date().toISOString() })
+    .eq('id', customerId)
+    .eq('organization_id', orgId)
+
+  revalidatePath('/customers')
+  revalidatePath(`/customers/${customerId}`)
+}
+
+export async function restoreCustomer(formData: FormData): Promise<void> {
+  const customerId = String(formData.get('customer_id') ?? '').trim()
+  if (!customerId) return
+
+  const orgId = await assertCustomerInOrg(customerId)
+  if (!orgId) return
+
+  const supabase = await createClient()
+  await supabase
+    .from('customers')
+    .update({ archived_at: null })
+    .eq('id', customerId)
+    .eq('organization_id', orgId)
+
+  revalidatePath('/customers')
+  revalidatePath(`/customers/${customerId}`)
+}
+
+
 // ── addCustomerNote ─────────────────────────────────────────────────────────
 
 export async function addCustomerNote(

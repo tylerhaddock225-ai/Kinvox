@@ -44,22 +44,13 @@ export async function createLead(
 
   if (error) return { status: 'error', error: error.message }
 
-  // Mirror this lead into the customers table so downstream entities (tickets,
-  // appointments) can link via customer_id. Two-step pattern matches the
-  // mirror behavior the SQL trigger would have done if the editor had let
-  // us deploy it. Failure to mirror logs but does not block lead creation.
-  await mirrorLeadToCustomer(supabase, {
-    leadId:         lead.id,
-    organizationId: profile.organization_id,
-    firstName,
-    lastName,
-    email,
-    company,
-  })
+  // Customer creation is deferred until the lead is converted (see
+  // updateLeadStatus below). The two tables stay decoupled at insert
+  // time so a never-converted lead never shows up in Customers.
+  void lead
 
   revalidatePath('/')
   revalidatePath('/leads')
-  revalidatePath('/customers')
   return { status: 'success' }
 }
 
@@ -160,10 +151,48 @@ export async function updateLeadStatus(leadId: string, status: string): Promise<
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return
 
-  await supabase
+  const { error: updErr } = await supabase
     .from('leads')
     .update({ status: status as Lead['status'] })
     .eq('id', leadId)
+  if (updErr) {
+    console.warn(`[lead-status] update failed lead=${leadId}: ${updErr.message}`)
+    return
+  }
+
+  // Convert-on-demand: when (and only when) the lead flips to 'converted'
+  // for the first time, mirror it into customers. Any other status change
+  // \u2014 including leaving 'converted' \u2014 leaves the customer row untouched
+  // so downstream records (tickets, appointments) never lose their link.
+  if (status === 'converted') {
+    // Pull the org-scoped lead snapshot the mirror helper needs.
+    const { data: lead } = await supabase
+      .from('leads')
+      .select('id, organization_id, first_name, last_name, email, company')
+      .eq('id', leadId)
+      .is('deleted_at', null)
+      .maybeSingle()
+
+    if (lead) {
+      const { data: already } = await supabase
+        .from('customers')
+        .select('id')
+        .eq('lead_id', lead.id)
+        .maybeSingle()
+
+      if (!already) {
+        await mirrorLeadToCustomer(supabase, {
+          leadId:         lead.id,
+          organizationId: lead.organization_id,
+          firstName:      lead.first_name,
+          lastName:       lead.last_name,
+          email:          lead.email,
+          company:        lead.company,
+        })
+        revalidatePath('/customers')
+      }
+    }
+  }
 
   revalidatePath(`/leads/${leadId}`)
   revalidatePath('/leads')

@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
-import { ArrowLeft, Mail, Phone, Building2, User, Calendar, Ticket as TicketIcon, CalendarCheck } from 'lucide-react'
+import { ArrowLeft, Mail, Phone, Building2, User, Calendar, Ticket as TicketIcon, CalendarCheck, Archive, RotateCcw, ShieldAlert } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import type { Customer, Ticket, Appointment } from '@/lib/types/database.types'
 import CustomerStatusSelect from '@/components/CustomerStatusSelect'
@@ -9,6 +9,8 @@ import LeadActivityList, { type Activity } from '@/components/LeadActivityList'
 import EditCustomerModal from '@/components/EditCustomerModal'
 import CopyId from '@/components/CopyId'
 import QuickScheduleModal from '@/components/QuickScheduleModal'
+import ConfirmButton from '@/components/admin/ConfirmButton'
+import { archiveCustomer, restoreCustomer } from '@/app/(dashboard)/actions/customers'
 import type { CustomerStatus } from '@/app/(dashboard)/actions/customers'
 
 type CustomerRowWithStatus = Customer & { status: CustomerStatus | null }
@@ -74,6 +76,7 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
   if (!customerData) notFound()
   const c = customerData as CustomerRowWithStatus
   const currentStatus: CustomerStatus = (c.status ?? 'active') as CustomerStatus
+  const isArchived = !!c.archived_at
 
   // Activity feed + related records in a single round trip
   const [actsRes, ticketsRes, apptsRes] = await Promise.all([
@@ -124,10 +127,18 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
           Back to Customers
         </Link>
         <div className="mt-2 flex items-center justify-between gap-4">
-          <h1 className="text-2xl font-bold text-white truncate">
-            {fullName}
-            {c.company && (
-              <span className="ml-3 text-xl font-normal text-gray-400">{c.company}</span>
+          <h1 className="text-2xl font-bold text-white truncate flex items-center gap-3">
+            <span className="truncate">
+              {fullName}
+              {c.company && (
+                <span className="ml-3 text-xl font-normal text-gray-400">{c.company}</span>
+              )}
+            </span>
+            {isArchived && (
+              <span className="inline-flex items-center gap-1.5 rounded-md border border-amber-700/60 bg-amber-950/40 px-2.5 py-1 text-[11px] font-medium uppercase tracking-wide text-amber-300 shrink-0">
+                <Archive className="w-3 h-3" />
+                Archived
+              </span>
             )}
           </h1>
           <div className="shrink-0">
@@ -242,6 +253,48 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
 
             <LeadActivityList activities={feed} />
           </div>
+
+          {/* Danger Zone \u2014 mirrors the Admin HQ org-archive pattern. */}
+          <section className="rounded-xl border border-rose-900/60 bg-rose-950/20 p-5">
+            <div className="flex items-center gap-2">
+              <ShieldAlert className="w-4 h-4 text-rose-400" />
+              <h2 className="text-sm font-semibold text-rose-200">Danger Zone</h2>
+            </div>
+
+            {!isArchived ? (
+              <>
+                <p className="mt-2 text-xs text-rose-300/70">
+                  Archiving hides this customer from the default list. Related tickets and appointments keep their link, and you can restore at any time.
+                </p>
+                <form action={archiveCustomer} className="mt-4">
+                  <input type="hidden" name="customer_id" value={c.id} />
+                  <ConfirmButton
+                    message={`Archive "${fullName}"? You can restore them from the archived list.`}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-rose-700/60 bg-rose-900/30 px-3 py-1.5 text-xs font-medium text-rose-100 hover:bg-rose-900/50 transition-colors"
+                  >
+                    <Archive className="w-3.5 h-3.5" />
+                    Archive customer
+                  </ConfirmButton>
+                </form>
+              </>
+            ) : (
+              <>
+                <p className="mt-2 text-xs text-rose-300/70">
+                  This customer is currently archived. Restore to bring them back into the default list.
+                </p>
+                <form action={restoreCustomer} className="mt-4">
+                  <input type="hidden" name="customer_id" value={c.id} />
+                  <button
+                    type="submit"
+                    className="inline-flex items-center gap-1.5 rounded-md border border-emerald-700/60 bg-emerald-950/40 px-3 py-1.5 text-xs font-medium text-emerald-200 hover:bg-emerald-900/40 transition-colors"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    Restore customer
+                  </button>
+                </form>
+              </>
+            )}
+          </section>
         </section>
       </div>
     </div>
