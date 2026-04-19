@@ -175,19 +175,19 @@ export default async function TicketsPage({
   if (fAssigned === 'unassigned') ticketsQ = ticketsQ.is('assigned_to', null)
   else if (fAssigned)             ticketsQ = ticketsQ.eq('assigned_to', fAssigned)
 
-  const [ticketsRes, membersRes, leadsRes, orgRes, activeCountRes, closedCountRes] = await Promise.all([
+  const [ticketsRes, membersRes, customersRes, orgRes, activeCountRes, closedCountRes] = await Promise.all([
     ticketsQ,
     supabase
       .from('profiles')
       .select('id, full_name')
       .eq('organization_id', orgId),
     supabase
-      .from('leads')
-      .select('id, first_name, last_name')
+      .from('customers')
+      .select('id, first_name, last_name, email')
       .eq('organization_id', orgId)
       .is('deleted_at', null)
-      .order('created_at', { ascending: false })
-      .limit(100),
+      .order('first_name', { ascending: true })
+      .limit(500),
     supabase
       .from('organizations')
       .select('verified_support_email')
@@ -210,7 +210,8 @@ export default async function TicketsPage({
   const activeCount = activeCountRes.count ?? 0
   const closedCount = closedCountRes.count ?? 0
 
-  const rawRows = (ticketsRes.data ?? []) as unknown as TicketRow[]
+  const rawRows   = (ticketsRes.data   ?? []) as unknown as TicketRow[]
+  const customers = (customersRes.data ?? []) as { id: string; first_name: string; last_name: string | null; email: string | null }[]
   const rows    = isJsSort
     ? [...rawRows].sort((a, b) => {
         const diff = sortKey === 'priority'
@@ -220,7 +221,6 @@ export default async function TicketsPage({
       })
     : rawRows
   const members = (membersRes.data ?? []) as { id: string; full_name: string | null }[]
-  const leads   = (leadsRes.data   ?? []) as { id: string; first_name: string; last_name: string | null }[]
   const verifiedSupportEmail = orgRes.data?.verified_support_email ?? null
 
   return (
@@ -230,7 +230,7 @@ export default async function TicketsPage({
           <h1 className="text-2xl font-bold text-white">Tickets</h1>
           <p className="text-sm text-gray-400 mt-1">Support requests and customer issues.</p>
         </div>
-        <CreateTicketModal members={members} leads={leads} />
+        <CreateTicketModal members={members} customers={customers} />
       </div>
 
       {!verifiedSupportEmail && (

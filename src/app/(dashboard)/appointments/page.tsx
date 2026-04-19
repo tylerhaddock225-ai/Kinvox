@@ -8,7 +8,7 @@ import MiniCalendar from '@/components/calendar/MiniCalendar'
 
 type SearchParamsP = Promise<{ [key: string]: string | string[] | undefined }>
 
-const APPT_COLS = 'id, display_id, title, start_at, end_at, status, description, location, assigned_to, created_by, lead_id'
+const APPT_COLS = 'id, display_id, title, start_at, end_at, status, description, location, assigned_to, created_by, lead_id, customer_id'
 
 export default async function AppointmentsPage({ searchParams }: { searchParams: SearchParamsP }) {
   const params   = await searchParams
@@ -53,19 +53,19 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
   }
   // view === 'global' applies no extra filter; full org list.
 
-  const [apptsRes, membersRes, leadsRes] = await Promise.all([
+  const [apptsRes, membersRes, customersRes] = await Promise.all([
     apptsQ,
     supabase
       .from('profiles')
       .select('id, full_name')
       .eq('organization_id', orgId),
     supabase
-      .from('leads')
-      .select('id, first_name, last_name')
+      .from('customers')
+      .select('id, first_name, last_name, email')
       .eq('organization_id', orgId)
       .is('deleted_at', null)
-      .order('created_at', { ascending: false })
-      .limit(100),
+      .order('first_name', { ascending: true })
+      .limit(500),
   ])
 
   let appointments = (apptsRes.data ?? []) as CalAppt[]
@@ -82,8 +82,8 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
     if (target) appointments = [...appointments, target as CalAppt]
   }
 
-  const members      = (membersRes.data ?? []) as { id: string; full_name: string | null }[]
-  const leads        = (leadsRes.data   ?? []) as { id: string; first_name: string; last_name: string | null }[]
+  const members   = (membersRes.data   ?? []) as { id: string; full_name: string | null }[]
+  const customers = (customersRes.data ?? []) as { id: string; first_name: string; last_name: string | null; email: string | null }[]
 
   return (
     <div className="px-8 py-8 space-y-6">
@@ -92,7 +92,7 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
           <h1 className="text-2xl font-bold text-white">Appointments</h1>
           <p className="text-sm text-gray-400 mt-1">Schedule and manage meetings with leads and clients.</p>
         </div>
-        <CreateAppointmentModal members={members} leads={leads} />
+        <CreateAppointmentModal members={members} customers={customers} />
       </div>
 
       <CalendarViewToggle members={members} canSeeGlobal={isAdmin} />
@@ -102,7 +102,7 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
           <CalendarCore
             appointments={appointments}
             members={members}
-            leads={leads}
+            customers={customers}
             colorByAgent={view === 'global'}
           />
         </Suspense>

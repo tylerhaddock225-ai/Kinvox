@@ -28,20 +28,92 @@ export async function createLead(
   const firstName = (formData.get('first_name') as string).trim()
   if (!firstName) return { status: 'error', error: 'First name is required' }
 
-  const { error } = await supabase.from('leads').insert({
+  const lastName = ((formData.get('last_name') as string).trim()) || null
+  const company  = ((formData.get('company')   as string).trim()) || null
+  const email    = ((formData.get('email')     as string).trim()) || null
+
+  const { data: lead, error } = await supabase.from('leads').insert({
     organization_id: profile.organization_id,
     first_name: firstName,
-    last_name: ((formData.get('last_name') as string).trim()) || null,
-    company: ((formData.get('company') as string).trim()) || null,
-    email: ((formData.get('email') as string).trim()) || null,
+    last_name:  lastName,
+    company,
+    email,
     source: (formData.get('source') as Lead['source']) || null,
     status: (formData.get('status') as Lead['status']) || 'new',
-  })
+  }).select('id').single()
 
   if (error) return { status: 'error', error: error.message }
 
+  // Mirror this lead into the customers table so downstream entities (tickets,
+  // appointments) can link via customer_id. Two-step pattern matches the
+  // mirror behavior the SQL trigger would have done if the editor had let
+  // us deploy it. Failure to mirror logs but does not block lead creation.
+  await mirrorLeadToCustomer(supabase, {
+    leadId:         lead.id,
+    organizationId: profile.organization_id,
+    firstName,
+    lastName,
+    email,
+    company,
+  })
+
   revalidatePath('/')
+  revalidatePath('/leads')
+  revalidatePath('/customers')
   return { status: 'success' }
+}
+
+type MirrorArgs = {
+  leadId:         string
+  organizationId: string
+  firstName:      string
+  lastName:       string | null
+  email:          string | null
+  company:        string | null
+}
+
+async function mirrorLeadToCustomer(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  m: MirrorArgs,
+): Promise<void> {
+  // 1. If a customer with this (org, email) already exists and isn't yet
+  //    linked to a lead, attach this lead to it. The unique partial index
+  //    on (organization_id, lower(email)) WHERE deleted_at IS NULL
+  //    guarantees at most one match per email per org.
+  if (m.email) {
+    const { error: linkErr } = await supabase
+      .from('customers')
+      .update({ lead_id: m.leadId })
+      .eq('organization_id', m.organizationId)
+      .ilike('email', m.email.replace(/[\\%_]/g, c => '\\' + c))
+      .is('deleted_at', null)
+      .is('lead_id', null)
+    if (linkErr) {
+      console.warn(`[lead-mirror] link existing customer failed lead=${m.leadId}: ${linkErr.message}`)
+    }
+  }
+
+  // 2. If no customer is now associated with this lead, insert one.
+  const { data: already } = await supabase
+    .from('customers')
+    .select('id')
+    .eq('organization_id', m.organizationId)
+    .eq('lead_id', m.leadId)
+    .maybeSingle()
+
+  if (already) return
+
+  const { error: insErr } = await supabase.from('customers').insert({
+    organization_id: m.organizationId,
+    lead_id:         m.leadId,
+    first_name:      m.firstName,
+    last_name:       m.lastName,
+    email:           m.email,
+    company:         m.company,
+  })
+  if (insErr) {
+    console.warn(`[lead-mirror] customer insert failed lead=${m.leadId}: ${insErr.message}`)
+  }
 }
 
 const LEAD_SOURCES: NonNullable<Lead['source']>[] = ['web', 'referral', 'import', 'manual', 'other']

@@ -25,9 +25,14 @@ export async function createTicket(_prev: State, formData: FormData): Promise<St
   const status      = formData.get('status')      as string
   const channel     = formData.get('channel')     as string | null
   const assigned_to = formData.get('assigned_to') as string | null
-  const lead_id     = formData.get('lead_id')     as string | null
+  const customer_id = formData.get('customer_id') as string | null
+  const lead_id_raw = formData.get('lead_id')     as string | null
 
   if (!subject?.trim()) return { status: 'error', error: 'Subject is required' }
+
+  // The modal posts customer_id (new). Older callers / inbound flows may still
+  // post lead_id; in that case, look up the matching customer.
+  const link = await resolveCustomerLink(supabase, profile.organization_id, customer_id, lead_id_raw)
 
   const { error } = await supabase.from('tickets').insert({
     organization_id: profile.organization_id,
@@ -38,7 +43,8 @@ export async function createTicket(_prev: State, formData: FormData): Promise<St
     status:      (status   || 'open')   as 'open' | 'pending' | 'closed',
     channel:     (channel  || null)     as 'email' | 'chat' | 'phone' | 'portal' | 'manual' | null,
     assigned_to: assigned_to || null,
-    lead_id:     lead_id     || null,
+    customer_id: link.customerId,
+    lead_id:     link.leadId,
   })
 
   if (error) return { status: 'error', error: error.message }
@@ -337,3 +343,41 @@ async function dispatchClosureEmail(args: ClosureArgs) {
     console.error(`[ticket-email] closure notice FAILED ticket=${displayId} to=${lead.email}: ${msg}`)
   }
 }
+
+// Resolve {customer_id, lead_id} pair from whatever the caller provided.
+// Modal forms post customer_id; inbound webhooks / older callers may post
+// lead_id. Either way we end up with both fields populated when possible
+// so downstream queries by either column find the row.
+//
+// Always scoped by organization_id — a stale customer_id pointing at another
+// org silently downgrades to (null, null) rather than leaking across tenants.
+async function resolveCustomerLink(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgId:    string,
+  customerId: string | null,
+  leadId:     string | null,
+): Promise<{ customerId: string | null; leadId: string | null }> {
+  if (customerId) {
+    const { data } = await supabase
+      .from('customers')
+      .select('id, lead_id')
+      .eq('id', customerId)
+      .eq('organization_id', orgId)
+      .maybeSingle()
+    if (!data) return { customerId: null, leadId: null }
+    return { customerId: data.id, leadId: data.lead_id }
+  }
+
+  if (leadId) {
+    const { data } = await supabase
+      .from('customers')
+      .select('id, lead_id')
+      .eq('lead_id', leadId)
+      .eq('organization_id', orgId)
+      .maybeSingle()
+    return { customerId: data?.id ?? null, leadId }
+  }
+
+  return { customerId: null, leadId: null }
+}
+

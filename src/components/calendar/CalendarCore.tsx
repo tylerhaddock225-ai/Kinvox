@@ -26,17 +26,18 @@ export type CalAppt = {
   assigned_to: string | null
   created_by:  string | null
   lead_id:     string | null
+  customer_id: string | null
 }
 
-type Member = { id: string; full_name: string | null }
-type Lead   = { id: string; first_name: string; last_name: string | null }
+type Member   = { id: string; full_name: string | null }
+type Customer = { id: string; first_name: string; last_name: string | null; email: string | null }
 
 type View = 'day' | 'week' | 'month' | 'year' | 'decade'
 
 interface Props {
   appointments:    CalAppt[]
   members:         Member[]
-  leads:           Lead[]
+  customers:       Customer[]
   colorByAgent?:   boolean
 }
 
@@ -94,7 +95,7 @@ const VIEWS: { key: View; label: string }[] = [
 
 // ── Main component ───────────────────────────────────────────────────────────
 
-export default function CalendarCore({ appointments, members, leads, colorByAgent = false }: Props) {
+export default function CalendarCore({ appointments, members, customers, colorByAgent = false }: Props) {
   const router       = useRouter()
   const searchParams = useSearchParams()
 
@@ -268,13 +269,13 @@ export default function CalendarCore({ appointments, members, leads, colorByAgen
         ref={modalRef}
         hideTrigger
         members={members}
-        leads={leads}
+        customers={customers}
         onClose={() => setDraft(null)}
       />
       <EditAppointmentModal
         ref={editRef}
         members={members}
-        leads={leads}
+        customers={customers}
       />
       <DayOverviewModal
         ref={overviewRef}

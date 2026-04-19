@@ -29,10 +29,13 @@ export async function createAppointment(_prev: State, formData: FormData): Promi
   const end_at      = formData.get('end_at')      as string | null
   const location    = formData.get('location')    as string | null
   const assigned_to = formData.get('assigned_to') as string | null
-  const lead_id     = formData.get('lead_id')     as string | null
+  const customer_id = formData.get('customer_id') as string | null
+  const lead_id_raw = formData.get('lead_id')     as string | null
 
   if (!title?.trim())  return { status: 'error', error: 'Title is required' }
   if (!start_at)       return { status: 'error', error: 'Start time is required' }
+
+  const link = await resolveCustomerLink(supabase, profile.organization_id, customer_id, lead_id_raw)
 
   const { data: created, error } = await supabase.from('appointments').insert({
     organization_id: profile.organization_id,
@@ -43,7 +46,8 @@ export async function createAppointment(_prev: State, formData: FormData): Promi
     end_at:      end_at   || null,
     location:    location || null,
     assigned_to: assigned_to || null,
-    lead_id:     lead_id     || null,
+    customer_id: link.customerId,
+    lead_id:     link.leadId,
     status:      'scheduled',
   }).select('id, display_id').single()
 
@@ -61,7 +65,7 @@ export async function createAppointment(_prev: State, formData: FormData): Promi
     creatorId:     user.id,
     creatorName:   profile.full_name,
     assignedToId:  assigned_to || null,
-    leadId:        lead_id || null,
+    leadId:        link.leadId,
     organizationId: profile.organization_id,
   })
 
@@ -94,10 +98,21 @@ export async function updateAppointment(
   const end_at      = formData.get('end_at')      as string | null
   const location    = formData.get('location')    as string | null
   const assigned_to = formData.get('assigned_to') as string | null
-  const lead_id     = formData.get('lead_id')     as string | null
+  const customer_id = formData.get('customer_id') as string | null
+  const lead_id_raw = formData.get('lead_id')     as string | null
 
   if (!title?.trim()) return { status: 'error', error: 'Title is required' }
   if (!start_at)      return { status: 'error', error: 'Start time is required' }
+
+  // Resolve org from the appointment row so the helper can scope safely.
+  const { data: existing } = await supabase
+    .from('appointments')
+    .select('organization_id')
+    .eq('id', appointmentId)
+    .single()
+  if (!existing) return { status: 'error', error: 'Appointment not found' }
+
+  const link = await resolveCustomerLink(supabase, existing.organization_id, customer_id, lead_id_raw)
 
   const { error } = await supabase.from('appointments').update({
     title:       title.trim(),
@@ -106,13 +121,50 @@ export async function updateAppointment(
     end_at:      end_at      || null,
     location:    location    || null,
     assigned_to: assigned_to || null,
-    lead_id:     lead_id     || null,
+    customer_id: link.customerId,
+    lead_id:     link.leadId,
   }).eq('id', appointmentId)
 
   if (error) return { status: 'error', error: error.message }
 
   revalidatePath('/appointments')
   return { status: 'success' }
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+// Resolve {customer_id, lead_id} from whatever the caller posted. Modal forms
+// submit customer_id; older flows may submit lead_id. Always scoped by orgId
+// so a stale customer_id pointing at another org silently downgrades to nulls
+// rather than leaking across tenants.
+async function resolveCustomerLink(
+  supabase:   Awaited<ReturnType<typeof createClient>>,
+  orgId:      string,
+  customerId: string | null,
+  leadId:     string | null,
+): Promise<{ customerId: string | null; leadId: string | null }> {
+  if (customerId) {
+    const { data } = await supabase
+      .from('customers')
+      .select('id, lead_id')
+      .eq('id', customerId)
+      .eq('organization_id', orgId)
+      .maybeSingle()
+    if (!data) return { customerId: null, leadId: null }
+    return { customerId: data.id, leadId: data.lead_id }
+  }
+
+  if (leadId) {
+    const { data } = await supabase
+      .from('customers')
+      .select('id, lead_id')
+      .eq('lead_id', leadId)
+      .eq('organization_id', orgId)
+      .maybeSingle()
+    return { customerId: data?.id ?? null, leadId }
+  }
+
+  return { customerId: null, leadId: null }
 }
 
 // ── Notifications ───────────────────────────────────────────────────────────

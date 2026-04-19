@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Users, CalendarCheck, Ticket, LayoutDashboard, Settings } from "lucide-react";
+import { Users, UserCircle, CalendarCheck, Ticket, LayoutDashboard, Settings } from "lucide-react";
 import Logo from "./Logo";
 
 const staticNav = [
   { href: "/",             label: "Dashboard",   icon: LayoutDashboard },
+  { href: "/customers",    label: "Customers",   icon: UserCircle },
   { href: "/appointments", label: "Appointments", icon: CalendarCheck },
   { href: "/tickets",      label: "Tickets",      icon: Ticket },
 ];

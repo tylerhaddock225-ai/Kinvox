@@ -4,17 +4,23 @@ import { useEffect, useRef, useActionState } from 'react'
 import { Plus, X } from 'lucide-react'
 import { createTicket } from '@/app/(dashboard)/actions/tickets'
 
-type Member = { id: string; full_name: string | null }
-type Lead   = { id: string; first_name: string; last_name: string | null }
+type Member   = { id: string; full_name: string | null }
+type Customer = { id: string; first_name: string; last_name: string | null; email: string | null }
 
 interface Props {
-  members: Member[]
-  leads:   Lead[]
+  members:   Member[]
+  customers: Customer[]
+}
+
+function customerLabel(c: Customer): string {
+  const name = [c.first_name, c.last_name].filter(Boolean).join(' ').trim()
+  if (c.email && name) return `${name} — ${c.email}`
+  return name || c.email || 'Unknown'
 }
 
 const INITIAL = null as ReturnType<typeof useActionState<Awaited<ReturnType<typeof createTicket>>, FormData>>[0]
 
-export default function CreateTicketModal({ members, leads }: Props) {
+export default function CreateTicketModal({ members, customers }: Props) {
   const [state, action, isPending] = useActionState(createTicket, INITIAL)
   const dialogRef = useRef<HTMLDialogElement>(null)
   const formRef   = useRef<HTMLFormElement>(null)
@@ -115,13 +121,13 @@ export default function CreateTicketModal({ members, leads }: Props) {
             </div>
           </div>
 
-          {leads.length > 0 && (
+          {customers.length > 0 && (
             <div>
-              <label className="block text-xs text-gray-400 mb-1">Related Lead</label>
-              <select name="lead_id" defaultValue="" className="w-full rounded-lg border border-pvx-border bg-gray-900 px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-violet-500">
+              <label className="block text-xs text-gray-400 mb-1">Customer</label>
+              <select name="customer_id" defaultValue="" className="w-full rounded-lg border border-pvx-border bg-gray-900 px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-violet-500">
                 <option value="">— None —</option>
-                {leads.map(l => (
-                  <option key={l.id} value={l.id}>{l.first_name} {l.last_name ?? ''}</option>
+                {customers.map(c => (
+                  <option key={c.id} value={c.id}>{customerLabel(c)}</option>
                 ))}
               </select>
             </div>

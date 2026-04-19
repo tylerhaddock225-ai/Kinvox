@@ -139,6 +139,41 @@ export type Database = {
         }
         Update: Partial<Database['public']['Tables']['leads']['Insert']>
       }
+      customers: {
+        Row: {
+          id: string
+          display_id: string | null
+          organization_id: string
+          lead_id: string | null
+          first_name: string
+          last_name: string | null
+          email: string | null
+          phone: string | null
+          company: string | null
+          notes: string | null
+          metadata: Json | null
+          deleted_at: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          display_id?: string | null
+          organization_id: string
+          lead_id?: string | null
+          first_name: string
+          last_name?: string | null
+          email?: string | null
+          phone?: string | null
+          company?: string | null
+          notes?: string | null
+          metadata?: Json | null
+          deleted_at?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['customers']['Insert']>
+      }
       lead_activities: {
         Row: {
           id: string
@@ -177,6 +212,7 @@ export type Database = {
           display_id: string | null
           organization_id: string
           lead_id: string | null
+          customer_id: string | null
           assigned_to: string | null
           created_by: string
           title: string
@@ -194,6 +230,7 @@ export type Database = {
           display_id?: string | null
           organization_id: string
           lead_id?: string | null
+          customer_id?: string | null
           assigned_to?: string | null
           created_by: string
           title: string
@@ -214,6 +251,7 @@ export type Database = {
           display_id: string | null
           organization_id: string
           lead_id: string | null
+          customer_id: string | null
           assigned_to: string | null
           created_by: string
           subject: string
@@ -234,6 +272,7 @@ export type Database = {
           display_id?: string | null
           organization_id: string
           lead_id?: string | null
+          customer_id?: string | null
           assigned_to?: string | null
           created_by: string
           subject: string
@@ -283,6 +322,7 @@ export type LeadActivity  = Database['public']['Tables']['lead_activities']['Row
 export type Profile      = Database['public']['Tables']['profiles']['Row']
 export type Organization = Database['public']['Tables']['organizations']['Row']
 export type Lead         = Database['public']['Tables']['leads']['Row']
+export type Customer     = Database['public']['Tables']['customers']['Row']
 export type Ticket        = Database['public']['Tables']['tickets']['Row']
 export type TicketMessage = Database['public']['Tables']['ticket_messages']['Row']
 export type Role          = Database['public']['Tables']['roles']['Row']

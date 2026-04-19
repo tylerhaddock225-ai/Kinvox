@@ -18,18 +18,24 @@ import {
 import CopyId from '@/components/CopyId'
 import type { CalAppt } from './CalendarCore'
 
-type Member = { id: string; full_name: string | null }
-type Lead   = { id: string; first_name: string; last_name: string | null }
+type Member   = { id: string; full_name: string | null }
+type Customer = { id: string; first_name: string; last_name: string | null; email: string | null }
 
 export type EditAppointmentModalHandle = {
   openWithAppointment: (appt: CalAppt) => void
 }
 
 interface Props {
-  members:  Member[]
-  leads:    Lead[]
-  onClose?: () => void
-  ref?:     Ref<EditAppointmentModalHandle>
+  members:    Member[]
+  customers:  Customer[]
+  onClose?:   () => void
+  ref?:       Ref<EditAppointmentModalHandle>
+}
+
+function customerLabel(c: Customer): string {
+  const name = [c.first_name, c.last_name].filter(Boolean).join(' ').trim()
+  if (c.email && name) return `${name} — ${c.email}`
+  return name || c.email || 'Unknown'
 }
 
 function isoToDtLocal(iso: string): string {
@@ -48,7 +54,7 @@ function addMinutesToLocal(dtLocal: string, mins: number): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
-export default function EditAppointmentModal({ members, leads, onClose, ref }: Props) {
+export default function EditAppointmentModal({ members, customers, onClose, ref }: Props) {
   const [appt, setAppt] = useState<CalAppt | null>(null)
 
   // Bind the action to the current appointment id.
@@ -58,13 +64,13 @@ export default function EditAppointmentModal({ members, leads, onClose, ref }: P
   }
   const [state, action, isPending] = useActionState<State, FormData>(boundAction, null)
 
-  const [titleVal,   setTitleVal]   = useState('')
-  const [startVal,   setStartVal]   = useState('')
-  const [endVal,     setEndVal]     = useState('')
-  const [locVal,     setLocVal]     = useState('')
-  const [descVal,    setDescVal]    = useState('')
-  const [assignVal,  setAssignVal]  = useState('')
-  const [leadVal,    setLeadVal]    = useState('')
+  const [titleVal,    setTitleVal]    = useState('')
+  const [startVal,    setStartVal]    = useState('')
+  const [endVal,      setEndVal]      = useState('')
+  const [locVal,      setLocVal]      = useState('')
+  const [descVal,     setDescVal]     = useState('')
+  const [assignVal,   setAssignVal]   = useState('')
+  const [customerVal, setCustomerVal] = useState('')
 
   const [deletePending, startDelete] = useTransition()
   const dialogRef = useRef<HTMLDialogElement>(null)
@@ -99,7 +105,7 @@ export default function EditAppointmentModal({ members, leads, onClose, ref }: P
       setLocVal(a.location ?? '')
       setDescVal(a.description ?? '')
       setAssignVal(a.assigned_to ?? '')
-      setLeadVal(a.lead_id ?? '')
+      setCustomerVal(a.customer_id ?? '')
       dialogRef.current?.showModal()
     },
   }), [])
@@ -190,16 +196,16 @@ export default function EditAppointmentModal({ members, leads, onClose, ref }: P
             </select>
           </div>
           <div>
-            <label className="block text-xs text-gray-400 mb-1">Related Lead</label>
+            <label className="block text-xs text-gray-400 mb-1">Customer</label>
             <select
-              name="lead_id"
-              value={leadVal}
-              onChange={e => setLeadVal(e.target.value)}
+              name="customer_id"
+              value={customerVal}
+              onChange={e => setCustomerVal(e.target.value)}
               className="w-full rounded-lg border border-pvx-border bg-gray-900 px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-violet-500"
             >
               <option value="">— None —</option>
-              {leads.map(l => (
-                <option key={l.id} value={l.id}>{l.first_name} {l.last_name ?? ''}</option>
+              {customers.map(c => (
+                <option key={c.id} value={c.id}>{customerLabel(c)}</option>
               ))}
             </select>
           </div>

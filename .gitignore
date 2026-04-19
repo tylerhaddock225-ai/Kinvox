@@ -36,6 +36,9 @@ yarn-error.log*
 # local agent / editor state
 .claude/
 
+# supabase CLI local state
+supabase/.temp/
+
 # vercel
 .vercel
 

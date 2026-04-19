@@ -4,8 +4,8 @@ import { useEffect, useImperativeHandle, useRef, useState, useActionState, type 
 import { Plus, X } from 'lucide-react'
 import { createAppointment } from '@/app/(dashboard)/actions/appointments'
 
-type Member = { id: string; full_name: string | null }
-type Lead   = { id: string; first_name: string; last_name: string | null }
+type Member   = { id: string; full_name: string | null }
+type Customer = { id: string; first_name: string; last_name: string | null; email: string | null }
 
 export type CreateAppointmentModalHandle = {
   openWithStart: (iso: string) => void
@@ -13,10 +13,16 @@ export type CreateAppointmentModalHandle = {
 
 interface Props {
   members:      Member[]
-  leads:        Lead[]
+  customers:    Customer[]
   hideTrigger?: boolean
   onClose?:     () => void
   ref?:         Ref<CreateAppointmentModalHandle>
+}
+
+function customerLabel(c: Customer): string {
+  const name = [c.first_name, c.last_name].filter(Boolean).join(' ').trim()
+  if (c.email && name) return `${name} — ${c.email}`
+  return name || c.email || 'Unknown'
 }
 
 const INITIAL = null as ReturnType<typeof useActionState<Awaited<ReturnType<typeof createAppointment>>, FormData>>[0]
@@ -30,7 +36,7 @@ function addMinutesToLocal(dtLocal: string, mins: number): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
-export default function CreateAppointmentModal({ members, leads, hideTrigger, onClose, ref }: Props) {
+export default function CreateAppointmentModal({ members, customers, hideTrigger, onClose, ref }: Props) {
   const [state, action, isPending] = useActionState(createAppointment, INITIAL)
   const [startVal, setStartVal] = useState<string>('')
   const [endVal,   setEndVal]   = useState<string>('')
@@ -153,11 +159,11 @@ export default function CreateAppointmentModal({ members, leads, hideTrigger, on
               </p>
             </div>
             <div>
-              <label className="block text-xs text-gray-400 mb-1">Related Lead</label>
-              <select name="lead_id" defaultValue="" className="w-full rounded-lg border border-pvx-border bg-gray-900 px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-violet-500">
+              <label className="block text-xs text-gray-400 mb-1">Customer</label>
+              <select name="customer_id" defaultValue="" className="w-full rounded-lg border border-pvx-border bg-gray-900 px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-violet-500">
                 <option value="">— None —</option>
-                {leads.map(l => (
-                  <option key={l.id} value={l.id}>{l.first_name} {l.last_name ?? ''}</option>
+                {customers.map(c => (
+                  <option key={c.id} value={c.id}>{customerLabel(c)}</option>
                 ))}
               </select>
             </div>
