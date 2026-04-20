@@ -1,4 +1,6 @@
+import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
+import { ArrowLeft, LifeBuoy } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import type { Ticket, TicketMessage } from '@/lib/types/database.types'
 import CopyId from '@/components/CopyId'
@@ -6,6 +8,7 @@ import EditableSubject from '@/components/EditableSubject'
 import ReplyBox from '@/components/ReplyBox'
 import TicketStatusSelect from '@/components/TicketStatusSelect'
 import TicketPrioritySelect from '@/components/TicketPrioritySelect'
+import { resolveImpersonation } from '@/lib/impersonation'
 
 type MessageRow = Pick<TicketMessage, 'id' | 'body' | 'type' | 'created_at' | 'sender_id'> & {
   profiles: { full_name: string | null } | null
@@ -16,8 +19,12 @@ function initials(name: string | null | undefined) {
   return name.trim().split(/\s+/).slice(0, 2).map(p => p[0]?.toUpperCase()).join('') || '??'
 }
 
-export default async function TicketDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params
+export default async function HQSupportDetailPage({
+  params,
+}: {
+  params: Promise<{ orgSlug: string; id: string }>
+}) {
+  const { orgSlug, id } = await params
   const supabase = await createClient()
 
   const { data: { user } } = await supabase.auth.getUser()
@@ -31,31 +38,29 @@ export default async function TicketDetailPage({ params }: { params: Promise<{ i
 
   if (!profile?.organization_id) redirect('/onboarding')
 
-  const { data: ticketData } = await supabase
-    .from('tickets')
-    .select('id, display_id, subject, description, status, priority, created_at, organization_id, is_platform_support, organizations(slug)')
-    .eq('id', id)
-    .eq('organization_id', profile.organization_id)
-    .is('deleted_at', null)
-    .single()
+  const impersonation = await resolveImpersonation()
+  const orgId = impersonation.active ? impersonation.orgId : profile.organization_id
 
-  if (!ticketData) notFound()
+  const [ticketRes, orgRes] = await Promise.all([
+    supabase
+      .from('tickets')
+      .select('id, display_id, subject, description, status, priority, created_at, organization_id, is_platform_support')
+      .eq('id', id)
+      .eq('organization_id', orgId)
+      .eq('is_platform_support', true)
+      .is('deleted_at', null)
+      .single(),
+    supabase
+      .from('organizations')
+      .select('name')
+      .eq('id', orgId)
+      .single<{ name: string | null }>(),
+  ])
 
-  // Platform-support tickets live under the branded slug-scoped route now.
-  // Anything still hitting /tickets/[id] for an HQ ticket gets bounced there
-  // so stale bookmarks and cross-references keep working.
-  const ticketRow = ticketData as unknown as {
-    is_platform_support: boolean
-    organizations:       { slug: string | null } | { slug: string | null }[] | null
-  }
-  if (ticketRow.is_platform_support) {
-    const org = Array.isArray(ticketRow.organizations)
-      ? ticketRow.organizations[0]
-      : ticketRow.organizations
-    if (org?.slug) redirect(`/${org.slug}/hq-support/${id}`)
-  }
+  if (!ticketRes.data) notFound()
 
-  const ticket = ticketData as Pick<Ticket, 'id' | 'display_id' | 'subject' | 'description' | 'status' | 'priority' | 'created_at' | 'organization_id'>
+  const ticket = ticketRes.data as Pick<Ticket, 'id' | 'display_id' | 'subject' | 'description' | 'status' | 'priority' | 'created_at' | 'organization_id'>
+  const orgName = orgRes.data?.name ?? null
 
   const { data: messagesData } = await supabase
     .from('ticket_messages')
@@ -68,6 +73,19 @@ export default async function TicketDetailPage({ params }: { params: Promise<{ i
   return (
     <div className="px-8 py-8 max-w-4xl mx-auto space-y-6">
       <div className="space-y-3">
+        <Link
+          href={`/${orgSlug}/hq-support`}
+          className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-400 hover:text-violet-300 transition-colors"
+        >
+          <ArrowLeft className="w-3.5 h-3.5" />
+          Back to HQ Support
+        </Link>
+
+        <div className="flex items-center gap-2 text-[10px] font-bold tracking-[0.2em] text-violet-300 uppercase">
+          <LifeBuoy className="w-3.5 h-3.5" />
+          HQ Support{orgName ? ` · ${orgName}` : ''}
+        </div>
+
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0">
             <EditableSubject ticketId={ticket.id} initial={ticket.subject} />

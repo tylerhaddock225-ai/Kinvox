@@ -122,6 +122,7 @@ export async function createHQSupportTicket(_prev: State, formData: FormData): P
   if (error) return { status: 'error', error: error.message }
 
   revalidatePath('/support')
+  revalidatePath('/[orgSlug]/hq-support', 'page')
   revalidatePath('/admin-hq/tickets')
   return { status: 'success' }
 }
@@ -172,6 +173,8 @@ export async function updateTicketStatus(formData: FormData): Promise<void> {
   revalidatePath('/admin-hq/tickets')
   revalidatePath(`/admin-hq/tickets/${ticket_id}`)
   revalidatePath('/support')
+  revalidatePath('/[orgSlug]/hq-support', 'page')
+  revalidatePath('/[orgSlug]/hq-support/[id]', 'page')
 }
 
 export async function updateTicketPriority(formData: FormData): Promise<void> {
@@ -193,6 +196,8 @@ export async function updateTicketPriority(formData: FormData): Promise<void> {
   revalidatePath(`/tickets/${ticket_id}`)
   revalidatePath('/admin-hq/tickets')
   revalidatePath(`/admin-hq/tickets/${ticket_id}`)
+  revalidatePath('/[orgSlug]/hq-support', 'page')
+  revalidatePath('/[orgSlug]/hq-support/[id]', 'page')
 }
 
 export async function updateTicketSubject(_prev: State, formData: FormData): Promise<State> {
@@ -214,6 +219,7 @@ export async function updateTicketSubject(_prev: State, formData: FormData): Pro
   if (error) return { status: 'error', error: error.message }
 
   revalidatePath(`/tickets/${ticket_id}`)
+  revalidatePath('/[orgSlug]/hq-support/[id]', 'page')
   return { status: 'success' }
 }
 
@@ -264,6 +270,8 @@ export async function sendTicketMessage(_prev: State, formData: FormData): Promi
   })
 
   if (error) return { status: 'error', error: error.message }
+
+  revalidatePath('/[orgSlug]/hq-support/[id]', 'page')
 
   if (type === 'public') {
     await dispatchOutboundEmail({

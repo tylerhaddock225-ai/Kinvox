@@ -33,6 +33,10 @@ export default function Sidebar({ canViewLeads = true, orgName = null, orgSlug =
   const currentSlug = firstSeg && !RESERVED_TOP.has(firstSeg) ? firstSeg : null;
   const dashboardSlug = currentSlug ?? orgSlug;
   const dashboardHref = dashboardSlug ? `/${dashboardSlug}` : "/";
+  const hqSupportHref = dashboardSlug ? `/${dashboardSlug}/hq-support` : "/support";
+  const onHqSupport = dashboardSlug
+    ? pathname === hqSupportHref || pathname.startsWith(`${hqSupportHref}/`)
+    : pathname.startsWith("/support");
 
   const staticNav = [
     { href: dashboardHref,   label: "Dashboard",    icon: LayoutDashboard },
@@ -119,9 +123,9 @@ export default function Sidebar({ canViewLeads = true, orgName = null, orgSlug =
           Organization Settings
         </Link>
         <Link
-          href="/support"
+          href={hqSupportHref}
           className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
-            pathname.startsWith("/support")
+            onHqSupport
               ? "border-violet-400 bg-violet-500/15 text-violet-100"
               : "border-violet-500/40 text-violet-300 hover:border-violet-400 hover:bg-violet-500/10 hover:text-violet-200"
           }`}

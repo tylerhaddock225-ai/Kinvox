@@ -2,12 +2,14 @@ import { notFound, redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { resolveImpersonation } from '@/lib/impersonation'
 
-export const dynamic = 'force-dynamic'
-
-// Legacy entry point: HQ support now lives at /[orgSlug]/hq-support for
-// tenant-isolated URLs. Resolve the effective slug and bounce. Stale
-// bookmarks, sidebar caches, and any lingering /support links keep working.
-export default async function LegacySupportRedirect() {
+export default async function OrgSlugLayout({
+  children,
+  params,
+}: {
+  children: React.ReactNode
+  params:   Promise<{ orgSlug: string }>
+}) {
+  const { orgSlug } = await params
   const supabase = await createClient()
 
   const { data: { user } } = await supabase.auth.getUser()
@@ -22,15 +24,17 @@ export default async function LegacySupportRedirect() {
   if (!profile?.organization_id) redirect('/onboarding')
 
   const impersonation = await resolveImpersonation()
-  const orgId = impersonation.active ? impersonation.orgId : profile.organization_id
+  const effectiveOrgId = impersonation.active
+    ? impersonation.orgId
+    : profile.organization_id
 
-  const { data: org } = await supabase
+  const { data: effectiveOrg } = await supabase
     .from('organizations')
     .select('slug')
-    .eq('id', orgId)
+    .eq('id', effectiveOrgId)
     .single<{ slug: string | null }>()
 
-  if (!org?.slug) notFound()
+  if (!effectiveOrg?.slug || effectiveOrg.slug !== orgSlug) notFound()
 
-  redirect(`/${org.slug}/hq-support`)
+  return <>{children}</>
 }
