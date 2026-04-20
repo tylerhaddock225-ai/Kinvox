@@ -68,20 +68,36 @@ export async function updateSession(request: NextRequest) {
   // was removed; see supabase/migrations/20260420000000_invite_only_org_insert.sql.
   // Skip for onboarding/pending/admin to avoid an extra DB call on every request.
   if (user && !isOnboarding && !isPending && !isAdmin && !isPublic) {
-    const { data: orgId } = await supabase.rpc('auth_user_org_id')
-    if (!orgId) {
-      // HQ admins (platform_owner / platform_support) legitimately have
-      // no organization_id — they live at /admin-hq. Let them through so
-      // the root page can route them there.
-      const { data: isHq } = await supabase.rpc('is_admin_hq')
-      if (!isHq) {
-        const hasInvite = Boolean(
-          (user.user_metadata as { invited_to_org?: string } | null)?.invited_to_org
-        )
-        return noStore(NextResponse.redirect(
-          new URL(hasInvite ? '/onboarding' : '/pending-invite', request.url)
-        ))
-      }
+    // Force a token refresh before reading tenant state. Mirrors the
+    // /api/auth/force-sync pattern that reliably recovered a stuck
+    // session — guarantees the JWT the RLS-gated read below runs
+    // against is the freshest one, not a cookie-cache artefact.
+    await supabase.auth.refreshSession().catch(() => null)
+
+    // Direct profiles select instead of is_admin_hq / auth_user_org_id
+    // RPC pair: one round trip, no SECURITY DEFINER plan-cache surprises,
+    // and exactly what force-sync does. We also re-hydrate `user` so the
+    // user_metadata read below (for the invite flag) is against the
+    // refreshed session rather than the stale one from above.
+    const { data: { user: refreshedUser } } = await supabase.auth.getUser()
+    const activeUser = refreshedUser ?? user
+
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('organization_id, system_role')
+      .eq('id', activeUser.id)
+      .single<{ organization_id: string | null; system_role: string | null }>()
+
+    const orgId = profile?.organization_id ?? null
+    const isHq  = !!profile?.system_role
+
+    if (!orgId && !isHq) {
+      const hasInvite = Boolean(
+        (activeUser.user_metadata as { invited_to_org?: string } | null)?.invited_to_org
+      )
+      return noStore(NextResponse.redirect(
+        new URL(hasInvite ? '/onboarding' : '/pending-invite', request.url)
+      ))
     }
 
     // Permission check: block /leads if view_leads is explicitly false.

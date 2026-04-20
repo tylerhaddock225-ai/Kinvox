@@ -1,14 +1,26 @@
 import { redirect } from 'next/navigation'
+import { unstable_noStore as noStore } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { resolveImpersonation } from '@/lib/impersonation'
+
+// Opt out of every layer of render cache. Combined with the no-store
+// Cache-Control header added in the middleware, the sorting hat below
+// always executes against live session + database state — never a
+// memoised snapshot from a prior request.
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
 
 // Kinvox root — strict login-first entry. Unauthenticated requests
 // leave immediately for /login; everything else is routed by the
 // "sorting hat" below. No public / marketing surface is rendered here.
 export default async function RootPage() {
+  noStore()
+
   const supabase = await createClient()
 
   // ── Gate 0: authentication ─────────────────────────────────
+  // getUser() re-validates the JWT against the Supabase auth server
+  // on every call, picking up any role/metadata change from the DB.
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
@@ -26,22 +38,21 @@ export default async function RootPage() {
   }
 
   // ── Sorting hat ────────────────────────────────────────────
-  // One query covers all remaining branches: HQ role, merchant
-  // org membership, and (via user_metadata) pending invites.
-  const [{ data: isHq }, { data: profile }] = await Promise.all([
-    supabase.rpc('is_admin_hq'),
-    supabase
-      .from('profiles')
-      .select('organization_id, organizations(slug)')
-      .eq('id', user.id)
-      .single<{
-        organization_id: string | null
-        organizations: { slug: string | null } | null
-      }>(),
-  ])
+  // Single profile read covers every remaining branch. Mirrors the
+  // middleware / force-sync path — direct select beats the RPC pair
+  // for staleness and plan-cache reasons documented there.
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('system_role, organization_id, organizations(slug)')
+    .eq('id', user.id)
+    .single<{
+      system_role: 'platform_owner' | 'platform_support' | null
+      organization_id: string | null
+      organizations: { slug: string | null } | null
+    }>()
 
   // 1. HQ admin → Command Center.
-  if (isHq) redirect('/admin-hq')
+  if (profile?.system_role) redirect('/admin-hq')
 
   // 2. Merchant with an org → their workspace dashboard.
   //    NOTE: the dashboard route is /{slug} (see src/app/(dashboard)/[orgSlug]/page.tsx),
