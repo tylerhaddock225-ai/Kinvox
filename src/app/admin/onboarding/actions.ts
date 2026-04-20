@@ -31,7 +31,9 @@ export async function inviteOrgOwner(orgId: string, ownerEmail: string) {
   await assertAdmin()
   const admin = createAdminClient()
 
-  const { error } = await admin.auth.admin.inviteUserByEmail(ownerEmail, {
+  const normalised = ownerEmail.trim().toLowerCase()
+
+  const { error } = await admin.auth.admin.inviteUserByEmail(normalised, {
     data: { invited_to_org: orgId },
     redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000'}/onboarding`,
   })

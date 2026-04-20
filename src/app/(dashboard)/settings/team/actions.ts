@@ -36,7 +36,7 @@ export async function inviteMember(
   const ctx = await requireAdmin()
   if (!ctx) return { status: 'error', error: 'Unauthorized' }
 
-  const email    = (formData.get('email') as string).trim()
+  const email    = (formData.get('email') as string).trim().toLowerCase()
   const fullName = ((formData.get('full_name') as string) ?? '').trim() || null
   const roleId   = (formData.get('role_id') as string) || null
 

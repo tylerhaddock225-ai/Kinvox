@@ -7,9 +7,15 @@ import { createClient } from '@/lib/supabase/server'
 export async function login(formData: FormData) {
   const supabase = await createClient()
 
+  // Normalise the email before every auth call. Supabase GoTrue already
+  // lowercases on signup, but mirroring it here keeps legacy rows and
+  // any upstream inconsistency from silently failing a sign-in.
+  const email = String(formData.get('email') ?? '').trim().toLowerCase()
+  const password = String(formData.get('password') ?? '')
+
   const { data, error } = await supabase.auth.signInWithPassword({
-    email: formData.get('email') as string,
-    password: formData.get('password') as string,
+    email,
+    password,
   })
 
   if (error) return { error: error.message }
