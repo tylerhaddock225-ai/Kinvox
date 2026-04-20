@@ -4,37 +4,26 @@ import Logo from '@/components/Logo'
 import AcceptInviteForm from './AcceptInviteForm'
 
 export const dynamic = 'force-dynamic'
+export const revalidate = 0
 
-// Invite-acceptance screen. Self-serve organization creation was
-// removed — this route only handles a pending Postmark invite.
-// Users without an invitation are bounced to /pending-invite.
+// The centralized middleware sorting hat routes HQ staff and
+// merchants away from /onboarding before they reach this page.
+// Only invitees (auth.users.raw_user_meta_data.invited_to_org set)
+// land here. The page just fetches the invite payload to render
+// the accept screen; all role-based redirecting lives in middleware.
 export default async function OnboardingPage() {
   const supabase = await createClient()
 
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('system_role, organization_id, organizations(slug)')
-    .eq('id', user.id)
-    .single<{
-      system_role: 'platform_owner' | 'platform_support' | null
-      organization_id: string | null
-      organizations: { slug: string | null } | null
-    }>()
-
-  if (profile?.system_role) redirect('/admin-hq')
-
-  if (profile?.organization_id && profile.organizations?.slug) {
-    redirect(`/${profile.organizations.slug}`)
-  }
-
   const { data: invite } = await supabase
     .rpc('current_user_invited_org')
     .maybeSingle<{ org_id: string; org_name: string; org_slug: string }>()
 
-  if (!invite) redirect('/pending-invite')
+  // Defensive: if the invite row has vanished since middleware ran,
+  // bounce back through / so the sorting hat can re-route.
+  if (!invite) redirect('/')
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-950 px-4">

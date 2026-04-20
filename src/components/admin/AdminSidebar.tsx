@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Building2, Ticket, Sparkles, CreditCard, Zap, Eye, LayoutDashboard, Settings, LogOut } from "lucide-react";
+import { Building2, Ticket, Sparkles, CreditCard, Zap, Eye, LayoutDashboard, Settings, LogOut, ShieldCheck } from "lucide-react";
 import { startImpersonation } from "@/app/actions/impersonation";
 import { logout } from "@/app/(auth)/actions";
 
@@ -28,7 +28,8 @@ const baseNav: NavItem[] = [
 ];
 
 const ownerOnlyNav: NavItem[] = [
-  { href: "/admin-hq/billing", label: "Billing", icon: CreditCard },
+  { href: "/admin-hq/billing",        label: "Billing", icon: CreditCard },
+  { href: "/admin-hq/settings/roles", label: "Roles",   icon: ShieldCheck },
 ];
 
 const ORG_DETAIL_RE = /^\/admin-hq\/organizations\/([^/]+)\/?$/;

@@ -20,42 +20,18 @@ export async function login(formData: FormData) {
 
   if (error) return { error: error.message }
 
-  // Aggressive post-login refresh. signInWithPassword already stamps
-  // new cookies via the SSR adapter, but explicitly calling refreshSession
-  // + getUser rotates the access token one more time and flushes it
-  // through the cookie writer before we redirect. This closes the edge
-  // case where the redirect lands on a server render that still sees
-  // the pre-login anon JWT (which would fail RLS-gated profile reads
-  // and cause the sorting hat to fall through to /pending-invite).
+  // Rotate the access token once more through the cookie adapter so
+  // the next request (the redirect to /) lands with fresh cookies.
   await supabase.auth.refreshSession().catch(() => null)
   await supabase.auth.getUser().catch(() => null)
 
-  // HQ admins → Command Center. Merchants → their org's slugged dashboard.
-  let destination = '/'
-  if (data.user) {
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('system_role, organizations(slug)')
-      .eq('id', data.user.id)
-      .single<{
-        system_role: 'platform_owner' | 'platform_support' | null
-        organizations: { slug: string | null } | null
-      }>()
-
-    if (profile?.system_role) {
-      destination = '/admin-hq'
-    } else if (profile?.organizations?.slug) {
-      destination = `/${profile.organizations.slug}`
-    } else {
-      const hasInvite = Boolean(
-        (data.user.user_metadata as { invited_to_org?: string } | null)?.invited_to_org
-      )
-      destination = hasInvite ? '/onboarding' : '/pending-invite'
-    }
-  }
-
+  // The centralized sorting hat in src/lib/supabase/middleware.ts
+  // is the single source of truth for post-login routing. We always
+  // redirect to /, and middleware picks the correct destination
+  // (/admin-hq, /{slug}, /onboarding, or /pending-invite) based on
+  // system_role + organization_id + invite metadata.
   revalidatePath('/', 'layout')
-  redirect(destination)
+  redirect('/')
 }
 
 // Global sign-out. supabase.auth.signOut() defaults to scope 'global',
