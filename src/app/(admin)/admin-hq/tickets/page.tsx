@@ -5,7 +5,7 @@ import CopyId from '@/components/CopyId'
 import TicketStatusSelect from '@/components/TicketStatusSelect'
 import TicketPrioritySelect from '@/components/TicketPrioritySelect'
 import HQCategorySelect from '@/components/admin/HQCategorySelect'
-import TicketRow from '@/components/admin/TicketRow'
+import TicketRow from '@/components/TicketRow'
 
 export const dynamic = 'force-dynamic'
 
@@ -125,7 +125,7 @@ export default async function AdminTicketsPage({
           <tbody className="divide-y divide-pvx-border">
             {tickets?.length ? (
               tickets.map((t) => (
-                <TicketRow key={t.id} ticketId={t.id}>
+                <TicketRow key={t.id} href={`/admin-hq/tickets/${t.id}`}>
                   <td className="px-5 py-4 text-xs">
                     <CopyId id={t.display_id} />
                   </td>

@@ -4,14 +4,13 @@ import { useRouter } from 'next/navigation'
 import type { ReactNode } from 'react'
 
 export default function TicketRow({
-  ticketId,
+  href,
   children,
 }: {
-  ticketId: string
+  href:     string
   children: ReactNode
 }) {
   const router = useRouter()
-  const href = `/admin-hq/tickets/${ticketId}`
 
   return (
     <tr
@@ -24,7 +23,7 @@ export default function TicketRow({
           router.push(href)
         }
       }}
-      className="cursor-pointer transition-colors hover:bg-slate-700/30 focus:bg-slate-700/30 focus:outline-none"
+      className="cursor-pointer transition-colors hover:bg-white/5 focus:bg-white/5 focus:outline-none"
     >
       {children}
     </tr>

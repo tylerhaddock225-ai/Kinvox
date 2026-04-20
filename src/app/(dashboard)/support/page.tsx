@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/server'
 import type { Ticket } from '@/lib/types/database.types'
 import CopyId from '@/components/CopyId'
 import HQSupportModal from '@/components/HQSupportModal'
+import TicketRow from '@/components/TicketRow'
 
 export const dynamic = 'force-dynamic'
 
@@ -146,7 +147,7 @@ export default async function SupportPage({
           </div>
           <h1 className="mt-1 text-2xl font-bold text-white">Your HQ Requests</h1>
           <p className="text-sm text-gray-400 mt-1">
-            Support requests you\u2019ve sent to the Kinvox team. Replies thread in here.
+            Support requests you've sent to the Kinvox team. Replies thread in here.
           </p>
         </div>
         <HQSupportModal showAffectedTab={showAffectedTab} showRecordId={showRecordId} />
@@ -178,17 +179,15 @@ export default async function SupportPage({
             </thead>
             <tbody className="divide-y divide-pvx-border">
               {rows.map(t => (
-                <tr
-                  key={t.id}
-                  className="hover:bg-violet-400/[0.07] transition-colors"
-                >
+                <TicketRow key={t.id} href={`/tickets/${t.id}`}>
                   <td className="pl-6 pr-3 py-3 text-xs">
                     <CopyId id={t.display_id} />
                   </td>
-                  <td className="px-3 py-3 text-gray-200 font-medium">
-                    <Link href={`/tickets/${t.id}`} className="hover:text-violet-400 transition-colors">
-                      {t.subject}
-                    </Link>
+                  <td className="px-3 py-3 text-gray-200 font-medium max-w-md">
+                    <span className="inline-flex items-center gap-2">
+                      <LifeBuoy className="w-3.5 h-3.5 text-violet-400 shrink-0" aria-hidden />
+                      <span className="truncate">{t.subject}</span>
+                    </span>
                   </td>
                   <td className="px-3 py-3">
                     {t.hq_category ? (
@@ -198,7 +197,9 @@ export default async function SupportPage({
                         {CATEGORY_LABEL[t.hq_category]}
                       </span>
                     ) : (
-                      <span className="text-xs text-gray-600">\u2014</span>
+                      <span className="inline-block rounded-full border border-gray-500/30 bg-gray-500/10 px-2 py-0.5 text-[11px] font-medium text-gray-300">
+                        General
+                      </span>
                     )}
                   </td>
                   <td className="px-3 py-3">
@@ -214,7 +215,7 @@ export default async function SupportPage({
                   <td className="px-3 py-3 pr-6 text-gray-500">
                     {new Date(t.created_at).toLocaleDateString()}
                   </td>
-                </tr>
+                </TicketRow>
               ))}
             </tbody>
           </table>
