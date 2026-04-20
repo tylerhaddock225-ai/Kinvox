@@ -1,6 +1,16 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
+// Tag every response with no-store + no-cache so the browser (and
+// BFCache in most browsers) won't replay a rendered dashboard after
+// the user signs out and clicks Back. Pair with revalidatePath in
+// the logout action to flush the server-side render cache too.
+function noStore(res: NextResponse) {
+  res.headers.set('Cache-Control', 'no-store, private, max-age=0, must-revalidate')
+  res.headers.set('Pragma', 'no-cache')
+  return res
+}
+
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
 
@@ -45,12 +55,12 @@ export async function updateSession(request: NextRequest) {
   // tickets, admin-hq, onboarding, pending-invite — everything
   // except the explicit isPublic allowlist above.
   if (!user && !isPublic) {
-    return NextResponse.redirect(new URL('/login', request.url))
+    return noStore(NextResponse.redirect(new URL('/login', request.url)))
   }
 
   // Authenticated + visiting login/signup → dashboard
   if (user && isAuthRoute) {
-    return NextResponse.redirect(new URL('/', request.url))
+    return noStore(NextResponse.redirect(new URL('/', request.url)))
   }
 
   // Authenticated + no org → pending-invite (or /onboarding if an
@@ -68,9 +78,9 @@ export async function updateSession(request: NextRequest) {
         const hasInvite = Boolean(
           (user.user_metadata as { invited_to_org?: string } | null)?.invited_to_org
         )
-        return NextResponse.redirect(
+        return noStore(NextResponse.redirect(
           new URL(hasInvite ? '/onboarding' : '/pending-invite', request.url)
-        )
+        ))
       }
     }
 
@@ -78,10 +88,10 @@ export async function updateSession(request: NextRequest) {
     if (pathname.startsWith('/leads')) {
       const { data: canView } = await supabase.rpc('auth_user_view_leads')
       if (canView === false) {
-        return NextResponse.redirect(new URL('/', request.url))
+        return noStore(NextResponse.redirect(new URL('/', request.url)))
       }
     }
   }
 
-  return supabaseResponse
+  return noStore(supabaseResponse)
 }

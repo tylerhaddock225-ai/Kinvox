@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Users, UserCircle, CalendarCheck, Ticket, LayoutDashboard, Settings, Shield, LifeBuoy } from "lucide-react";
+import { Users, UserCircle, CalendarCheck, Ticket, LayoutDashboard, Settings, Shield, LifeBuoy, LogOut } from "lucide-react";
 import Logo from "./Logo";
+import { logout } from "@/app/(auth)/actions";
 
 const leadsNav = { href: "/leads", label: "Leads", icon: Users };
 
@@ -128,6 +129,19 @@ export default function Sidebar({ canViewLeads = true, orgName = null, orgSlug =
           <LifeBuoy className="w-4 h-4 shrink-0" />
           Contact HQ Support
         </Link>
+      </div>
+
+      {/* Sign out */}
+      <div className="px-3 pb-3 border-t border-pvx-border pt-3">
+        <form action={logout}>
+          <button
+            type="submit"
+            className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs font-medium text-gray-500 hover:text-gray-200 hover:bg-white/5 transition-colors"
+          >
+            <LogOut className="w-3.5 h-3.5 shrink-0" />
+            Sign out
+          </button>
+        </form>
       </div>
 
       {/* Footer */}

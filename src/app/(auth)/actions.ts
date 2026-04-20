@@ -42,9 +42,15 @@ export async function login(formData: FormData) {
   redirect(destination)
 }
 
+// Global sign-out. supabase.auth.signOut() defaults to scope 'global',
+// which revokes the refresh token server-side and clears every sb-*
+// cookie via the createServerClient cookie adapter. revalidatePath
+// flushes any rendered dashboard segments from the server cache before
+// redirecting to '/', where the middleware + root sorting hat bounce
+// the now-anonymous user to /login.
 export async function logout() {
   const supabase = await createClient()
   await supabase.auth.signOut()
   revalidatePath('/', 'layout')
-  redirect('/login')
+  redirect('/')
 }

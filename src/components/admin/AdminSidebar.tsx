@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Building2, Ticket, Sparkles, CreditCard, Zap, Eye, LayoutDashboard, Settings } from "lucide-react";
+import { Building2, Ticket, Sparkles, CreditCard, Zap, Eye, LayoutDashboard, Settings, LogOut } from "lucide-react";
 import { startImpersonation } from "@/app/actions/impersonation";
+import { logout } from "@/app/(auth)/actions";
 
 type SystemRole = "platform_owner" | "platform_support";
 
@@ -107,6 +108,19 @@ export default function AdminSidebar({ systemRole }: AdminSidebarProps) {
           <Settings className="w-4 h-4 shrink-0" />
           Settings
         </Link>
+      </div>
+
+      {/* Sign out */}
+      <div className="px-3 pb-3 border-t border-pvx-border pt-3">
+        <form action={logout}>
+          <button
+            type="submit"
+            className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs font-medium text-gray-500 hover:text-gray-200 hover:bg-white/5 transition-colors"
+          >
+            <LogOut className="w-3.5 h-3.5 shrink-0" />
+            Sign out
+          </button>
+        </form>
       </div>
 
       <div className="px-6 py-4 border-t border-pvx-border text-xs text-gray-600">
