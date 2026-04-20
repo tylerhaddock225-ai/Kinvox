@@ -82,16 +82,42 @@ export async function updateSession(request: NextRequest) {
     const { data: { user: refreshedUser } } = await supabase.auth.getUser()
     const activeUser = refreshedUser ?? user
 
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('organization_id, system_role')
-      .eq('id', activeUser.id)
-      .single<{ organization_id: string | null; system_role: string | null }>()
+    let orgId:  string | null = null
+    let isHq:   boolean       = false
+    let lookupFailed          = false
 
-    const orgId = profile?.organization_id ?? null
-    const isHq  = !!profile?.system_role
+    try {
+      const { data: profile, error } = await supabase
+        .from('profiles')
+        .select('organization_id, system_role')
+        .eq('id', activeUser.id)
+        .single<{ organization_id: string | null; system_role: string | null }>()
 
-    if (!orgId && !isHq) {
+      if (error) {
+        lookupFailed = true
+        console.error('[middleware] profile lookup error:', error.message)
+      } else {
+        orgId = profile?.organization_id ?? null
+        isHq  = !!profile?.system_role
+      }
+    } catch (err) {
+      lookupFailed = true
+      console.error('[middleware] profile lookup threw:', err)
+    }
+
+    // HQ short-circuit. If system_role is set, we let the request through
+    // unconditionally — no org check, no onboarding redirect. Explicit
+    // NextResponse.next() (wrapped via supabaseResponse to preserve the
+    // refreshed cookies) so a future reader sees the HQ bypass on its
+    // own line rather than inferring it from a fall-through.
+    if (isHq) {
+      return noStore(supabaseResponse)
+    }
+
+    // If the lookup failed, fall through without bouncing — don't add a
+    // false positive to the /pending-invite funnel. The downstream page
+    // will surface any real auth issue to the user.
+    if (!lookupFailed && !orgId) {
       const hasInvite = Boolean(
         (activeUser.user_metadata as { invited_to_org?: string } | null)?.invited_to_org
       )

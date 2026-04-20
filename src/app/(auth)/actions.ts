@@ -20,6 +20,16 @@ export async function login(formData: FormData) {
 
   if (error) return { error: error.message }
 
+  // Aggressive post-login refresh. signInWithPassword already stamps
+  // new cookies via the SSR adapter, but explicitly calling refreshSession
+  // + getUser rotates the access token one more time and flushes it
+  // through the cookie writer before we redirect. This closes the edge
+  // case where the redirect lands on a server render that still sees
+  // the pre-login anon JWT (which would fail RLS-gated profile reads
+  // and cause the sorting hat to fall through to /pending-invite).
+  await supabase.auth.refreshSession().catch(() => null)
+  await supabase.auth.getUser().catch(() => null)
+
   // HQ admins → Command Center. Merchants → their org's slugged dashboard.
   let destination = '/'
   if (data.user) {

@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { logout } from '../(auth)/actions'
 import Logo from '@/components/Logo'
+import ClientEscape from './ClientEscape'
 
 export const dynamic = 'force-dynamic'
 
@@ -37,6 +38,7 @@ export default async function PendingInvitePage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-950 px-4">
+      <ClientEscape />
       <div className="w-full max-w-md">
 
         <div className="flex items-center justify-center gap-3 mb-10">
