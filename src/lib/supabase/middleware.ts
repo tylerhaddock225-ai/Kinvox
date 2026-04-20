@@ -23,7 +23,9 @@ export async function updateSession(request: NextRequest) {
     }
   )
 
-  // Refresh session — do not remove this line
+  // Refresh session on every request so a valid cookie survives
+  // across fresh tabs / reloads — this is what powers the session
+  // persistence the sorting hat in src/app/page.tsx depends on.
   const { data: { user } } = await supabase.auth.getUser()
 
   const { pathname } = request.nextUrl
@@ -38,7 +40,10 @@ export async function updateSession(request: NextRequest) {
   const isAuthApi    = pathname.startsWith('/api/auth/')
   const isPublic     = isAuthRoute || isWebhook || isAuthApi || pathname.startsWith('/_next') || pathname === '/favicon.ico'
 
-  // Unauthenticated → login
+  // Login-first: any protected route reached without a session
+  // bounces to /login. This covers dashboards, leads, settings,
+  // tickets, admin-hq, onboarding, pending-invite — everything
+  // except the explicit isPublic allowlist above.
   if (!user && !isPublic) {
     return NextResponse.redirect(new URL('/login', request.url))
   }
