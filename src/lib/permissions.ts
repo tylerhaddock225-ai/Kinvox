@@ -28,6 +28,7 @@ export const ORG_PERMISSION_KEYS = [
 export const HQ_PERMISSION_KEYS = [
   { key: 'manage_users',             label: 'Manage Users'             },
   { key: 'manage_global_roles',      label: 'Manage Global Roles'      },
+  { key: 'manage_global_settings',   label: 'Manage Global Settings'   },
   { key: 'manage_platform_billing',  label: 'Manage Platform Billing'  },
   { key: 'manage_support_settings',  label: 'Manage Support Settings'  },
 ] as const
@@ -60,6 +61,7 @@ export const DEFAULT_ORG_PERMISSIONS: OrgPermissions = {
 export const DEFAULT_HQ_PERMISSIONS: HqPermissions = {
   manage_users:             false,
   manage_global_roles:      false,
+  manage_global_settings:   false,
   manage_platform_billing:  false,
   manage_support_settings:  false,
 }
@@ -75,8 +77,17 @@ export const DEFAULT_PERMISSIONS = DEFAULT_ORG_PERMISSIONS
 // return a boolean.
 
 export interface ProfileWithRole {
+  system_role?: string | null
   role?: { permissions?: unknown } | null
   roles?: { permissions?: unknown } | null
+}
+
+// Super Admin — platform_owner bypasses every permission check so a
+// freshly-promoted owner never gets trapped behind missing bits in
+// the permissions bag. Every other role (platform_admin, tenant
+// admin, etc) goes through the regular JSONB lookup.
+export function isSuperAdmin(profile: ProfileWithRole | null | undefined): boolean {
+  return profile?.system_role === 'platform_owner'
 }
 
 function readPermissionBag(profile: ProfileWithRole | null | undefined): Record<string, unknown> | null {
@@ -95,6 +106,7 @@ export function hasOrgPermission(
   profile: ProfileWithRole | null | undefined,
   key: OrgPermissionKey,
 ): boolean {
+  if (isSuperAdmin(profile)) return true
   return bagHas(readPermissionBag(profile), key)
 }
 
@@ -102,5 +114,6 @@ export function hasHqPermission(
   profile: ProfileWithRole | null | undefined,
   key: HqPermissionKey,
 ): boolean {
+  if (isSuperAdmin(profile)) return true
   return bagHas(readPermissionBag(profile), key)
 }
