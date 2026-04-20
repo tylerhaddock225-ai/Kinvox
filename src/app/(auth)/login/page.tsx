@@ -2,11 +2,13 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
+import { Eye, EyeOff } from 'lucide-react'
 import { login } from '../actions'
 
 export default function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
 
   async function handleSubmit(formData: FormData) {
     setLoading(true)
@@ -44,13 +46,27 @@ export default function LoginPage() {
               Forgot password?
             </Link>
           </div>
-          <input
-            name="password"
-            type="password"
-            required
-            placeholder="••••••••"
-            className="w-full rounded-lg bg-gray-800 border border-gray-700 text-white placeholder-gray-500 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-          />
+          <div className="relative">
+            <input
+              name="password"
+              type={showPassword ? 'text' : 'password'}
+              required
+              placeholder="••••••••"
+              className="w-full rounded-lg bg-gray-800 border border-gray-700 text-white placeholder-gray-500 px-3 py-2.5 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword((v) => !v)}
+              aria-label={showPassword ? 'Hide password' : 'Show password'}
+              aria-pressed={showPassword}
+              className="absolute inset-y-0 right-0 flex items-center px-3 text-gray-500 hover:text-emerald-400 focus:outline-none focus:text-emerald-400 transition-colors"
+            >
+              {showPassword
+                ? <EyeOff className="w-4 h-4" aria-hidden="true" />
+                : <Eye    className="w-4 h-4" aria-hidden="true" />
+              }
+            </button>
+          </div>
         </div>
 
         {error && (
