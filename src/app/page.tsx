@@ -7,7 +7,8 @@ import { resolveImpersonation } from '@/lib/impersonation'
  *   1. Impersonating (cookie set + admin verified) → merchant view of that org.
  *   2. HQ admin (non-impersonating) → Command Center.
  *   3. Merchant → own org's slug dashboard.
- *   4. No org yet → onboarding.
+ *   4. Pending Postmark invite → /onboarding (accept screen).
+ *   5. Otherwise → /pending-invite (contact support).
  */
 export default async function RootPage() {
   const supabase = await createClient()
@@ -36,7 +37,10 @@ export default async function RootPage() {
   if (profile?.system_role) redirect('/admin-hq')
 
   const slug = profile?.organizations?.slug
-  if (!slug) redirect('/onboarding')
+  if (slug) redirect(`/${slug}`)
 
-  redirect(`/${slug}`)
+  const hasInvite = Boolean(
+    (user.user_metadata as { invited_to_org?: string } | null)?.invited_to_org
+  )
+  redirect(hasInvite ? '/onboarding' : '/pending-invite')
 }

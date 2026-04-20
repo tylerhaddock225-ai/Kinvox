@@ -31,7 +31,10 @@ export async function login(formData: FormData) {
     } else if (profile?.organizations?.slug) {
       destination = `/${profile.organizations.slug}`
     } else {
-      destination = '/onboarding'
+      const hasInvite = Boolean(
+        (data.user.user_metadata as { invited_to_org?: string } | null)?.invited_to_org
+      )
+      destination = hasInvite ? '/onboarding' : '/pending-invite'
     }
   }
 

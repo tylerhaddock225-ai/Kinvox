@@ -1,22 +1,37 @@
-'use client'
-
-import { useState } from 'react'
-import { createOrganization } from './actions'
+import { redirect } from 'next/navigation'
+import { createClient } from '@/lib/supabase/server'
 import Logo from '@/components/Logo'
+import AcceptInviteForm from './AcceptInviteForm'
 
-export default function OnboardingPage() {
-  const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
+export const dynamic = 'force-dynamic'
 
-  async function handleSubmit(formData: FormData) {
-    setLoading(true)
-    setError(null)
-    const result = await createOrganization(formData)
-    if (result?.error) {
-      setError(result.error)
-      setLoading(false)
-    }
+// Invite-acceptance screen. Self-serve organization creation was
+// removed — this route only handles a pending Postmark invite.
+// Users without an invitation are bounced to /pending-invite.
+export default async function OnboardingPage() {
+  const supabase = await createClient()
+
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('organization_id, organizations(slug)')
+    .eq('id', user.id)
+    .single<{
+      organization_id: string | null
+      organizations: { slug: string | null } | null
+    }>()
+
+  if (profile?.organization_id && profile.organizations?.slug) {
+    redirect(`/${profile.organizations.slug}`)
   }
+
+  const { data: invite } = await supabase
+    .rpc('current_user_invited_org')
+    .maybeSingle<{ org_id: string; org_name: string; org_slug: string }>()
+
+  if (!invite) redirect('/pending-invite')
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-950 px-4">
@@ -29,43 +44,14 @@ export default function OnboardingPage() {
 
         <div className="bg-gray-900 border border-gray-800 rounded-2xl p-8">
           <div className="mb-6">
-            <h1 className="text-xl font-bold text-white">Set up your organization</h1>
+            <h1 className="text-xl font-bold text-white">Accept your invitation</h1>
             <p className="text-sm text-gray-400 mt-1">
-              This is your workspace. You can invite teammates after setup.
+              You&apos;ve been invited to join{' '}
+              <span className="text-white font-medium">{invite.org_name}</span>.
             </p>
           </div>
 
-          <form action={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-xs font-medium text-gray-400 mb-1.5">
-                Organization name
-              </label>
-              <input
-                name="name"
-                type="text"
-                required
-                placeholder="Acme Corp"
-                className="w-full rounded-lg bg-gray-800 border border-gray-700 text-white placeholder-gray-500 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-              />
-              <p className="text-xs text-gray-500 mt-1">
-                A URL-safe slug will be generated automatically.
-              </p>
-            </div>
-
-            {error && (
-              <p className="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2">
-                {error}
-              </p>
-            )}
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold rounded-lg px-4 py-2.5 text-sm transition-colors"
-            >
-              {loading ? 'Creating workspace…' : 'Continue to dashboard →'}
-            </button>
-          </form>
+          <AcceptInviteForm orgName={invite.org_name} />
         </div>
 
       </div>

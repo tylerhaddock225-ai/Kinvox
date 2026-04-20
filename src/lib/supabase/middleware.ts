@@ -32,6 +32,7 @@ export async function updateSession(request: NextRequest) {
                     || pathname.startsWith('/forgot-password')
                     || pathname.startsWith('/reset-password')
   const isOnboarding = pathname.startsWith('/onboarding')
+  const isPending    = pathname.startsWith('/pending-invite')
   const isAdmin      = pathname.startsWith('/admin')
   const isWebhook    = pathname.startsWith('/api/webhooks/')
   const isAuthApi    = pathname.startsWith('/api/auth/')
@@ -47,12 +48,19 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(new URL('/', request.url))
   }
 
-  // Authenticated + no org → onboarding
-  // Skip for onboarding/admin to avoid an extra DB call on every request.
-  if (user && !isOnboarding && !isAdmin && !isPublic) {
+  // Authenticated + no org → pending-invite (or /onboarding if an
+  // invite token is present on the user). Self-serve org creation
+  // was removed; see supabase/migrations/20260420000000_invite_only_org_insert.sql.
+  // Skip for onboarding/pending/admin to avoid an extra DB call on every request.
+  if (user && !isOnboarding && !isPending && !isAdmin && !isPublic) {
     const { data: orgId } = await supabase.rpc('auth_user_org_id')
     if (!orgId) {
-      return NextResponse.redirect(new URL('/onboarding', request.url))
+      const hasInvite = Boolean(
+        (user.user_metadata as { invited_to_org?: string } | null)?.invited_to_org
+      )
+      return NextResponse.redirect(
+        new URL(hasInvite ? '/onboarding' : '/pending-invite', request.url)
+      )
     }
 
     // Permission check: block /leads if view_leads is explicitly false.
