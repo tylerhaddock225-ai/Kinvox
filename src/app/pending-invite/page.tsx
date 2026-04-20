@@ -16,12 +16,15 @@ export default async function PendingInvitePage() {
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('organization_id, organizations(slug)')
+    .select('system_role, organization_id, organizations(slug)')
     .eq('id', user.id)
     .single<{
+      system_role: 'platform_owner' | 'platform_support' | null
       organization_id: string | null
       organizations: { slug: string | null } | null
     }>()
+
+  if (profile?.system_role) redirect('/admin-hq')
 
   if (profile?.organization_id && profile.organizations?.slug) {
     redirect(`/${profile.organizations.slug}`)

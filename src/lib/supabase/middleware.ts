@@ -55,12 +55,18 @@ export async function updateSession(request: NextRequest) {
   if (user && !isOnboarding && !isPending && !isAdmin && !isPublic) {
     const { data: orgId } = await supabase.rpc('auth_user_org_id')
     if (!orgId) {
-      const hasInvite = Boolean(
-        (user.user_metadata as { invited_to_org?: string } | null)?.invited_to_org
-      )
-      return NextResponse.redirect(
-        new URL(hasInvite ? '/onboarding' : '/pending-invite', request.url)
-      )
+      // HQ admins (platform_owner / platform_support) legitimately have
+      // no organization_id — they live at /admin-hq. Let them through so
+      // the root page can route them there.
+      const { data: isHq } = await supabase.rpc('is_admin_hq')
+      if (!isHq) {
+        const hasInvite = Boolean(
+          (user.user_metadata as { invited_to_org?: string } | null)?.invited_to_org
+        )
+        return NextResponse.redirect(
+          new URL(hasInvite ? '/onboarding' : '/pending-invite', request.url)
+        )
+      }
     }
 
     // Permission check: block /leads if view_leads is explicitly false.
