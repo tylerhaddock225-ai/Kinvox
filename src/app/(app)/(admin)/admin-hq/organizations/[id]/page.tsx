@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { ArrowLeft, ShieldAlert, Archive, RotateCcw } from 'lucide-react'
+import { ArrowLeft, ShieldAlert, Archive, RotateCcw, Sparkles } from 'lucide-react'
 import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import {
@@ -9,6 +9,8 @@ import {
   restoreOrganization,
 } from '@/app/(app)/(admin)/admin-hq/actions/organizations'
 import ConfirmButton from '@/components/admin/ConfirmButton'
+import OrgAiStrategyForm from '@/components/admin/OrgAiStrategyForm'
+import type { AiTemplate } from '@/lib/ai-templates'
 
 export const dynamic = 'force-dynamic'
 
@@ -39,21 +41,29 @@ export default async function AdminOrgDetailPage({
 
   const { data: org } = await supabase
     .from('organizations')
-    .select('id, name, slug, vertical, status, plan, deleted_at, created_at, owner_id')
+    .select('id, name, slug, vertical, status, plan, deleted_at, created_at, owner_id, ai_template_id, enabled_ai_features')
     .eq('id', id)
     .single<{
-      id:         string
-      name:       string
-      slug:       string | null
-      vertical:   string | null
-      status:     string | null
-      plan:       string | null
-      deleted_at: string | null
-      created_at: string
-      owner_id:   string
+      id:                  string
+      name:                string
+      slug:                string | null
+      vertical:            string | null
+      status:              string | null
+      plan:                string | null
+      deleted_at:          string | null
+      created_at:          string
+      owner_id:            string
+      ai_template_id:      string | null
+      enabled_ai_features: Record<string, boolean> | null
     }>()
 
   if (!org) notFound()
+
+  const { data: templates } = await supabase
+    .from('ai_templates')
+    .select('id, name, industry, base_prompt, metadata')
+    .order('name', { ascending: true })
+    .returns<AiTemplate[]>()
 
   const isArchived = !!org.deleted_at
   const status     = (org.status ?? 'active').toLowerCase()
@@ -183,6 +193,26 @@ export default async function AdminOrgDetailPage({
             </button>
           </div>
         </form>
+      </section>
+
+      {/* AI Strategy */}
+      <section className="rounded-xl border border-pvx-border bg-gray-900 p-5">
+        <div className="flex items-center gap-2">
+          <Sparkles className="w-4 h-4 text-violet-300" />
+          <h2 className="text-sm font-semibold text-white">AI Strategy</h2>
+        </div>
+        <p className="mt-1 text-xs text-gray-500">
+          Pick the prompt template this merchant runs and toggle individual features on or off.
+        </p>
+
+        <div className="mt-5">
+          <OrgAiStrategyForm
+            orgId={org.id}
+            templates={templates ?? []}
+            currentTemplateId={org.ai_template_id}
+            enabledFeatures={org.enabled_ai_features ?? {}}
+          />
+        </div>
       </section>
 
       {/* Danger zone */}
