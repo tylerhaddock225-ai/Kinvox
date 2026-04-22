@@ -78,7 +78,7 @@ export default async function HqRolesPage() {
         <h1 className="mt-1 text-2xl font-semibold text-white">HQ Roles</h1>
         <p className="mt-1 text-sm text-gray-400">
           Permission bundles for Kinvox HQ staff. These roles are not visible
-          to tenant organizations; merchants define their own role set at
+          to tenant organizations; organizations define their own role set at
           /settings/team.
         </p>
       </div>

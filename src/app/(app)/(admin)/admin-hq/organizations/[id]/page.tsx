@@ -248,7 +248,7 @@ export default async function AdminOrgDetailPage({
           <h2 className="text-sm font-semibold text-white">AI Strategy</h2>
         </div>
         <p className="mt-1 text-xs text-gray-500">
-          Pick the prompt template this merchant runs and toggle individual features on or off.
+          Pick the prompt template this organization runs and toggle individual features on or off.
         </p>
 
         <div className="mt-5">

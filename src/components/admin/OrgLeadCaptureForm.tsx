@@ -148,7 +148,7 @@ export default function OrgLeadCaptureForm({
 
         <Field
           label="Website URL"
-          hint="Used as the merchant's 'Learn more' link on the landing page."
+          hint="Used as the organization's 'Learn more' link on the landing page."
         >
           <input
             name="website_url"
@@ -203,7 +203,7 @@ export default function OrgLeadCaptureForm({
         {embedCode ? (
           <>
             <p className="mt-1 text-[11px] text-gray-500">
-              Drop this into the merchant's website to embed the capture widget.
+              Drop this into the organization's website to embed the capture widget.
             </p>
             <div className="mt-2 flex items-start gap-2">
               <pre className="flex-1 overflow-auto rounded-md border border-pvx-border bg-pvx-bg p-3 text-[11px] leading-relaxed text-gray-200 font-mono whitespace-pre-wrap break-all">

@@ -53,7 +53,7 @@ export default async function AdminAiTemplateDetailPage({
             </div>
             <h1 className="mt-1 text-2xl font-semibold text-white">{template.name}</h1>
             <p className="mt-1 text-xs text-gray-500">
-              {adoptionCount ?? 0} {adoptionCount === 1 ? 'merchant' : 'merchants'} using this template
+              {adoptionCount ?? 0} {adoptionCount === 1 ? 'organization' : 'organizations'} using this template
             </p>
           </div>
         </div>
@@ -63,7 +63,7 @@ export default async function AdminAiTemplateDetailPage({
       <section className="rounded-xl border border-pvx-border bg-gray-900 p-5">
         <h2 className="text-sm font-semibold text-white">Base Prompt</h2>
         <p className="mt-1 text-xs text-gray-500">
-          Sent on every conversation. Per-feature instructions are appended at runtime when the merchant has the feature toggled on.
+          Sent on every conversation. Per-feature instructions are appended at runtime when the organization has the feature toggled on.
         </p>
         <pre className="mt-4 max-h-72 overflow-auto whitespace-pre-wrap rounded-md border border-pvx-border bg-pvx-surface p-4 text-xs leading-relaxed text-gray-200 font-mono">
 {template.base_prompt}
@@ -76,7 +76,7 @@ export default async function AdminAiTemplateDetailPage({
           <div>
             <h2 className="text-sm font-semibold text-white">Feature Library</h2>
             <p className="mt-1 text-xs text-gray-500">
-              Modules merchants can toggle individually from their org settings.
+              Modules organizations can toggle individually from their own settings.
             </p>
           </div>
           <span className="inline-flex items-center rounded-md border border-pvx-border bg-pvx-surface px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-gray-400">
