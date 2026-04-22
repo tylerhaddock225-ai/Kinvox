@@ -1,22 +1,17 @@
 import { NextResponse, type NextRequest } from 'next/server'
-import { randomBytes, createHash } from 'node:crypto'
 import { ServerClient } from 'postmark'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { mintToken, hashToken, ttlFromNow, TTL } from '@/lib/auth/tokens'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 const LOG = '[reset-password]'
 
-const APP_URL           = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.kinvoxtech.com'
-const RESET_BASE_URL    = `${APP_URL}/reset-password`
-const TOKEN_TTL_MINUTES = 60
+const APP_URL        = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.kinvoxtech.com'
+const RESET_BASE_URL = `${APP_URL}/reset-password`
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-
-function hashToken(token: string): string {
-  return createHash('sha256').update(token).digest('hex')
-}
 
 export async function POST(request: NextRequest) {
   let body: { email?: unknown }
@@ -55,11 +50,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ status: 'ok' }, { status: 200 })
   }
 
-  // Generate token: 32 random bytes → 64 hex chars. The plaintext travels in
-  // the email link; we only persist its SHA-256 hash.
-  const token     = randomBytes(32).toString('hex')
-  const tokenHash = hashToken(token)
-  const expiresAt = new Date(Date.now() + TOKEN_TTL_MINUTES * 60_000).toISOString()
+  // Raw token travels in the email link; DB gets the sha256 hash only.
+  const { raw: token, hash: tokenHash } = mintToken()
+  const expiresAt = ttlFromNow(TTL.PASSWORD_RESET)
 
   const { error: insErr } = await supabase.from('password_reset_tokens').insert({
     user_id:    userId,

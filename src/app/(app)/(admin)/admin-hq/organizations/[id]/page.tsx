@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { ArrowLeft, ShieldAlert, Archive, RotateCcw, Sparkles, Megaphone } from 'lucide-react'
+import { ArrowLeft, ShieldAlert, Archive, RotateCcw, Sparkles, Megaphone, Mail, CheckCircle2, AlertCircle } from 'lucide-react'
 import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import {
@@ -8,6 +8,7 @@ import {
   archiveOrganization,
   restoreOrganization,
 } from '@/app/(app)/(admin)/admin-hq/actions/organizations'
+import { sendOrganizationClaimInvite } from '@/app/(app)/(admin)/admin-hq/actions/claim'
 import ConfirmButton from '@/components/admin/ConfirmButton'
 import OrgAiStrategyForm from '@/components/admin/OrgAiStrategyForm'
 import OrgLeadCaptureForm from '@/components/admin/OrgLeadCaptureForm'
@@ -49,12 +50,14 @@ export default async function AdminOrgDetailPage({
   searchParams,
 }: {
   params:       Promise<{ id: string }>
-  searchParams: Promise<{ tab?: string; error?: string }>
+  searchParams: Promise<{ tab?: string; error?: string; claim_sent?: string; claim_error?: string }>
 }) {
   const { id } = await params
   const sp     = await searchParams
   const activeTab: TabKey = sp.tab === 'lead-capture' ? 'lead-capture' : 'details'
   const errorMessage = typeof sp.error === 'string' ? sp.error : null
+  const claimSentTo  = typeof sp.claim_sent  === 'string' ? sp.claim_sent  : null
+  const claimError   = typeof sp.claim_error === 'string' ? sp.claim_error : null
   const supabase = await createClient()
 
   const { data: org } = await supabase
@@ -259,6 +262,53 @@ export default async function AdminOrgDetailPage({
             enabledFeatures={org.enabled_ai_features ?? {}}
           />
         </div>
+      </section>
+
+      {/* Merchant claim invite */}
+      <section className="rounded-xl border border-pvx-border bg-gray-900 p-5">
+        <div className="flex items-center gap-2">
+          <Mail className="w-4 h-4 text-violet-300" />
+          <h2 className="text-sm font-semibold text-white">Send Claim Invite</h2>
+        </div>
+        <p className="mt-1 text-xs text-gray-500">
+          Emails a 7-day claim link to a merchant. On redemption they become the owner of this organization and get tenant-admin access.
+        </p>
+
+        {claimSentTo && (
+          <div className="mt-4 flex items-start gap-2 rounded-md border border-emerald-800/60 bg-emerald-950/30 px-3 py-2 text-xs text-emerald-200">
+            <CheckCircle2 className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+            <span>Claim invite sent to <span className="font-mono">{claimSentTo}</span>. Link expires in 7 days.</span>
+          </div>
+        )}
+        {claimError && (
+          <div className="mt-4 flex items-start gap-2 rounded-md border border-rose-900/60 bg-rose-950/30 px-3 py-2 text-xs text-rose-200">
+            <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+            <span>{claimError}</span>
+          </div>
+        )}
+
+        <form action={sendOrganizationClaimInvite} className="mt-5 space-y-3">
+          <input type="hidden" name="org_id" value={org.id} />
+          <label className="block">
+            <span className="block text-[11px] font-medium uppercase tracking-wider text-gray-400 mb-1.5">
+              Recipient email
+            </span>
+            <input
+              name="email"
+              type="email"
+              required
+              placeholder="owner@example.com"
+              className="w-full rounded-md bg-pvx-surface border border-pvx-border px-3 py-2 text-sm text-gray-100 font-mono focus:border-violet-500/60 focus:outline-none focus:ring-1 focus:ring-violet-500/40"
+            />
+          </label>
+          <button
+            type="submit"
+            className="inline-flex items-center gap-1.5 rounded-md bg-violet-600 hover:bg-violet-500 px-4 py-2 text-sm font-medium text-white transition-colors"
+          >
+            <Mail className="w-3.5 h-3.5" />
+            Send claim invite
+          </button>
+        </form>
       </section>
 
       {/* Danger zone */}
