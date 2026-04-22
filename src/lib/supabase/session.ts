@@ -74,7 +74,11 @@ export async function updateSession(request: NextRequest) {
   const isAdmin      = pathname.startsWith('/admin')
   const isWebhook    = pathname.startsWith('/api/webhooks/')
   const isAuthApi    = pathname.startsWith('/api/auth/')
-  const isPublic     = isAuthRoute || isWebhook || isAuthApi || pathname.startsWith('/_next') || pathname === '/favicon.ico'
+  // Anonymous lead-magnet landing pages + their public capture endpoint.
+  // These must be reachable without a session on the app host.
+  const isLeadMagnet = pathname.startsWith('/l/')
+  const isPublicApi  = pathname.startsWith('/api/v1/')
+  const isPublic     = isAuthRoute || isWebhook || isAuthApi || isLeadMagnet || isPublicApi || pathname.startsWith('/_next') || pathname === '/favicon.ico'
 
   // ── Gate 0: login-first ────────────────────────────────────
   // Every protected route bounces unauthenticated requests to /login.
