@@ -1,19 +1,39 @@
-// One-off Sandbox verification:
-// 1. Pull the seeded Storm Shelter template
-// 2. Borrow the first live Sandbox org (saving + restoring its prior
-//    ai_template_id / enabled_ai_features so we leave no footprint)
-// 3. Set toggles with virtual_fitment OFF, soh_grant_screener ON,
-//    tribal_grant_check ON
-// 4. Re-implement applyFeatureGating exactly as src/lib/ai-runtime.ts
-//    does and run it against the seeded prompt
-// 5. Assert the disabled block is gone and enabled blocks survive
+// End-to-end verification for the AI template runtime. Default mode
+// targets Sandbox (.env.local) and exercises the full write path by
+// temporarily "borrowing" the first live org. Pass --env=<path> to run
+// against a different environment and --readonly to skip the borrow step
+// (use on Prod so we never touch a real merchant row).
+//
+// Steps:
+//   1. Pull the seeded Storm Shelter template
+//   2. [non-readonly only] Borrow first live org, write toggles
+//   3. Apply the same strip regex src/lib/ai-runtime.ts uses
+//   4. Assert disabled block gone, enabled blocks + Wave 2 wording survive
+//   5. [non-readonly only] Restore the borrowed org in a finally
 
 import { createClient } from '@supabase/supabase-js'
 import { readFileSync } from 'node:fs'
 
-// Load .env.local manually so we don't pull a dotenv dep just for this.
+// --- CLI flags ---
+const args = Object.fromEntries(
+  process.argv.slice(2).map((a) => {
+    const [k, v] = a.replace(/^--/, '').split('=')
+    return [k, v ?? true]
+  }),
+)
+const envFile = typeof args.env === 'string' ? args.env : '.env.local'
+const readonly = !!args.readonly
+
+// Known project refs we accept — guard against accidentally pointing the
+// script at some unrelated Supabase project. Extend as new envs appear.
+const KNOWN_REFS = {
+  ntwimeqxyyvjyrisqofl: 'Sandbox',
+  jysnvuqdrfejejosizwo: 'Production',
+}
+
+// Load env manually so we don't pull a dotenv dep just for this.
 const env = Object.fromEntries(
-  readFileSync('.env.local', 'utf8')
+  readFileSync(envFile, 'utf8')
     .split('\n')
     .map((l) => l.trim())
     .filter((l) => l && !l.startsWith('#') && l.includes('='))
@@ -31,8 +51,14 @@ const env = Object.fromEntries(
 const url     = env.NEXT_PUBLIC_SUPABASE_URL
 const service = env.SUPABASE_SERVICE_ROLE_KEY
 
-if (!url.includes('ntwimeqxyyvjyrisqofl')) {
-  console.error('ABORT: .env.local is not pointing at Sandbox. URL =', url)
+const matchedRef = Object.keys(KNOWN_REFS).find((r) => url?.includes(r))
+if (!matchedRef) {
+  console.error(`ABORT: ${envFile} URL is not a known project.  URL = ${url}`)
+  process.exit(1)
+}
+console.log(`env file: ${envFile}  target: ${KNOWN_REFS[matchedRef]} (${matchedRef})  readonly: ${readonly}`)
+if (matchedRef === 'jysnvuqdrfejejosizwo' && !readonly) {
+  console.error('ABORT: refuse to run write-mode against Production. Re-run with --readonly.')
   process.exit(1)
 }
 
@@ -72,37 +98,50 @@ if (tErr || !template) throw new Error('Storm Shelter template missing: ' + (tEr
 const features = template.metadata?.features ?? []
 console.log(`✓ template: ${template.name} (${template.id})  features=${features.map(f=>f.key).join(',')}`)
 
-// ---- 2. Borrow an org ----
-const { data: orgs, error: oErr } = await supabase
-  .from('organizations')
-  .select('id, name, ai_template_id, enabled_ai_features')
-  .is('deleted_at', null)
-  .order('created_at', { ascending: true })
-  .limit(1)
-if (oErr || !orgs?.length) throw new Error('No live sandbox orgs')
-const target = orgs[0]
-console.log(`✓ borrowing org: ${target.name} (${target.id})`)
-const prior = { ai_template_id: target.ai_template_id, enabled_ai_features: target.enabled_ai_features }
+// ---- 2. Borrow an org (skipped in readonly mode) ----
+let target = null
+let prior  = null
+if (!readonly) {
+  const { data: orgs, error: oErr } = await supabase
+    .from('organizations')
+    .select('id, name, ai_template_id, enabled_ai_features')
+    .is('deleted_at', null)
+    .order('created_at', { ascending: true })
+    .limit(1)
+  if (oErr || !orgs?.length) throw new Error('No live orgs to borrow')
+  target = orgs[0]
+  console.log(`✓ borrowing org: ${target.name} (${target.id})`)
+  prior = { ai_template_id: target.ai_template_id, enabled_ai_features: target.enabled_ai_features }
+} else {
+  console.log('✓ readonly mode: skipping org borrow')
+}
 
 try {
-  // ---- 3. Write test toggles ----
   const testEnabled = { soh_grant_screener: true, virtual_fitment: false, tribal_grant_check: true }
-  const { error: pErr } = await supabase
-    .from('organizations')
-    .update({ ai_template_id: template.id, enabled_ai_features: testEnabled })
-    .eq('id', target.id)
-  if (pErr) throw pErr
 
-  // ---- 4. Re-fetch + resolve like /api/merchant/ai-features would ----
-  const { data: refreshed } = await supabase
-    .from('organizations')
-    .select('ai_template_id, enabled_ai_features')
-    .eq('id', target.id)
-    .single()
-  console.log(`✓ org now has ai_template_id=${refreshed.ai_template_id}`)
-  console.log(`  enabled_ai_features =`, refreshed.enabled_ai_features)
+  let sourceToggles = testEnabled
+  if (!readonly) {
+    // ---- 3. Write test toggles ----
+    const { error: pErr } = await supabase
+      .from('organizations')
+      .update({ ai_template_id: template.id, enabled_ai_features: testEnabled })
+      .eq('id', target.id)
+    if (pErr) throw pErr
 
-  const enabled = resolveEnabledFeatures(features, refreshed.enabled_ai_features)
+    // ---- 4. Re-fetch like /api/merchant/ai-features would ----
+    const { data: refreshed } = await supabase
+      .from('organizations')
+      .select('ai_template_id, enabled_ai_features')
+      .eq('id', target.id)
+      .single()
+    console.log(`✓ org now has ai_template_id=${refreshed.ai_template_id}`)
+    console.log(`  enabled_ai_features =`, refreshed.enabled_ai_features)
+    sourceToggles = refreshed.enabled_ai_features
+  } else {
+    console.log(`  simulating toggles =`, testEnabled)
+  }
+
+  const enabled = resolveEnabledFeatures(features, sourceToggles)
   const resolved = applyFeatureGating(template.base_prompt, features, enabled)
 
   // ---- 5. Assertions ----
@@ -128,9 +167,11 @@ try {
   if (!checks.every((c) => c.pass)) process.exitCode = 1
 } finally {
   // ---- restore ----
-  await supabase
-    .from('organizations')
-    .update(prior)
-    .eq('id', target.id)
-  console.log(`\n✓ restored ${target.name} to prior strategy`)
+  if (!readonly && target && prior) {
+    await supabase
+      .from('organizations')
+      .update(prior)
+      .eq('id', target.id)
+    console.log(`\n✓ restored ${target.name} to prior strategy`)
+  }
 }
