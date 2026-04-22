@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { Archive } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
+import { resolveImpersonation } from '@/lib/impersonation'
 import type { Customer } from '@/lib/types/database.types'
 import CopyId from '@/components/CopyId'
 import NewCustomerModal from '@/components/NewCustomerModal'
@@ -23,13 +24,19 @@ export default async function CustomersPage({ searchParams }: { searchParams: Se
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('organization_id')
-    .eq('id', user.id)
-    .single()
+  const [{ data: profile }, impersonation] = await Promise.all([
+    supabase
+      .from('profiles')
+      .select('organization_id')
+      .eq('id', user.id)
+      .single<{ organization_id: string | null }>(),
+    resolveImpersonation(),
+  ])
 
-  if (!profile?.organization_id) redirect('/onboarding')
+  const effectiveOrgId = impersonation.active
+    ? impersonation.orgId
+    : profile?.organization_id ?? null
+  if (!effectiveOrgId) redirect('/onboarding')
 
   const q = params.q?.trim() ?? ''
   const showArchived = params.show === 'all'
@@ -37,7 +44,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Se
   let query = supabase
     .from('customers')
     .select('id, display_id, first_name, last_name, email, phone, company, created_at, lead_id, archived_at')
-    .eq('organization_id', profile.organization_id)
+    .eq('organization_id', effectiveOrgId)
     .is('deleted_at', null)
     .order('created_at', { ascending: false })
     .limit(500)
@@ -60,7 +67,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Se
     supabase
       .from('customers')
       .select('id', { count: 'exact', head: true })
-      .eq('organization_id', profile.organization_id)
+      .eq('organization_id', effectiveOrgId)
       .is('deleted_at', null)
       .not('archived_at', 'is', null),
   ])

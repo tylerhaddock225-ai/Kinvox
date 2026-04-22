@@ -1,6 +1,7 @@
 import { Suspense } from 'react'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { resolveImpersonation } from '@/lib/impersonation'
 import CreateAppointmentModal from '@/components/CreateAppointmentModal'
 import CalendarCore, { type CalAppt } from '@/components/calendar/CalendarCore'
 import CalendarViewToggle from '@/components/calendar/CalendarViewToggle'
@@ -17,16 +18,25 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('organization_id, role')
-    .eq('id', user.id)
-    .single()
+  const [{ data: profile }, impersonation] = await Promise.all([
+    supabase
+      .from('profiles')
+      .select('organization_id, role')
+      .eq('id', user.id)
+      .single<{ organization_id: string | null; role: string | null }>(),
+    resolveImpersonation(),
+  ])
 
-  if (!profile?.organization_id) redirect('/onboarding')
+  const effectiveOrgId = impersonation.active
+    ? impersonation.orgId
+    : profile?.organization_id ?? null
+  if (!effectiveOrgId) redirect('/onboarding')
 
-  const orgId         = profile.organization_id
-  const isAdmin       = profile.role === 'admin'
+  const orgId         = effectiveOrgId
+  // HQ admins impersonating a tenant are treated as admins of that tenant
+  // for view-toggle purposes — their intent is to assist, and RLS still
+  // enforces the actual write boundaries downstream.
+  const isAdmin       = impersonation.active || profile?.role === 'admin'
   const openId        = typeof params.open    === 'string' ? params.open    : null
   const requestedView = typeof params.view    === 'string' ? params.view    : null
   const agentParam    = typeof params.agent   === 'string' ? params.agent   : null

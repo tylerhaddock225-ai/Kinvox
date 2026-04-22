@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { resolveImpersonation } from '@/lib/impersonation'
 import { redirect } from 'next/navigation'
 import TeamTabs from './TeamTabs'
 import type { Permissions } from '@/lib/permissions'
@@ -27,16 +28,27 @@ export default async function TeamSettingsPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('organization_id, role')
-    .eq('id', user.id)
-    .single()
+  const [{ data: profile }, impersonation] = await Promise.all([
+    supabase
+      .from('profiles')
+      .select('organization_id, role')
+      .eq('id', user.id)
+      .single<{ organization_id: string | null; role: string | null }>(),
+    resolveImpersonation(),
+  ])
 
-  if (!profile?.organization_id) redirect('/onboarding')
-  if (profile.role !== 'admin') redirect('/')
+  const effectiveOrgId = impersonation.active
+    ? impersonation.orgId
+    : profile?.organization_id ?? null
+  if (!effectiveOrgId) redirect('/onboarding')
 
-  const orgId = profile.organization_id
+  // An HQ admin who has passed resolveImpersonation's is_admin_hq gate
+  // is treated as a tenant admin on the impersonated org for read
+  // access; tenant role is only enforced when the caller is acting as
+  // themselves.
+  if (!impersonation.active && profile?.role !== 'admin') redirect('/')
+
+  const orgId = effectiveOrgId
 
   // Fetch members, roles, and the org settings row in parallel
   const [membersRes, rolesRes, orgRes] = await Promise.all([

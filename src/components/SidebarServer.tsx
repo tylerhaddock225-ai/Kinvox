@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { resolveImpersonation } from '@/lib/impersonation'
 import Sidebar from './Sidebar'
 
 export default async function SidebarServer() {
@@ -6,6 +7,13 @@ export default async function SidebarServer() {
   const { data: { user } } = await supabase.auth.getUser()
 
   if (!user) return <Sidebar canViewLeads={true} />
+
+  // Resolve impersonation FIRST so the sidebar's "current org" reflects
+  // the merchant the HQ admin is acting as, not the admin's own (null)
+  // tenant org. Without this, navigating /leads → Dashboard falls back
+  // to "/" which sorting-hats platform_owners straight to /admin-hq,
+  // kicking them out of the impersonation context.
+  const impersonation = await resolveImpersonation()
 
   const [{ data: canView }, { data: profile }] = await Promise.all([
     supabase.rpc('auth_user_view_leads'),
@@ -16,13 +24,18 @@ export default async function SidebarServer() {
       .single<{ organization_id: string | null; system_role: 'platform_owner' | 'platform_support' | null }>(),
   ])
 
+  // Effective org is whichever lens the caller is looking through.
+  const effectiveOrgId = impersonation.active
+    ? impersonation.orgId
+    : profile?.organization_id ?? null
+
   let orgName: string | null = null
   let orgSlug: string | null = null
-  if (profile?.organization_id) {
+  if (effectiveOrgId) {
     const { data: org } = await supabase
       .from('organizations')
       .select('name, slug')
-      .eq('id', profile.organization_id)
+      .eq('id', effectiveOrgId)
       .single<{ name: string | null; slug: string | null }>()
     orgName = org?.name ?? null
     orgSlug = org?.slug ?? null

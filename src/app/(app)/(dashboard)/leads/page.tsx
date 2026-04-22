@@ -1,6 +1,7 @@
 import { Suspense } from 'react'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { resolveImpersonation } from '@/lib/impersonation'
 import type { Lead } from '@/lib/types/database.types'
 import CreateLeadModal from '@/components/CreateLeadModal'
 import CopyId from '@/components/CopyId'
@@ -40,13 +41,22 @@ export default async function LeadsPage({ searchParams }: { searchParams: Search
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('organization_id')
-    .eq('id', user.id)
-    .single()
+  const [{ data: profile }, impersonation] = await Promise.all([
+    supabase
+      .from('profiles')
+      .select('organization_id')
+      .eq('id', user.id)
+      .single<{ organization_id: string | null }>(),
+    resolveImpersonation(),
+  ])
 
-  if (!profile?.organization_id) redirect('/onboarding')
+  // HQ admins have no tenant org (profile.organization_id is null). When
+  // they're impersonating, we scope to the impersonated org; otherwise
+  // we require a tenant org and bounce to /onboarding.
+  const effectiveOrgId = impersonation.active
+    ? impersonation.orgId
+    : profile?.organization_id ?? null
+  if (!effectiveOrgId) redirect('/onboarding')
 
   const q      = params.q?.trim() ?? ''
   const status = pickStatus(params.status)
@@ -55,7 +65,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Search
   let query = supabase
     .from('leads')
     .select('id, display_id, first_name, last_name, email, company, status, source, created_at')
-    .eq('organization_id', profile.organization_id)
+    .eq('organization_id', effectiveOrgId)
     .is('deleted_at', null)
     .order('created_at', { ascending: false })
     .limit(200)

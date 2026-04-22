@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { AlertTriangle } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
+import { resolveImpersonation } from '@/lib/impersonation'
 import type { Ticket } from '@/lib/types/database.types'
 import CreateTicketModal from '@/components/CreateTicketModal'
 import CopyId from '@/components/CopyId'
@@ -106,15 +107,21 @@ export default async function TicketsPage({
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('organization_id')
-    .eq('id', user.id)
-    .single()
+  const [{ data: profile }, impersonation] = await Promise.all([
+    supabase
+      .from('profiles')
+      .select('organization_id')
+      .eq('id', user.id)
+      .single<{ organization_id: string | null }>(),
+    resolveImpersonation(),
+  ])
 
-  if (!profile?.organization_id) redirect('/onboarding')
+  const effectiveOrgId = impersonation.active
+    ? impersonation.orgId
+    : profile?.organization_id ?? null
+  if (!effectiveOrgId) redirect('/onboarding')
 
-  const orgId   = profile.organization_id
+  const orgId   = effectiveOrgId
   const params  = await searchParams
   const requestedQueue: Queue = params.queue === 'closed' ? 'closed' : 'active'
 

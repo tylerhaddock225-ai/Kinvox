@@ -71,6 +71,7 @@ export async function POST(request: NextRequest) {
   const metadata: Record<string, unknown> = {
     captured_via: 'lead_magnet',
     slug,
+    tags: ['lead_magnet'],
   }
   if (address)                       metadata.address = address
   if (typeof body.homestead_exemption === 'boolean') {
