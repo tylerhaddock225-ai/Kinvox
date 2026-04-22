@@ -2,7 +2,7 @@
 
 import { useActionState, useEffect, useRef } from 'react'
 import { Pencil, X } from 'lucide-react'
-import { updateLead, type UpdateLeadState } from '@/app/(dashboard)/actions/leads'
+import { updateLead, type UpdateLeadState } from '@/app/(app)/(dashboard)/actions/leads'
 import type { Lead } from '@/lib/types/database.types'
 
 const INPUT = 'w-full rounded-lg border border-pvx-border bg-gray-900 px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-violet-500'

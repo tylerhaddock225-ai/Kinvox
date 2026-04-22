@@ -2,7 +2,7 @@
 
 import { useEffect, useImperativeHandle, useRef, useState, useActionState, type Ref } from 'react'
 import { Plus, X } from 'lucide-react'
-import { createAppointment } from '@/app/(dashboard)/actions/appointments'
+import { createAppointment } from '@/app/(app)/(dashboard)/actions/appointments'
 
 type Member   = { id: string; full_name: string | null }
 type Customer = { id: string; first_name: string; last_name: string | null; email: string | null }

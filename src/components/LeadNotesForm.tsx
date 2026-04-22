@@ -1,7 +1,7 @@
 'use client'
 
 import { useActionState, useEffect, useRef } from 'react'
-import { addLeadNote, type AddNoteState } from '@/app/(dashboard)/actions/leads'
+import { addLeadNote, type AddNoteState } from '@/app/(app)/(dashboard)/actions/leads'
 
 interface Props {
   leadId: string

@@ -2,7 +2,7 @@ import { Suspense } from 'react'
 import Link from 'next/link'
 import { Eye, Archive } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
-import { startImpersonation } from '@/app/actions/impersonation'
+import { startImpersonation } from '@/app/(app)/actions/impersonation'
 import CopyId from '@/components/CopyId'
 import OrgFilters from './OrgFilters'
 

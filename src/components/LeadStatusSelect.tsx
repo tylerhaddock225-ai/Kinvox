@@ -1,7 +1,7 @@
 'use client'
 
 import { useTransition } from 'react'
-import { updateLeadStatus } from '@/app/(dashboard)/actions/leads'
+import { updateLeadStatus } from '@/app/(app)/(dashboard)/actions/leads'
 import type { Lead } from '@/lib/types/database.types'
 
 const OPTIONS: { value: Lead['status']; label: string }[] = [

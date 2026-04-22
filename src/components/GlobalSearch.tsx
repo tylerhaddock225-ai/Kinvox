@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Search } from 'lucide-react'
-import { globalSearch } from '@/app/actions/search'
+import { globalSearch } from '@/app/(app)/actions/search'
 
 export default function GlobalSearch() {
   const [q, setQ] = useState('')

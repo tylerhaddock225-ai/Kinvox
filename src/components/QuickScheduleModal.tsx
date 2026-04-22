@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useActionState } from 'react'
 import { CalendarPlus, X } from 'lucide-react'
 import { useRouter } from 'next/navigation'
-import { createAppointment } from '@/app/(dashboard)/actions/appointments'
+import { createAppointment } from '@/app/(app)/(dashboard)/actions/appointments'
 
 interface Props {
   leadId?:     string

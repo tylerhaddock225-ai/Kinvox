@@ -1,7 +1,7 @@
 'use client'
 
 import { useActionState, useEffect, useRef } from 'react'
-import { addCustomerNote, type AddNoteState } from '@/app/(dashboard)/actions/customers'
+import { addCustomerNote, type AddNoteState } from '@/app/(app)/(dashboard)/actions/customers'
 
 interface Props {
   customerId: string

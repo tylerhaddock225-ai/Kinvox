@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useActionState } from 'react'
 import { AlertTriangle } from 'lucide-react'
-import { sendHQTicketMessage } from '@/app/(admin)/admin-hq/actions/tickets'
+import { sendHQTicketMessage } from '@/app/(app)/(admin)/admin-hq/actions/tickets'
 
 type MessageType = 'public' | 'internal'
 

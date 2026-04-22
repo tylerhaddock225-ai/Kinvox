@@ -1,7 +1,7 @@
 'use client'
 
 import { useRef, useTransition, type MouseEvent } from 'react'
-import { updateTicketPriority } from '@/app/(dashboard)/actions/tickets'
+import { updateTicketPriority } from '@/app/(app)/(dashboard)/actions/tickets'
 
 type Priority = 'low' | 'medium' | 'high'
 

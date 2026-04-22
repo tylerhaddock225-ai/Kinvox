@@ -9,7 +9,7 @@ import {
   updateRole,
   deleteRole,
 } from './actions'
-import { updateSupportEmail, initializeInboundEmail } from '@/app/(dashboard)/actions/org-settings'
+import { updateSupportEmail, initializeInboundEmail } from '@/app/(app)/(dashboard)/actions/org-settings'
 import { PERMISSION_KEYS, DEFAULT_PERMISSIONS, type Permissions } from '@/lib/permissions'
 import type { MemberRow, RoleRow } from './page'
 

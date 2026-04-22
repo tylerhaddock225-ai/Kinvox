@@ -2,7 +2,7 @@
 
 import { useState, useRef, useTransition } from 'react'
 import { SlidersHorizontal, X } from 'lucide-react'
-import { saveWidgetConfig } from '@/app/(dashboard)/actions/dashboard'
+import { saveWidgetConfig } from '@/app/(app)/(dashboard)/actions/dashboard'
 import type { WidgetDef } from '@/lib/widgets'
 
 interface Props {

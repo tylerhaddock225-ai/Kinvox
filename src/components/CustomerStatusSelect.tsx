@@ -1,7 +1,7 @@
 'use client'
 
 import { useTransition } from 'react'
-import { updateCustomerStatus, type CustomerStatus } from '@/app/(dashboard)/actions/customers'
+import { updateCustomerStatus, type CustomerStatus } from '@/app/(app)/(dashboard)/actions/customers'
 
 const OPTIONS: { value: CustomerStatus; label: string }[] = [
   { value: 'active',     label: 'Active' },

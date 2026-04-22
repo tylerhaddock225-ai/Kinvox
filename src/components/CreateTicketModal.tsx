@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useActionState } from 'react'
 import { Plus, X } from 'lucide-react'
-import { createTicket } from '@/app/(dashboard)/actions/tickets'
+import { createTicket } from '@/app/(app)/(dashboard)/actions/tickets'
 
 type Member   = { id: string; full_name: string | null }
 type Customer = { id: string; first_name: string; last_name: string | null; email: string | null }

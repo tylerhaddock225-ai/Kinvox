@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useActionState } from 'react'
 import { Pencil } from 'lucide-react'
-import { updateTicketSubject } from '@/app/(dashboard)/actions/tickets'
+import { updateTicketSubject } from '@/app/(app)/(dashboard)/actions/tickets'
 
 const INITIAL = null as ReturnType<typeof useActionState<Awaited<ReturnType<typeof updateTicketSubject>>, FormData>>[0]
 

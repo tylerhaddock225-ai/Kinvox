@@ -3,7 +3,7 @@
 import { useEffect, useRef, useActionState } from 'react'
 import { LifeBuoy, Plus, X } from 'lucide-react'
 import { useRouter } from 'next/navigation'
-import { createHQSupportTicket } from '@/app/(dashboard)/actions/tickets'
+import { createHQSupportTicket } from '@/app/(app)/(dashboard)/actions/tickets'
 
 const INITIAL = null as ReturnType<typeof useActionState<Awaited<ReturnType<typeof createHQSupportTicket>>, FormData>>[0]
 

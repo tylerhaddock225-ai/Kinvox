@@ -1,5 +1,5 @@
 import { Eye, LogOut } from 'lucide-react'
-import { stopImpersonation } from '@/app/actions/impersonation'
+import { stopImpersonation } from '@/app/(app)/actions/impersonation'
 
 interface Props {
   orgName: string

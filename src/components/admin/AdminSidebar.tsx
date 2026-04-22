@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Building2, Ticket, Sparkles, CreditCard, Zap, Eye, LayoutDashboard, Settings, LogOut, ShieldCheck } from "lucide-react";
-import { startImpersonation } from "@/app/actions/impersonation";
-import { logout } from "@/app/(auth)/actions";
+import { startImpersonation } from "@/app/(app)/actions/impersonation";
+import { logout } from "@/app/(app)/(auth)/actions";
 
 type SystemRole = "platform_owner" | "platform_support";
 

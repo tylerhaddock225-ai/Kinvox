@@ -2,7 +2,7 @@
 
 import { useActionState, useEffect, useRef } from 'react'
 import { X, Plus } from 'lucide-react'
-import { createLead } from '@/app/(dashboard)/actions/leads'
+import { createLead } from '@/app/(app)/(dashboard)/actions/leads'
 
 const INPUT = 'w-full rounded-lg border border-pvx-border bg-gray-900 px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-violet-500'
 const LABEL = 'block text-xs font-medium text-gray-400 mb-1'

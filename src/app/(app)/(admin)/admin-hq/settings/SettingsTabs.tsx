@@ -2,7 +2,7 @@
 
 import { useActionState, useEffect, useRef, useState, useTransition } from 'react'
 import { CheckCircle2, Hash, ToggleRight } from 'lucide-react'
-import { updateTicketIdPrefix, updatePlatformToggle } from '@/app/(admin)/admin-hq/actions/platform-settings'
+import { updateTicketIdPrefix, updatePlatformToggle } from '@/app/(app)/(admin)/admin-hq/actions/platform-settings'
 
 const INPUT = 'w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-violet-500'
 const LABEL = 'block text-xs font-medium text-gray-400 mb-1'

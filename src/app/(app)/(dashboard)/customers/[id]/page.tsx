@@ -10,8 +10,8 @@ import EditCustomerModal from '@/components/EditCustomerModal'
 import CopyId from '@/components/CopyId'
 import QuickScheduleModal from '@/components/QuickScheduleModal'
 import ConfirmButton from '@/components/admin/ConfirmButton'
-import { archiveCustomer, restoreCustomer } from '@/app/(dashboard)/actions/customers'
-import type { CustomerStatus } from '@/app/(dashboard)/actions/customers'
+import { archiveCustomer, restoreCustomer } from '@/app/(app)/(dashboard)/actions/customers'
+import type { CustomerStatus } from '@/app/(app)/(dashboard)/actions/customers'
 
 type CustomerRowWithStatus = Customer & { status: CustomerStatus | null }
 

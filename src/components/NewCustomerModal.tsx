@@ -2,7 +2,7 @@
 
 import { useActionState, useRef } from 'react'
 import { X, UserPlus } from 'lucide-react'
-import { createNewCustomer, type CreateCustomerState } from '@/app/(dashboard)/actions/customers'
+import { createNewCustomer, type CreateCustomerState } from '@/app/(app)/(dashboard)/actions/customers'
 
 const INPUT = 'w-full rounded-lg border border-pvx-border bg-gray-900 px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-violet-500'
 const LABEL = 'block text-xs font-medium text-gray-400 mb-1'

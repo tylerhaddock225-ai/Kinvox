@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useActionState } from 'react'
 import { AlertTriangle } from 'lucide-react'
-import { sendTicketMessage } from '@/app/(dashboard)/actions/tickets'
+import { sendTicketMessage } from '@/app/(app)/(dashboard)/actions/tickets'
 
 type MessageType = 'public' | 'internal'
 

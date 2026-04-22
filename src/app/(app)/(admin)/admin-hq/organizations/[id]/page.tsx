@@ -7,7 +7,7 @@ import {
   setOrgStatus,
   archiveOrganization,
   restoreOrganization,
-} from '@/app/(admin)/admin-hq/actions/organizations'
+} from '@/app/(app)/(admin)/admin-hq/actions/organizations'
 import ConfirmButton from '@/components/admin/ConfirmButton'
 
 export const dynamic = 'force-dynamic'

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Users, UserCircle, CalendarCheck, Ticket, LayoutDashboard, Settings, Shield, LifeBuoy, LogOut } from "lucide-react";
 import Logo from "./Logo";
-import { logout } from "@/app/(auth)/actions";
+import { logout } from "@/app/(app)/(auth)/actions";
 
 const leadsNav = { href: "/leads", label: "Leads", icon: Users };
 

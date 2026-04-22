@@ -14,7 +14,7 @@ import {
   deleteAppointment,
   updateAppointment,
   type State,
-} from '@/app/(dashboard)/actions/appointments'
+} from '@/app/(app)/(dashboard)/actions/appointments'
 import CopyId from '@/components/CopyId'
 import type { CalAppt } from './CalendarCore'
 

@@ -2,7 +2,7 @@
 
 import { useActionState, useEffect, useRef } from 'react'
 import { Pencil, X } from 'lucide-react'
-import { updateCustomer, type UpdateCustomerState } from '@/app/(dashboard)/actions/customers'
+import { updateCustomer, type UpdateCustomerState } from '@/app/(app)/(dashboard)/actions/customers'
 import type { Customer } from '@/lib/types/database.types'
 
 const INPUT = 'w-full rounded-lg border border-pvx-border bg-gray-900 px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-violet-500'

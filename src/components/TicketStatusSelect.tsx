@@ -1,7 +1,7 @@
 'use client'
 
 import { useRef, useTransition, type MouseEvent } from 'react'
-import { updateTicketStatus } from '@/app/(dashboard)/actions/tickets'
+import { updateTicketStatus } from '@/app/(app)/(dashboard)/actions/tickets'
 
 type Status = 'open' | 'pending' | 'closed'
 
