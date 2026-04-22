@@ -43,6 +43,11 @@ supabase/.temp/
 # vercel
 .vercel
 
+# temp files
+*.tmp
+*.tmp.*
+.tmp/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
