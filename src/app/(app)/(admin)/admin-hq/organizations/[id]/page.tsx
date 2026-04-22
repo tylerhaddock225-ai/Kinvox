@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { ArrowLeft, ShieldAlert, Archive, RotateCcw, Sparkles } from 'lucide-react'
+import { ArrowLeft, ShieldAlert, Archive, RotateCcw, Sparkles, Megaphone } from 'lucide-react'
 import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import {
@@ -10,7 +10,20 @@ import {
 } from '@/app/(app)/(admin)/admin-hq/actions/organizations'
 import ConfirmButton from '@/components/admin/ConfirmButton'
 import OrgAiStrategyForm from '@/components/admin/OrgAiStrategyForm'
+import OrgLeadCaptureForm from '@/components/admin/OrgLeadCaptureForm'
 import type { AiTemplate } from '@/lib/ai-templates'
+
+type TabKey = 'details' | 'lead-capture'
+const TABS: Array<{ key: TabKey; label: string; icon: typeof Sparkles }> = [
+  { key: 'details',      label: 'Details',      icon: Sparkles },
+  { key: 'lead-capture', label: 'Lead Capture', icon: Megaphone },
+]
+
+// Base URL the preview link + embed snippet should use. NEXT_PUBLIC_APP_URL
+// is set per-environment in Vercel; we fall back to the sandbox host so
+// local dev always shows a plausible domain.
+const LANDING_BASE =
+  (process.env.NEXT_PUBLIC_APP_URL ?? 'https://sandbox.kinvoxtech.com').replace(/\/$/, '')
 
 export const dynamic = 'force-dynamic'
 
@@ -33,28 +46,36 @@ const PLANS: Array<{ value: 'free' | 'pro' | 'enterprise'; label: string }> = [
 
 export default async function AdminOrgDetailPage({
   params,
+  searchParams,
 }: {
-  params: Promise<{ id: string }>
+  params:       Promise<{ id: string }>
+  searchParams: Promise<{ tab?: string; error?: string }>
 }) {
   const { id } = await params
+  const sp     = await searchParams
+  const activeTab: TabKey = sp.tab === 'lead-capture' ? 'lead-capture' : 'details'
+  const errorMessage = typeof sp.error === 'string' ? sp.error : null
   const supabase = await createClient()
 
   const { data: org } = await supabase
     .from('organizations')
-    .select('id, name, slug, vertical, status, plan, deleted_at, created_at, owner_id, ai_template_id, enabled_ai_features')
+    .select('id, name, slug, vertical, status, plan, deleted_at, created_at, owner_id, ai_template_id, enabled_ai_features, lead_magnet_slug, lead_magnet_settings, website_url')
     .eq('id', id)
     .single<{
-      id:                  string
-      name:                string
-      slug:                string | null
-      vertical:            string | null
-      status:              string | null
-      plan:                string | null
-      deleted_at:          string | null
-      created_at:          string
-      owner_id:            string
-      ai_template_id:      string | null
-      enabled_ai_features: Record<string, boolean> | null
+      id:                   string
+      name:                 string
+      slug:                 string | null
+      vertical:             string | null
+      status:               string | null
+      plan:                 string | null
+      deleted_at:           string | null
+      created_at:           string
+      owner_id:             string
+      ai_template_id:       string | null
+      enabled_ai_features:  Record<string, boolean> | null
+      lead_magnet_slug:     string | null
+      lead_magnet_settings: { enabled?: boolean; headline?: string; features?: string[] } | null
+      website_url:          string | null
     }>()
 
   if (!org) notFound()
@@ -96,6 +117,31 @@ export default async function AdminOrgDetailPage({
         )}
       </header>
 
+      {/* Tab nav */}
+      <nav className="flex items-center gap-1 border-b border-pvx-border">
+        {TABS.map(({ key, label, icon: Icon }) => {
+          const active = key === activeTab
+          const href = key === 'details'
+            ? `/admin-hq/organizations/${org.id}`
+            : `/admin-hq/organizations/${org.id}?tab=${key}`
+          return (
+            <Link
+              key={key}
+              href={href}
+              className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors border-b-2 -mb-px ${
+                active
+                  ? 'text-violet-200 border-violet-500'
+                  : 'text-gray-400 border-transparent hover:text-gray-200 hover:border-pvx-border'
+              }`}
+            >
+              <Icon className="w-3.5 h-3.5" />
+              {label}
+            </Link>
+          )
+        })}
+      </nav>
+
+      {activeTab === 'details' && <>
       {/* Status toggle */}
       <section className="rounded-xl border border-pvx-border bg-gray-900 p-5">
         <div className="flex items-center justify-between gap-4">
@@ -257,6 +303,30 @@ export default async function AdminOrgDetailPage({
           </>
         )}
       </section>
+      </>}
+
+      {activeTab === 'lead-capture' && (
+        <section className="rounded-xl border border-pvx-border bg-gray-900 p-5">
+          <div className="flex items-center gap-2">
+            <Megaphone className="w-4 h-4 text-violet-300" />
+            <h2 className="text-sm font-semibold text-white">Lead Capture</h2>
+          </div>
+          <p className="mt-1 text-xs text-gray-500">
+            Configure this organization's public lead-magnet landing page and copy the embed snippet for their website.
+          </p>
+
+          <div className="mt-5">
+            <OrgLeadCaptureForm
+              orgId={org.id}
+              slug={org.lead_magnet_slug}
+              settings={org.lead_magnet_settings}
+              websiteUrl={org.website_url}
+              landingBase={LANDING_BASE}
+              errorMessage={errorMessage}
+            />
+          </div>
+        </section>
+      )}
     </div>
   )
 }
