@@ -1,5 +1,29 @@
+/**
+ * Kinvox proxy (Next.js 16 — formerly `middleware.ts`).
+ *
+ * Multi-domain routing + auth gating:
+ *   - `kinvoxtech.com` / `www.kinvoxtech.com` / `localhost`    → marketing
+ *   - `app.kinvoxtech.com` / `sandbox.kinvoxtech.com`          → app
+ *   - `app.localhost`                                           → app (dev)
+ *
+ * Two-stage pipeline per request:
+ *   1. Hostname gate (here). Marketing requests for non-marketing paths
+ *      307 to the app subdomain; app requests pass straight through to
+ *      the auth stage.
+ *   2. Auth / sorting-hat (see `@/lib/supabase/session#updateSession`).
+ *      Decides where a signed-in user belongs based on their role and
+ *      org state, and bounces unsigned-in requests to /login.
+ *
+ * Invariant: the `(marketing)` route tree is unreachable on an app host.
+ * A post-hoc assertion below forces a /login redirect if a marketing
+ * path ever slips through updateSession — it shouldn't, but we shout
+ * loudly if it does.
+ *
+ * Shared paths (`/api/*`, `/_next/*`, static assets) bypass the host
+ * rewrite so webhooks keep working on whichever host receives them.
+ */
 import { NextResponse, type NextRequest } from 'next/server'
-import { updateSession } from '@/lib/supabase/middleware'
+import { updateSession } from '@/lib/supabase/session'
 
 const PROD_APP_HOSTS = new Set(['app.kinvoxtech.com', 'sandbox.kinvoxtech.com'])
 
@@ -11,7 +35,6 @@ function splitHost(host: string): { name: string; port: string } {
 function isAppHost(host: string): boolean {
   const { name } = splitHost(host)
   if (PROD_APP_HOSTS.has(name)) return true
-  // Local dev: `app.localhost` (and any subdomain of it) routes to the app.
   return name === 'app.localhost' || name.endsWith('.app.localhost')
 }
 
@@ -28,7 +51,7 @@ function isMarketingPath(pathname: string): boolean {
   return pathname === '/' || pathname === '/apply' || pathname.startsWith('/apply/')
 }
 
-function rewriteHost(request: NextRequest, newName: string): string {
+function buildUrlOnHost(request: NextRequest, newName: string): string {
   const { port } = splitHost(request.headers.get('host') ?? '')
   const protocol = request.nextUrl.protocol || 'http:'
   const pathAndQuery = `${request.nextUrl.pathname}${request.nextUrl.search}`
@@ -48,36 +71,32 @@ function appHostFor(request: NextRequest): string {
   return 'app.kinvoxtech.com'
 }
 
-function marketingHostFor(request: NextRequest): string {
-  const { name } = splitHost(request.headers.get('host') ?? '')
-  if (name === 'app.localhost' || name.endsWith('.app.localhost')) return 'localhost'
-  return 'kinvoxtech.com'
-}
-
 export async function proxy(request: NextRequest) {
   const host = request.headers.get('host') ?? ''
   const pathname = request.nextUrl.pathname
   const appHost = isAppHost(host)
 
-  // /api, /_next, and static assets are served on whichever host they land on.
-  // Webhook receivers depend on this — redirecting them would break integrations.
   if (isSharedPath(pathname)) {
     return appHost ? updateSession(request) : NextResponse.next()
   }
 
   if (appHost) {
-    // /apply is marketing-only, but the page will still render on the
-    // app host if someone lands here directly. We don't redirect away
-    // because Next dev collapses same-root-host Location headers to
-    // relative paths, which would loop. Production lives on truly
-    // separate hosts so this path is effectively unreachable there.
-    return updateSession(request)
+    const response = await updateSession(request)
+    // Assertion: updateSession's sorting hat always redirects `/`,
+    // `/onboarding`, `/pending-invite`. If a marketing path ever
+    // returns a non-redirect response, force /login instead of
+    // rendering the (marketing) tree on an app host.
+    const isRedirect = response.status >= 300 && response.status < 400
+    if (!isRedirect && isMarketingPath(pathname)) {
+      return new NextResponse(null, { status: 307, headers: { Location: '/login' } })
+    }
+    return response
   }
 
-  // Marketing host: only the landing page and /apply render here.
-  // Everything else is an app route and bounces to the app subdomain.
+  // Marketing host. Anything that isn't `/` or `/apply*` is an app
+  // route that landed on the wrong subdomain — bounce to the app host.
   if (!isMarketingPath(pathname)) {
-    return hostRedirect(rewriteHost(request, appHostFor(request)))
+    return hostRedirect(buildUrlOnHost(request, appHostFor(request)))
   }
   return NextResponse.next()
 }

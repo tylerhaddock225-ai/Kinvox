@@ -1,5 +1,7 @@
 import Link from 'next/link'
 
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.kinvoxtech.com'
+
 export const metadata = {
   title: 'Kinvox — Sales & Support, built for Oklahoma City',
   description:
@@ -29,7 +31,7 @@ export default function LandingPage() {
             Apply for access
           </Link>
           <a
-            href="https://app.kinvoxtech.com/login"
+            href={`${APP_URL}/login`}
             className="rounded-lg border border-gray-700 hover:border-gray-500 px-6 py-3 font-medium"
           >
             Existing customer? Sign in

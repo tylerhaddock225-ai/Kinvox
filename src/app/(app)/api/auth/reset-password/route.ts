@@ -8,7 +8,8 @@ export const dynamic = 'force-dynamic'
 
 const LOG = '[reset-password]'
 
-const RESET_BASE_URL    = 'https://www.kinvoxtech.com/reset-password'
+const APP_URL           = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.kinvoxtech.com'
+const RESET_BASE_URL    = `${APP_URL}/reset-password`
 const TOKEN_TTL_MINUTES = 60
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/

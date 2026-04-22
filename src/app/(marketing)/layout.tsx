@@ -1,5 +1,7 @@
 import Link from 'next/link'
 
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.kinvoxtech.com'
+
 export default function MarketingLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen flex flex-col bg-pvx-bg text-gray-100">
@@ -9,7 +11,7 @@ export default function MarketingLayout({ children }: { children: React.ReactNod
           <div className="flex items-center gap-6 text-sm">
             <Link href="/apply" className="text-gray-300 hover:text-white">Apply</Link>
             <a
-              href="https://app.kinvoxtech.com/login"
+              href={`${APP_URL}/login`}
               className="rounded-lg bg-white/10 hover:bg-white/20 px-4 py-2 font-medium"
             >
               Sign in

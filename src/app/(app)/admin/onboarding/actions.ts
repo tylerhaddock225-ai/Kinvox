@@ -35,7 +35,7 @@ export async function inviteOrgOwner(orgId: string, ownerEmail: string) {
 
   const { error } = await admin.auth.admin.inviteUserByEmail(normalised, {
     data: { invited_to_org: orgId },
-    redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000'}/onboarding`,
+    redirectTo: `${process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.kinvoxtech.com'}/onboarding`,
   })
 
   if (error) return { error: error.message }

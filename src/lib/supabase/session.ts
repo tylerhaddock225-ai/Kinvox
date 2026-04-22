@@ -1,3 +1,22 @@
+/**
+ * updateSession — the auth + sorting-hat pass of the proxy pipeline.
+ *
+ * Invoked from `src/proxy.ts` on every request that reaches the app
+ * host (hostname gating happens upstream — this file never checks host
+ * names). Responsibilities:
+ *   - Refresh the Supabase session cookie
+ *   - Gate 0: unauth user on a protected path → /login
+ *   - Gate 1: auth user on /login|/signup|etc → /
+ *   - Gate 2: centralized sorting hat for /, /pending-invite, /onboarding.
+ *     Decides the user's one legitimate destination from profile state:
+ *     platform_* → /admin-hq, tenant member → /{slug}, invitee →
+ *     /onboarding, otherwise → /pending-invite.
+ *   - Gate 3: orphan guard on any other protected path — users without
+ *     an org AND without a platform role get bounced to /pending-invite.
+ *
+ * Response cache is no-store'd so BFCache can't replay a stale dashboard
+ * after logout (see noStore helper).
+ */
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
