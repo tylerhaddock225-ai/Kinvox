@@ -271,7 +271,7 @@ export default async function AdminOrgDetailPage({
           <h2 className="text-sm font-semibold text-white">Send Claim Invite</h2>
         </div>
         <p className="mt-1 text-xs text-gray-500">
-          Emails a 7-day claim link to a merchant. On redemption they become the owner of this organization and get tenant-admin access.
+          Emails a 7-day claim link to the organization owner. On redemption they become the owner of this organization and get tenant-admin access.
         </p>
 
         {claimSentTo && (
