@@ -9,7 +9,7 @@ import CopyId from '@/components/CopyId'
 import TicketStatusSelect from '@/components/TicketStatusSelect'
 import TicketPrioritySelect from '@/components/TicketPrioritySelect'
 import TicketsFilterBar from '@/components/TicketsFilterBar'
-import TicketsRow from '@/components/TicketsRow'
+import TicketRow from '@/components/TicketRow'
 import SortableHeader from '@/components/SortableHeader'
 
 type TicketRow = Pick<
@@ -297,7 +297,7 @@ export default async function TicketsPage({
             </thead>
             <tbody className="divide-y divide-pvx-border">
               {rows.map(t => (
-                <TicketsRow key={t.id} ticketId={t.id}>
+                <TicketRow key={t.id} href={`/tickets/${t.id}`}>
                   <td className="pl-6 pr-3 py-3 text-xs">
                     <CopyId id={t.display_id} />
                   </td>
@@ -321,7 +321,7 @@ export default async function TicketsPage({
                   <td className="px-3 py-3 pr-6 text-gray-500">
                     {new Date(t.created_at).toLocaleDateString()}
                   </td>
-                </TicketsRow>
+                </TicketRow>
               ))}
             </tbody>
           </table>

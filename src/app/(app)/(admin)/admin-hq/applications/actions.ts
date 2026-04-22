@@ -8,7 +8,7 @@ export async function approveApplication(formData: FormData) {
   if (!id) return
 
   const supabase = await createClient()
-  const { error } = await supabase.rpc('approve_merchant_application', {
+  const { error } = await supabase.rpc('approve_organization_application', {
     application_id: id,
   })
 
