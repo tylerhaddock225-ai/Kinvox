@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Building2, Ticket, Sparkles, CreditCard, Zap, Eye, LayoutDashboard, Settings, LogOut, ShieldCheck } from "lucide-react";
+import { Building2, Ticket, Sparkles, CreditCard, Zap, Eye, Inbox, LayoutDashboard, Settings, LogOut, ShieldCheck } from "lucide-react";
 import { startImpersonation } from "@/app/(app)/actions/impersonation";
 import { logout } from "@/app/(app)/(auth)/actions";
 
@@ -23,6 +23,7 @@ type NavItem = {
 const baseNav: NavItem[] = [
   { href: "/admin-hq",               label: "Dashboard",     icon: LayoutDashboard, exact: true },
   { href: "/admin-hq/organizations", label: "Organizations", icon: Building2 },
+  { href: "/admin-hq/applications",  label: "Applications",  icon: Inbox },
   { href: "/admin-hq/tickets",       label: "Tickets",       icon: Ticket },
   { href: "/admin-hq/ai-templates",  label: "AI Templates",  icon: Sparkles },
 ];
