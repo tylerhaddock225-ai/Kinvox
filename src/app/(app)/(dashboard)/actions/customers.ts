@@ -3,6 +3,27 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { resolveImpersonation } from '@/lib/impersonation'
+
+// Zero-Inference: creates write into the impersonated tenant when an HQ
+// admin is "acting as" one; otherwise into the caller's profile org. Never
+// a default — absent either resolution, the action errors rather than
+// silently writing to the wrong tenant.
+async function resolveEffectiveOrgId(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+): Promise<string | null> {
+  const impersonation = await resolveImpersonation()
+  if (impersonation.active) return impersonation.orgId
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('organization_id')
+    .eq('id', userId)
+    .single<{ organization_id: string | null }>()
+
+  return profile?.organization_id ?? null
+}
 
 // ── Types (shared with client components) ───────────────────────────────────
 
@@ -36,19 +57,14 @@ export async function createNewCustomer(
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { status: 'error', error: 'Unauthorized' }
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('organization_id')
-    .eq('id', user.id)
-    .single()
-
-  if (!profile?.organization_id) return { status: 'error', error: 'No organization found' }
+  const orgId = await resolveEffectiveOrgId(supabase, user.id)
+  if (!orgId) return { status: 'error', error: 'No organization found' }
 
   const firstName = ((formData.get('first_name') as string) ?? '').trim()
   if (!firstName) return { status: 'error', error: 'First name is required' }
 
   const { data: inserted, error } = await supabase.from('customers').insert({
-    organization_id: profile.organization_id,
+    organization_id: orgId,
     first_name: firstName,
     last_name:  ((formData.get('last_name') as string) ?? '').trim() || null,
     company:    ((formData.get('company')   as string) ?? '').trim() || null,
@@ -119,28 +135,20 @@ export async function updateCustomerStatus(customerId: string, status: string): 
 // restorable. We org-scope the update so RLS can\u2019t silently no-op on a row
 // that belongs to another tenant.
 
-async function assertCustomerInOrg(customerId: string): Promise<string | null> {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return null
-
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('organization_id')
-    .eq('id', user.id)
-    .single()
-
-  return profile?.organization_id ?? null
-}
-
 export async function archiveCustomer(formData: FormData): Promise<void> {
   const customerId = String(formData.get('customer_id') ?? '').trim()
   if (!customerId) return
 
-  const orgId = await assertCustomerInOrg(customerId)
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return
+
+  // Use the impersonation-aware org so an HQ admin "acting as" a tenant
+  // hits the tenant's row instead of silently no-op'ing against their
+  // own home org.
+  const orgId = await resolveEffectiveOrgId(supabase, user.id)
   if (!orgId) return
 
-  const supabase = await createClient()
   await supabase
     .from('customers')
     .update({ archived_at: new Date().toISOString() })
@@ -155,10 +163,13 @@ export async function restoreCustomer(formData: FormData): Promise<void> {
   const customerId = String(formData.get('customer_id') ?? '').trim()
   if (!customerId) return
 
-  const orgId = await assertCustomerInOrg(customerId)
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return
+
+  const orgId = await resolveEffectiveOrgId(supabase, user.id)
   if (!orgId) return
 
-  const supabase = await createClient()
   await supabase
     .from('customers')
     .update({ archived_at: null })

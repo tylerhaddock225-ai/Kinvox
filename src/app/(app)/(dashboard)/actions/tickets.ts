@@ -2,22 +2,37 @@
 
 import { ServerClient } from 'postmark'
 import { createClient } from '@/lib/supabase/server'
+import { resolveImpersonation } from '@/lib/impersonation'
 import { revalidatePath } from 'next/cache'
 
 type State = { status: 'success' } | { status: 'error'; error: string } | null
+
+// Zero-Inference: never trust a client-supplied organization_id and never
+// fall back to a default. The effective org is the impersonated tenant when
+// an HQ admin is acting as one; otherwise the caller's own profile org.
+async function resolveEffectiveOrgId(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+): Promise<string | null> {
+  const impersonation = await resolveImpersonation()
+  if (impersonation.active) return impersonation.orgId
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('organization_id')
+    .eq('id', userId)
+    .single<{ organization_id: string | null }>()
+
+  return profile?.organization_id ?? null
+}
 
 export async function createTicket(_prev: State, formData: FormData): Promise<State> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { status: 'error', error: 'Not authenticated' }
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('organization_id')
-    .eq('id', user.id)
-    .single()
-
-  if (!profile?.organization_id) return { status: 'error', error: 'No organization' }
+  const orgId = await resolveEffectiveOrgId(supabase, user.id)
+  if (!orgId) return { status: 'error', error: 'No organization' }
 
   const subject     = formData.get('subject')     as string
   const description = formData.get('description') as string | null
@@ -32,10 +47,10 @@ export async function createTicket(_prev: State, formData: FormData): Promise<St
 
   // The modal posts customer_id (new). Older callers / inbound flows may still
   // post lead_id; in that case, look up the matching customer.
-  const link = await resolveCustomerLink(supabase, profile.organization_id, customer_id, lead_id_raw)
+  const link = await resolveCustomerLink(supabase, orgId, customer_id, lead_id_raw)
 
   const { error } = await supabase.from('tickets').insert({
-    organization_id: profile.organization_id,
+    organization_id: orgId,
     created_by:  user.id,
     subject:     subject.trim(),
     description: description || null,
@@ -73,13 +88,8 @@ export async function createHQSupportTicket(_prev: State, formData: FormData): P
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { status: 'error', error: 'Not authenticated' }
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('organization_id')
-    .eq('id', user.id)
-    .single()
-
-  if (!profile?.organization_id) return { status: 'error', error: 'No organization' }
+  const orgId = await resolveEffectiveOrgId(supabase, user.id)
+  if (!orgId) return { status: 'error', error: 'No organization' }
 
   const subject         = formData.get('subject')        as string
   const description     = formData.get('description')    as string | null
@@ -105,7 +115,7 @@ export async function createHQSupportTicket(_prev: State, formData: FormData): P
   const recordId = record_id_raw?.trim().slice(0, 64) || null
 
   const { error } = await supabase.from('tickets').insert({
-    organization_id:     profile.organization_id,
+    organization_id:     orgId,
     created_by:          user.id,
     subject:             subject.trim(),
     description:         description?.trim() || null,
@@ -228,13 +238,14 @@ export async function sendTicketMessage(_prev: State, formData: FormData): Promi
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { status: 'error', error: 'Not authenticated' }
 
+  const orgId = await resolveEffectiveOrgId(supabase, user.id)
+  if (!orgId) return { status: 'error', error: 'No organization' }
+
   const { data: senderProfile } = await supabase
     .from('profiles')
-    .select('organization_id, full_name')
+    .select('full_name')
     .eq('id', user.id)
-    .single()
-
-  if (!senderProfile?.organization_id) return { status: 'error', error: 'No organization' }
+    .single<{ full_name: string | null }>()
 
   const ticket_id = formData.get('ticket_id') as string
   const body      = formData.get('body')      as string
@@ -246,16 +257,16 @@ export async function sendTicketMessage(_prev: State, formData: FormData): Promi
     return { status: 'error', error: 'Invalid message type' }
   }
 
-  // Confirm the ticket belongs to the sender's org before writing.
-  // RLS would block a cross-org insert anyway, but failing fast gives
-  // a friendlier error than a constraint violation.
+  // Confirm the ticket belongs to the effective org (real or impersonated)
+  // before writing. RLS would block a cross-org insert anyway, but failing
+  // fast gives a friendlier error than a constraint violation.
   const { data: ticket } = await supabase
     .from('tickets')
     .select('id, organization_id, display_id, subject, lead_id')
     .eq('id', ticket_id)
     .single()
 
-  if (!ticket || ticket.organization_id !== senderProfile.organization_id) {
+  if (!ticket || ticket.organization_id !== orgId) {
     return { status: 'error', error: 'Ticket not found' }
   }
 
@@ -263,7 +274,7 @@ export async function sendTicketMessage(_prev: State, formData: FormData): Promi
 
   const { error } = await supabase.from('ticket_messages').insert({
     ticket_id,
-    org_id:    senderProfile.organization_id,
+    org_id:    orgId,
     sender_id: user.id,
     body:      trimmed,
     type,
@@ -276,8 +287,8 @@ export async function sendTicketMessage(_prev: State, formData: FormData): Promi
   if (type === 'public') {
     await dispatchOutboundEmail({
       supabase,
-      orgId:         senderProfile.organization_id,
-      senderName:    senderProfile.full_name,
+      orgId,
+      senderName:    senderProfile?.full_name ?? null,
       ticketId:      ticket.id,
       ticketLeadId:  ticket.lead_id,
       ticketSubject: ticket.subject,
