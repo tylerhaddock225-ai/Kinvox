@@ -2,27 +2,35 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Users, UserCircle, CalendarCheck, Ticket, LayoutDashboard, Settings, Shield, LifeBuoy, LogOut } from "lucide-react";
+import { Users, UserCircle, CalendarCheck, Ticket, LayoutDashboard, Settings, Shield, LifeBuoy, LogOut, Sparkles } from "lucide-react";
 import Logo from "./Logo";
 import { logout } from "@/app/(app)/(auth)/actions";
 
-const leadsNav = { href: "/leads", label: "Leads", icon: Users };
+const leadsNav   = { href: "/leads",   label: "Leads",   icon: Users };
+const signalsNav = { href: "/signals", label: "Signals", icon: Sparkles };
 
 interface SidebarProps {
   canViewLeads?: boolean;
   orgName?: string | null;
   orgSlug?: string | null;
   isHqAdmin?: boolean;
+  pendingSignalCount?: number;
 }
 
 // Top-level paths that are NOT org slugs — don't treat them as "current slug".
 const RESERVED_TOP = new Set([
-  "leads", "tickets", "customers", "appointments", "settings", "support",
+  "leads", "signals", "tickets", "customers", "appointments", "settings", "support",
   "login", "signup", "forgot-password", "reset-password",
   "onboarding", "admin", "admin-hq", "api",
 ]);
 
-export default function Sidebar({ canViewLeads = true, orgName = null, orgSlug = null, isHqAdmin = false }: SidebarProps) {
+export default function Sidebar({
+  canViewLeads = true,
+  orgName = null,
+  orgSlug = null,
+  isHqAdmin = false,
+  pendingSignalCount = 0,
+}: SidebarProps) {
   const pathname = usePathname();
 
   // The "current slug" is whatever non-reserved segment is first in the URL.
@@ -45,8 +53,11 @@ export default function Sidebar({ canViewLeads = true, orgName = null, orgSlug =
     { href: "/tickets",      label: "Tickets",      icon: Ticket },
   ];
 
+  // Signals slots immediately under Leads. When the viewer can't see
+  // Leads we still gate Signals on the same permission since the queue
+  // is a read-on-leads concept.
   const navItems = canViewLeads
-    ? [staticNav[0], leadsNav, ...staticNav.slice(1)]
+    ? [staticNav[0], leadsNav, signalsNav, ...staticNav.slice(1)]
     : staticNav;
 
   function linkClass(href: string) {
@@ -108,12 +119,25 @@ export default function Sidebar({ canViewLeads = true, orgName = null, orgSlug =
 
       {/* Main navigation */}
       <nav className="flex-1 px-3 pt-3 pb-4 space-y-1">
-        {navItems.map(({ href, label, icon: Icon }) => (
-          <Link key={href} href={href} className={linkClass(href)}>
-            <Icon className="w-4 h-4 shrink-0" />
-            {label}
-          </Link>
-        ))}
+        {navItems.map(({ href, label, icon: Icon }) => {
+          const badge = href === "/signals" && pendingSignalCount > 0
+            ? pendingSignalCount
+            : 0
+          return (
+            <Link key={href} href={href} className={linkClass(href)}>
+              <Icon className="w-4 h-4 shrink-0" />
+              <span className="flex-1">{label}</span>
+              {badge > 0 && (
+                <span
+                  aria-label={`${badge} pending`}
+                  className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-[10px] font-semibold bg-violet-500/20 text-violet-200 border border-violet-500/40 tabular-nums"
+                >
+                  {badge > 99 ? '99+' : badge}
+                </span>
+              )}
+            </Link>
+          )
+        })}
       </nav>
 
       {/* Settings section */}

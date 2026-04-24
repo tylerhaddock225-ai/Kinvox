@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { ArrowLeft, ShieldAlert, Archive, RotateCcw, Sparkles, Megaphone, Mail, CheckCircle2, AlertCircle } from 'lucide-react'
+import { ArrowLeft, ShieldAlert, Archive, RotateCcw, Sparkles, Megaphone, Mail, CheckCircle2, AlertCircle, Wallet, Radar } from 'lucide-react'
 import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import {
@@ -12,32 +12,33 @@ import { sendOrganizationClaimInvite } from '@/app/(app)/(admin)/admin-hq/action
 import ConfirmButton from '@/components/admin/ConfirmButton'
 import OrgAiStrategyForm from '@/components/admin/OrgAiStrategyForm'
 import OrgLeadCaptureForm from '@/components/admin/OrgLeadCaptureForm'
+import OrgCreditManager from '@/components/hq/org-credit-manager'
+import OrgApiKeyList from '@/components/hq/org-api-key-list'
+import OrgSignalConfigs from '@/components/hq/org-signal-configs'
 import type { AiTemplate } from '@/lib/ai-templates'
+import type {
+  OrganizationCredits,
+  OrganizationApiKey,
+  SignalConfig,
+  Vertical,
+} from '@/lib/types/database.types'
 
-type TabKey = 'details' | 'lead-capture'
+type TabKey = 'details' | 'lead-capture' | 'signal-configs' | 'integrations-billing'
 const TABS: Array<{ key: TabKey; label: string; icon: typeof Sparkles }> = [
-  { key: 'details',      label: 'Details',      icon: Sparkles },
-  { key: 'lead-capture', label: 'Lead Capture', icon: Megaphone },
+  { key: 'details',              label: 'Details',               icon: Sparkles },
+  { key: 'lead-capture',         label: 'Lead Capture',          icon: Megaphone },
+  { key: 'signal-configs',       label: 'Signal Configs',        icon: Radar },
+  { key: 'integrations-billing', label: 'Integrations & Billing', icon: Wallet },
 ]
 
 // Base URL the preview link + embed snippet should use. NEXT_PUBLIC_APP_URL
-// is set per-environment in Vercel; we fall back to the sandbox host so
-// local dev always shows a plausible domain.
+// is set per-environment in Vercel; the fallback points at the prod host
+// so a missing var on prod doesn't silently leak sandbox URLs into the HQ
+// UI (local dev already sets the var explicitly in its .env).
 const LANDING_BASE =
-  (process.env.NEXT_PUBLIC_APP_URL ?? 'https://sandbox.kinvoxtech.com').replace(/\/$/, '')
+  (process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.kinvoxtech.com').replace(/\/$/, '')
 
 export const dynamic = 'force-dynamic'
-
-const VERTICALS = [
-  'General',
-  'Dental',
-  'Home Preparedness',
-  'Payment Facilitation',
-  'Healthcare',
-  'Retail',
-  'Professional Services',
-  'Other',
-]
 
 const PLANS: Array<{ value: 'free' | 'pro' | 'enterprise'; label: string }> = [
   { value: 'free',       label: 'Free' },
@@ -50,14 +51,40 @@ export default async function AdminOrgDetailPage({
   searchParams,
 }: {
   params:       Promise<{ id: string }>
-  searchParams: Promise<{ tab?: string; error?: string; claim_sent?: string; claim_error?: string }>
+  searchParams: Promise<{
+    tab?:           string
+    error?:         string
+    claim_sent?:    string
+    claim_error?:   string
+    credits_added?: string
+    credits_error?: string
+    topup_saved?:   string
+    new_key?:       string
+    key_error?:     string
+    key_revoked?:   string
+    config_saved?:  string
+    config_error?:  string
+  }>
 }) {
   const { id } = await params
   const sp     = await searchParams
-  const activeTab: TabKey = sp.tab === 'lead-capture' ? 'lead-capture' : 'details'
+  const activeTab: TabKey =
+    sp.tab === 'lead-capture'         ? 'lead-capture' :
+    sp.tab === 'signal-configs'       ? 'signal-configs' :
+    sp.tab === 'integrations-billing' ? 'integrations-billing' :
+                                        'details'
   const errorMessage = typeof sp.error === 'string' ? sp.error : null
   const claimSentTo  = typeof sp.claim_sent  === 'string' ? sp.claim_sent  : null
   const claimError   = typeof sp.claim_error === 'string' ? sp.claim_error : null
+
+  const creditsAdded = typeof sp.credits_added === 'string' ? parseInt(sp.credits_added, 10) : null
+  const creditsError = typeof sp.credits_error === 'string' ? sp.credits_error               : null
+  const topUpSaved   = sp.topup_saved === '1'
+  const newKey       = typeof sp.new_key    === 'string' ? sp.new_key    : null
+  const keyError     = typeof sp.key_error  === 'string' ? sp.key_error  : null
+  const keyRevoked   = sp.key_revoked === '1'
+  const configSaved  = sp.config_saved === '1'
+  const configError  = typeof sp.config_error === 'string' ? sp.config_error : null
   const supabase = await createClient()
 
   const { data: org } = await supabase
@@ -83,11 +110,53 @@ export default async function AdminOrgDetailPage({
 
   if (!org) notFound()
 
-  const { data: templates } = await supabase
-    .from('ai_templates')
-    .select('id, name, industry, base_prompt, metadata')
-    .order('name', { ascending: true })
-    .returns<AiTemplate[]>()
+  const [{ data: templates }, { data: verticals }] = await Promise.all([
+    supabase
+      .from('ai_templates')
+      .select('id, name, industry, base_prompt, metadata')
+      .order('name', { ascending: true })
+      .returns<AiTemplate[]>(),
+    supabase
+      .from('verticals')
+      .select('id, label, is_active')
+      .eq('is_active', true)
+      .order('label', { ascending: true })
+      .returns<Vertical[]>(),
+  ])
+
+  const verticalOptions: Vertical[] = verticals ?? []
+
+  // Only load tab-specific data when that tab is active — keeps the
+  // happy-path details view from paying for round-trips the user did
+  // not ask for.
+  let credits: OrganizationCredits | null = null
+  let apiKeys: OrganizationApiKey[] = []
+  let signalConfigs: SignalConfig[] = []
+  if (activeTab === 'integrations-billing') {
+    const [{ data: c }, { data: k }] = await Promise.all([
+      supabase
+        .from('organization_credits')
+        .select('id, organization_id, balance, auto_top_up_enabled, top_up_threshold, top_up_amount, created_at, updated_at')
+        .eq('organization_id', org.id)
+        .maybeSingle<OrganizationCredits>(),
+      supabase
+        .from('organization_api_keys')
+        .select('id, organization_id, key_hash, label, created_by, last_used_at, revoked_at, created_at')
+        .eq('organization_id', org.id)
+        .order('created_at', { ascending: false })
+        .returns<OrganizationApiKey[]>(),
+    ])
+    credits = c ?? null
+    apiKeys = k ?? []
+  } else if (activeTab === 'signal-configs') {
+    const { data: configs } = await supabase
+      .from('signal_configs')
+      .select('id, organization_id, vertical, center_lat, center_long, radius_miles, keywords, is_active, created_at')
+      .eq('organization_id', org.id)
+      .order('created_at', { ascending: false })
+      .returns<SignalConfig[]>()
+    signalConfigs = configs ?? []
+  }
 
   const isArchived = !!org.deleted_at
   const status     = (org.status ?? 'active').toLowerCase()
@@ -212,11 +281,12 @@ export default async function AdminOrgDetailPage({
           <Field label="Vertical">
             <select
               name="vertical"
-              defaultValue={org.vertical ?? 'General'}
+              defaultValue={org.vertical ?? ''}
               className="w-full rounded-md bg-pvx-surface border border-pvx-border px-3 py-2 text-sm text-gray-100 focus:border-violet-500/60 focus:outline-none focus:ring-1 focus:ring-violet-500/40"
             >
-              {VERTICALS.map(v => (
-                <option key={v} value={v}>{v}</option>
+              <option value="">— Unassigned —</option>
+              {verticalOptions.map(v => (
+                <option key={v.id} value={v.id}>{v.label}</option>
               ))}
             </select>
           </Field>
@@ -376,6 +446,87 @@ export default async function AdminOrgDetailPage({
             />
           </div>
         </section>
+      )}
+
+      {activeTab === 'signal-configs' && (
+        <section className="rounded-xl border border-pvx-border bg-gray-900 p-5">
+          <div className="flex items-center gap-2">
+            <Radar className="w-4 h-4 text-violet-300" />
+            <h2 className="text-sm font-semibold text-white">Signal Configs</h2>
+          </div>
+          <p className="mt-1 text-xs text-gray-500">
+            Geofence + keyword configs routed by <span className="font-mono">/api/v1/signals/capture</span>. A signal must match at least one active config for this org to land in the review queue.
+          </p>
+
+          <div className="mt-5">
+            <OrgSignalConfigs
+              orgId={org.id}
+              configs={signalConfigs}
+              verticals={verticalOptions}
+              flash={{ saved: configSaved, error: configError }}
+            />
+          </div>
+        </section>
+      )}
+
+      {activeTab === 'integrations-billing' && (
+        <>
+          <section className="rounded-xl border border-pvx-border bg-gray-900 p-5">
+            <div className="flex items-center gap-2">
+              <Wallet className="w-4 h-4 text-violet-300" />
+              <h2 className="text-sm font-semibold text-white">Credits</h2>
+            </div>
+            <p className="mt-1 text-xs text-gray-500">
+              Signal balance and ledger adjustments for this organization. Every change writes to <span className="font-mono">credit_ledger</span>.
+            </p>
+
+            <div className="mt-5">
+              {credits ? (
+                <OrgCreditManager
+                  orgId={org.id}
+                  credits={{
+                    balance:             credits.balance,
+                    auto_top_up_enabled: credits.auto_top_up_enabled,
+                    top_up_threshold:    credits.top_up_threshold,
+                    top_up_amount:       credits.top_up_amount,
+                  }}
+                  flash={{
+                    creditsAdded: creditsAdded,
+                    topUpSaved:   topUpSaved,
+                    error:        creditsError,
+                  }}
+                />
+              ) : (
+                <div className="flex items-start gap-2 rounded-md border border-amber-900/60 bg-amber-950/30 px-3 py-2 text-xs text-amber-200">
+                  <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                  <span>No credits row for this organization yet — the provisioning trigger should backfill on next DB sync.</span>
+                </div>
+              )}
+            </div>
+          </section>
+
+          <section className="rounded-xl border border-pvx-border bg-gray-900 p-5">
+            <div className="flex items-center gap-2">
+              <ShieldAlert className="w-4 h-4 text-violet-300" />
+              <h2 className="text-sm font-semibold text-white">Signal API Keys</h2>
+            </div>
+            <p className="mt-1 text-xs text-gray-500">
+              Keys authenticate external agents (Make.com, n8n) calling <span className="font-mono">POST /api/v1/signals/capture</span>. Raw keys are shown once at creation and never re-displayed.
+            </p>
+
+            <div className="mt-5">
+              <OrgApiKeyList
+                orgId={org.id}
+                keys={apiKeys}
+                flash={{
+                  newKey:  newKey,
+                  revoked: keyRevoked,
+                  error:   keyError,
+                }}
+              />
+            </div>
+          </section>
+        </>
       )}
     </div>
   )

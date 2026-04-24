@@ -2,13 +2,19 @@
 
 import { useState, type FormEvent } from 'react'
 import { Loader2, CheckCircle2, AlertCircle } from 'lucide-react'
+import type { LeadQuestion, LeadAnswer } from '@/lib/lead-questions'
 
 type Props = {
   slug:            string
   askHomestead:    boolean
+  customQuestions: LeadQuestion[]
 }
 
-export default function LeadCaptureLandingForm({ slug, askHomestead }: Props) {
+export default function LeadCaptureLandingForm({
+  slug,
+  askHomestead,
+  customQuestions,
+}: Props) {
   const [status, setStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle')
   const [error, setError]   = useState<string | null>(null)
 
@@ -18,6 +24,23 @@ export default function LeadCaptureLandingForm({ slug, askHomestead }: Props) {
     setError(null)
 
     const form = new FormData(e.currentTarget)
+
+    // Collect custom answers. Required answers are enforced by the
+    // `required` attribute on the inputs too; this is a belt check.
+    const customAnswers: LeadAnswer[] = []
+    for (const q of customQuestions) {
+      const raw = String(form.get(`q_${q.id}`) ?? '').trim()
+      if (!raw) {
+        if (q.required) {
+          setError(`Please answer: ${q.label}`)
+          setStatus('error')
+          return
+        }
+        continue
+      }
+      customAnswers.push({ question_id: q.id, label: q.label, answer: raw })
+    }
+
     const payload = {
       slug,
       name:  String(form.get('name')  ?? '').trim(),
@@ -27,6 +50,7 @@ export default function LeadCaptureLandingForm({ slug, askHomestead }: Props) {
       homestead_exemption: askHomestead
         ? form.get('homestead_exemption') === 'on'
         : null,
+      custom_answers: customAnswers,
     }
 
     try {
@@ -62,9 +86,10 @@ export default function LeadCaptureLandingForm({ slug, askHomestead }: Props) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <Field label="Name" name="name" required autoComplete="name" />
+      {/* Locked platform-mandatory fields — Name, Email, Phone. */}
+      <Field label="Name"  name="name"  required autoComplete="name" />
       <Field label="Email" name="email" type="email" required autoComplete="email" />
-      <Field label="Phone" name="phone" type="tel" autoComplete="tel" />
+      <Field label="Phone" name="phone" type="tel"   required autoComplete="tel"   />
       <Field label="Address" name="address" autoComplete="street-address" />
 
       {askHomestead && (
@@ -82,6 +107,17 @@ export default function LeadCaptureLandingForm({ slug, askHomestead }: Props) {
           </span>
         </label>
       )}
+
+      {/* Tenant-defined questions. Rendered in the order saved under
+          organizations.custom_lead_questions. */}
+      {customQuestions.map((q) => (
+        <Field
+          key={q.id}
+          label={q.label}
+          name={`q_${q.id}`}
+          required={q.required}
+        />
+      ))}
 
       {error && (
         <div className="flex items-start gap-2 rounded-md border border-rose-900/60 bg-rose-950/30 px-3 py-2 text-xs text-rose-200">

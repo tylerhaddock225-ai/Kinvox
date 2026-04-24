@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation'
 import { Check, ExternalLink } from 'lucide-react'
 import { createAdminClient } from '@/lib/supabase/admin'
 import LeadCaptureLandingForm from './LeadCaptureLandingForm'
+import { normalizeLeadQuestions } from '@/lib/lead-questions'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,11 +13,12 @@ type Settings = {
 }
 
 type Org = {
-  id:                   string
-  name:                 string
-  lead_magnet_slug:     string | null
-  lead_magnet_settings: Settings | null
-  website_url:          string | null
+  id:                    string
+  name:                  string
+  lead_magnet_slug:      string | null
+  lead_magnet_settings:  Settings | null
+  website_url:           string | null
+  custom_lead_questions: unknown
 }
 
 // If the merchant opted into a feature that resembles a grant screener,
@@ -44,7 +46,7 @@ export default async function LeadMagnetPage({
   const supabase = createAdminClient()
   const { data: org } = await supabase
     .from('organizations')
-    .select('id, name, lead_magnet_slug, lead_magnet_settings, website_url')
+    .select('id, name, lead_magnet_slug, lead_magnet_settings, website_url, custom_lead_questions')
     .ilike('lead_magnet_slug', slug)
     .is('deleted_at', null)
     .single<Org>()
@@ -57,6 +59,7 @@ export default async function LeadMagnetPage({
   const headline = settings.headline || 'Check your eligibility'
   const features = Array.isArray(settings.features) ? settings.features : []
   const askHomestead = needsHomesteadQuestion(features)
+  const customQuestions = normalizeLeadQuestions(org.custom_lead_questions)
 
   return (
     <main className="px-4 py-8 sm:py-12">
@@ -84,7 +87,11 @@ export default async function LeadMagnetPage({
         )}
 
         <div className="mt-8 rounded-2xl border border-pvx-border bg-gray-900/80 p-5 shadow-xl backdrop-blur">
-          <LeadCaptureLandingForm slug={org.lead_magnet_slug} askHomestead={askHomestead} />
+          <LeadCaptureLandingForm
+            slug={org.lead_magnet_slug}
+            askHomestead={askHomestead}
+            customQuestions={customQuestions}
+          />
         </div>
 
         {org.website_url && (

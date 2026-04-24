@@ -4,6 +4,7 @@ import { resolveImpersonation } from '@/lib/impersonation'
 import { redirect } from 'next/navigation'
 import TeamTabs from './TeamTabs'
 import type { Permissions } from '@/lib/permissions'
+import { normalizeLeadQuestions } from '@/lib/lead-questions'
 
 export const dynamic = 'force-dynamic'
 
@@ -63,10 +64,16 @@ export default async function TeamSettingsPage() {
       .order('name'),
     supabase
       .from('organizations')
-      .select('inbound_email_address, verified_support_email, verified_support_email_confirmed_at')
+      .select('inbound_email_address, verified_support_email, verified_support_email_confirmed_at, ai_listening_enabled, cancel_at_period_end, current_period_end, custom_lead_questions, signal_engagement_mode')
       .eq('id', orgId)
       .single(),
   ])
+
+  const { data: creditsRow } = await supabase
+    .from('organization_credits')
+    .select('balance')
+    .eq('organization_id', orgId)
+    .maybeSingle<{ balance: number }>()
 
   // Fetch emails via admin API
   const admin = createAdminClient()
@@ -100,6 +107,15 @@ export default async function TeamSettingsPage() {
     verified_support_email_confirmed_at: orgRes.data?.verified_support_email_confirmed_at ?? null,
   }
 
+  const leadSupport = {
+    ai_listening_enabled:   orgRes.data?.ai_listening_enabled   ?? true,
+    balance:                creditsRow?.balance                 ?? 0,
+    cancel_at_period_end:   orgRes.data?.cancel_at_period_end   ?? false,
+    current_period_end:     orgRes.data?.current_period_end     ?? null,
+    custom_lead_questions:  normalizeLeadQuestions(orgRes.data?.custom_lead_questions),
+    signal_engagement_mode: (orgRes.data?.signal_engagement_mode ?? 'ai_draft') as 'ai_draft' | 'manual',
+  }
+
   return (
     <div className="px-8 py-8 space-y-6 max-w-5xl">
       <div>
@@ -108,7 +124,12 @@ export default async function TeamSettingsPage() {
           Manage your organization, team, and how customers reach you.
         </p>
       </div>
-      <TeamTabs members={members} roles={roles} orgSettings={orgSettings} />
+      <TeamTabs
+        members={members}
+        roles={roles}
+        orgSettings={orgSettings}
+        leadSupport={leadSupport}
+      />
     </div>
   )
 }

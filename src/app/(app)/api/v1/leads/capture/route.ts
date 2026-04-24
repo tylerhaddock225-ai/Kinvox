@@ -14,6 +14,12 @@ export const dynamic = 'force-dynamic'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
+type CustomAnswer = {
+  question_id?: unknown
+  label?:       unknown
+  answer?:      unknown
+}
+
 type Payload = {
   slug?:                string
   name?:                string
@@ -21,6 +27,7 @@ type Payload = {
   phone?:               string
   address?:             string
   homestead_exemption?: boolean | null
+  custom_answers?:      CustomAnswer[]
 }
 
 function bad(message: string, status = 400) {
@@ -41,9 +48,10 @@ export async function POST(request: NextRequest) {
   const phone   = typeof body.phone === 'string' ? body.phone.trim()               : ''
   const address = typeof body.address === 'string' ? body.address.trim()           : ''
 
-  if (!slug)               return bad('Missing slug')
-  if (!name)               return bad('Name is required')
+  if (!slug)                 return bad('Missing slug')
+  if (!name)                 return bad('Name is required')
   if (!EMAIL_RE.test(email)) return bad('Enter a valid email address')
+  if (!phone)                return bad('Phone is required')
 
   const supabase = createAdminClient()
 
@@ -76,6 +84,22 @@ export async function POST(request: NextRequest) {
   if (address)                       metadata.address = address
   if (typeof body.homestead_exemption === 'boolean') {
     metadata.homestead_exemption = body.homestead_exemption
+  }
+
+  // Server-side scrub of tenant-defined answers. We accept whatever the
+  // public form sent but only persist clean strings — never trust the
+  // client about which questions were "required" (the form's HTML5
+  // validation does that; server just records what arrived).
+  if (Array.isArray(body.custom_answers) && body.custom_answers.length > 0) {
+    const cleaned = body.custom_answers
+      .map((a) => ({
+        question_id: typeof a?.question_id === 'string' ? a.question_id.slice(0, 64)  : '',
+        label:       typeof a?.label       === 'string' ? a.label.slice(0, 200)       : '',
+        answer:      typeof a?.answer      === 'string' ? a.answer.trim().slice(0, 2000) : '',
+      }))
+      .filter((a) => a.question_id && a.label && a.answer)
+      .slice(0, 20)
+    if (cleaned.length > 0) metadata.custom_answers = cleaned
   }
 
   const { data: lead, error: insertErr } = await supabase

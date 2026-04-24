@@ -23,6 +23,11 @@ export type Database = {
           inbound_email_address: string | null
           verified_support_email: string | null
           verified_support_email_confirmed_at: string | null
+          ai_listening_enabled: boolean
+          cancel_at_period_end: boolean
+          current_period_end: string | null
+          custom_lead_questions: Json
+          signal_engagement_mode: 'ai_draft' | 'manual'
           deleted_at: string | null
           created_at: string
           updated_at: string
@@ -46,6 +51,11 @@ export type Database = {
           inbound_email_address?: string | null
           verified_support_email?: string | null
           verified_support_email_confirmed_at?: string | null
+          ai_listening_enabled?: boolean
+          cancel_at_period_end?: boolean
+          current_period_end?: string | null
+          custom_lead_questions?: Json
+          signal_engagement_mode?: 'ai_draft' | 'manual'
           deleted_at?: string | null
           created_at?: string
           updated_at?: string
@@ -110,7 +120,7 @@ export type Database = {
           phone: string | null
           company: string | null
           status: 'new' | 'contacted' | 'qualified' | 'lost' | 'converted'
-          source: 'web' | 'referral' | 'import' | 'manual' | 'other' | null
+          source: 'web' | 'referral' | 'import' | 'manual' | 'other' | 'social_listening' | null
           notes: string | null
           tags: string[] | null
           metadata: Json | null
@@ -130,7 +140,7 @@ export type Database = {
           phone?: string | null
           company?: string | null
           status?: 'new' | 'contacted' | 'qualified' | 'lost' | 'converted'
-          source?: 'web' | 'referral' | 'import' | 'manual' | 'other' | null
+          source?: 'web' | 'referral' | 'import' | 'manual' | 'other' | 'social_listening' | null
           notes?: string | null
           tags?: string[] | null
           metadata?: Json | null
@@ -342,6 +352,144 @@ export type Database = {
         }
         Update: Partial<Database['public']['Tables']['platform_settings']['Insert']>
       }
+      organization_credits: {
+        Row: {
+          id: string
+          organization_id: string
+          balance: number
+          auto_top_up_enabled: boolean
+          top_up_threshold: number | null
+          top_up_amount: number | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          organization_id: string
+          balance?: number
+          auto_top_up_enabled?: boolean
+          top_up_threshold?: number | null
+          top_up_amount?: number | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['organization_credits']['Insert']>
+      }
+      pending_signals: {
+        Row: {
+          id: string
+          organization_id: string
+          raw_text: string | null
+          ai_draft_reply: string | null
+          reasoning_snippet: string | null
+          intent_score: 1 | 3 | 6 | null
+          platform: string | null
+          status: 'pending' | 'approved' | 'dismissed'
+          external_post_id: string | null
+          signal_config_id: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          organization_id: string
+          raw_text?: string | null
+          ai_draft_reply?: string | null
+          reasoning_snippet?: string | null
+          intent_score?: 1 | 3 | 6 | null
+          platform?: string | null
+          status?: 'pending' | 'approved' | 'dismissed'
+          external_post_id?: string | null
+          signal_config_id?: string | null
+          created_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['pending_signals']['Insert']>
+      }
+      signal_configs: {
+        Row: {
+          id: string
+          organization_id: string
+          vertical: string
+          center_lat: number | null
+          center_long: number | null
+          radius_miles: number
+          keywords: string[]
+          is_active: boolean
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          organization_id: string
+          vertical: string
+          center_lat?: number | null
+          center_long?: number | null
+          radius_miles?: number
+          keywords?: string[]
+          is_active?: boolean
+          created_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['signal_configs']['Insert']>
+      }
+      verticals: {
+        Row: {
+          id: string
+          label: string
+          is_active: boolean
+        }
+        Insert: {
+          id: string
+          label: string
+          is_active?: boolean
+        }
+        Update: Partial<Database['public']['Tables']['verticals']['Insert']>
+      }
+      organization_api_keys: {
+        Row: {
+          id: string
+          organization_id: string
+          key_hash: string
+          label: string | null
+          created_by: string | null
+          last_used_at: string | null
+          revoked_at: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          organization_id: string
+          key_hash: string
+          label?: string | null
+          created_by?: string | null
+          last_used_at?: string | null
+          revoked_at?: string | null
+          created_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['organization_api_keys']['Insert']>
+      }
+      credit_ledger: {
+        Row: {
+          id: string
+          organization_id: string
+          amount: number
+          type: 'signal_deduction' | 'purchase' | 'refund' | 'adjustment'
+          reference_id: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          organization_id: string
+          amount: number
+          type: 'signal_deduction' | 'purchase' | 'refund' | 'adjustment'
+          reference_id?: string | null
+          created_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['credit_ledger']['Insert']>
+      }
+    }
+    Functions: {
+      deduct_credit: {
+        Args: { org_id: string; amount: number; ref_id: string }
+        Returns: number
+      }
     }
   }
 }
@@ -355,3 +503,9 @@ export type Customer     = Database['public']['Tables']['customers']['Row']
 export type Ticket        = Database['public']['Tables']['tickets']['Row']
 export type TicketMessage = Database['public']['Tables']['ticket_messages']['Row']
 export type Role          = Database['public']['Tables']['roles']['Row']
+export type OrganizationCredits = Database['public']['Tables']['organization_credits']['Row']
+export type CreditLedgerEntry   = Database['public']['Tables']['credit_ledger']['Row']
+export type OrganizationApiKey  = Database['public']['Tables']['organization_api_keys']['Row']
+export type PendingSignal       = Database['public']['Tables']['pending_signals']['Row']
+export type SignalConfig        = Database['public']['Tables']['signal_configs']['Row']
+export type Vertical            = Database['public']['Tables']['verticals']['Row']

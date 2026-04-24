@@ -10,6 +10,7 @@ import {
   deleteRole,
 } from './actions'
 import { updateSupportEmail, initializeInboundEmail } from '@/app/(app)/(dashboard)/actions/org-settings'
+import LeadSupportTab, { type LeadSupportState } from '@/components/settings/lead-support-tab'
 import { PERMISSION_KEYS, DEFAULT_PERMISSIONS, type Permissions } from '@/lib/permissions'
 import type { MemberRow, RoleRow } from './page'
 
@@ -18,6 +19,8 @@ export type OrgSettings = {
   verified_support_email:              string | null
   verified_support_email_confirmed_at: string | null
 }
+
+export type { LeadSupportState }
 
 // ── Shared style tokens ──────────────────────────────────────────────────────
 
@@ -580,8 +583,9 @@ function SupportSettingsPanel({ settings }: { settings: OrgSettings }) {
 // ── Main export ──────────────────────────────────────────────────────────────
 
 const TABS = [
-  { id: 'users',   label: 'User Administration' },
-  { id: 'support', label: 'Support Settings' },
+  { id: 'users',        label: 'User Administration' },
+  { id: 'support',      label: 'Support Settings'    },
+  { id: 'lead-support', label: 'Lead Support'        },
 ] as const
 
 type TabId = typeof TABS[number]['id']
@@ -590,10 +594,12 @@ export default function TeamTabs({
   members,
   roles,
   orgSettings,
+  leadSupport,
 }: {
   members:     MemberRow[]
   roles:       RoleRow[]
   orgSettings: OrgSettings
+  leadSupport: LeadSupportState
 }) {
   const [activeTab, setActiveTab] = useState<TabId>('users')
 
@@ -617,7 +623,7 @@ export default function TeamTabs({
       </div>
 
       {/* Tab content */}
-      {activeTab === 'users' ? (
+      {activeTab === 'users' && (
         <div className="space-y-8">
           <section className="space-y-3">
             <div className="flex items-center justify-between">
@@ -635,8 +641,14 @@ export default function TeamTabs({
             <RolesPanel roles={roles} />
           </section>
         </div>
-      ) : (
+      )}
+
+      {activeTab === 'support' && (
         <SupportSettingsPanel settings={orgSettings} />
+      )}
+
+      {activeTab === 'lead-support' && (
+        <LeadSupportTab state={leadSupport} />
       )}
     </div>
   )
