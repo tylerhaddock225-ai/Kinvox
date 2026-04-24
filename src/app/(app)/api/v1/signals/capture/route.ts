@@ -99,7 +99,7 @@ export async function POST(request: NextRequest) {
   // must produce a working link; without one we'd post a 404.
   const { data: org } = await admin
     .from('organizations')
-    .select('name, ai_listening_enabled, signal_engagement_mode, lead_magnet_slug, deleted_at')
+    .select('name, ai_listening_enabled, signal_engagement_mode, lead_magnet_slug, deleted_at, latitude, longitude, signal_radius')
     .eq('id', orgId)
     .maybeSingle<{
       name:                   string
@@ -107,6 +107,9 @@ export async function POST(request: NextRequest) {
       signal_engagement_mode: 'ai_draft' | 'manual'
       lead_magnet_slug:       string | null
       deleted_at:             string | null
+      latitude:               number | null
+      longitude:              number | null
+      signal_radius:          number | null
     }>()
 
   if (!org || org.deleted_at) return json({ error: 'organization_unavailable' }, 404)
@@ -120,6 +123,33 @@ export async function POST(request: NextRequest) {
       { error: 'landing_slug_not_configured', hint: 'ai_draft mode requires organizations.lead_magnet_slug' },
       409,
     )
+  }
+
+  const callerLat = typeof body.latitude  === 'number' ? body.latitude  : null
+  const callerLng = typeof body.longitude === 'number' ? body.longitude : null
+
+  // ── Org-level geofence gate ──────────────────────────────────────────
+  // Applies BEFORE per-signal-config geofence, AI scoring, and deduction.
+  // Only engages when the org has an anchor + radius configured AND the
+  // caller supplied coordinates — otherwise we let the per-config gate
+  // below make the call. Rejections here are free of charge.
+  if (
+    org.latitude      !== null &&
+    org.longitude     !== null &&
+    org.signal_radius !== null &&
+    callerLat         !== null &&
+    callerLng         !== null
+  ) {
+    const miles = haversineMiles(callerLat, callerLng, org.latitude, org.longitude)
+    if (miles > org.signal_radius) {
+      return json(
+        {
+          error: 'Out of organization service area',
+          code:  'ORG_GEOFENCE_REJECTION',
+        },
+        422,
+      )
+    }
   }
 
   // ── Signal config resolution + geofence ──────────────────────────────
@@ -185,9 +215,6 @@ export async function POST(request: NextRequest) {
       configRadius     = cfg.radius_miles
     }
   }
-
-  const callerLat = typeof body.latitude  === 'number' ? body.latitude  : null
-  const callerLng = typeof body.longitude === 'number' ? body.longitude : null
 
   if (
     configCenterLat  !== null &&
