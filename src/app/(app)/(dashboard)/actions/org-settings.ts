@@ -1,6 +1,7 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
+import { resolveEffectiveOrgId, resolveImpersonation } from '@/lib/impersonation'
 import { revalidatePath } from 'next/cache'
 import { createSenderSignature } from '@/lib/postmark-admin'
 import { generateInboundEmail } from '@/lib/org-utils'
@@ -12,35 +13,45 @@ type State =
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-// Org Owner OR a system 'admin' role can edit support settings.
-// Returns { ok: true } or { ok: false, error } so callers can fail uniformly.
+// Org Owner OR a system 'admin' role can edit support settings — and an HQ
+// admin in "View as Merchant" mode always can, targeting the impersonated
+// tenant. Returns { ok: true, orgId } or { ok: false, error } so callers
+// can fail uniformly.
 async function requireSettingsAdmin(supabase: Awaited<ReturnType<typeof createClient>>) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { ok: false as const, error: 'Not authenticated' }
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('organization_id, role')
-    .eq('id', user.id)
-    .single()
+  const orgId = await resolveEffectiveOrgId(supabase, user.id)
+  if (!orgId) return { ok: false as const, error: 'No organization' }
 
-  if (!profile?.organization_id) return { ok: false as const, error: 'No organization' }
+  // HQ admin impersonating has already cleared the is_admin_hq gate inside
+  // resolveImpersonation; skip the owner/admin check so they can edit on
+  // the tenant's behalf. Tenant callers still need owner or role='admin'.
+  const impersonation = await resolveImpersonation()
+  if (!impersonation.active) {
+    const [{ data: profile }, { data: org }] = await Promise.all([
+      supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single<{ role: string | null }>(),
+      supabase
+        .from('organizations')
+        .select('owner_id')
+        .eq('id', orgId)
+        .single<{ owner_id: string }>(),
+    ])
 
-  const { data: org } = await supabase
-    .from('organizations')
-    .select('id, owner_id')
-    .eq('id', profile.organization_id)
-    .single()
+    if (!org) return { ok: false as const, error: 'Organization not found' }
 
-  if (!org) return { ok: false as const, error: 'Organization not found' }
-
-  const isOwner      = org.owner_id === user.id
-  const isSuperAdmin = profile.role === 'admin'
-  if (!isOwner && !isSuperAdmin) {
-    return { ok: false as const, error: 'You do not have permission to change support settings' }
+    const isOwner      = org.owner_id === user.id
+    const isSuperAdmin = profile?.role === 'admin'
+    if (!isOwner && !isSuperAdmin) {
+      return { ok: false as const, error: 'You do not have permission to change support settings' }
+    }
   }
 
-  return { ok: true as const, userId: user.id, orgId: org.id, ownerName: profile.role }
+  return { ok: true as const, userId: user.id, orgId }
 }
 
 export async function updateSupportEmail(_prev: State, formData: FormData): Promise<State> {

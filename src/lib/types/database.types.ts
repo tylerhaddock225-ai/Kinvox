@@ -28,6 +28,9 @@ export type Database = {
           current_period_end: string | null
           custom_lead_questions: Json
           signal_engagement_mode: 'ai_draft' | 'manual'
+          latitude: number | null
+          longitude: number | null
+          signal_radius: number | null
           deleted_at: string | null
           created_at: string
           updated_at: string
@@ -56,6 +59,9 @@ export type Database = {
           current_period_end?: string | null
           custom_lead_questions?: Json
           signal_engagement_mode?: 'ai_draft' | 'manual'
+          latitude?: number | null
+          longitude?: number | null
+          signal_radius?: number | null
           deleted_at?: string | null
           created_at?: string
           updated_at?: string
