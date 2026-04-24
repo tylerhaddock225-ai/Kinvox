@@ -144,8 +144,11 @@ export async function POST(request: NextRequest) {
     if (miles > org.signal_radius) {
       return json(
         {
-          error: 'Out of organization service area',
-          code:  'ORG_GEOFENCE_REJECTION',
+          status:   'rejected',
+          reason:   'out_of_bounds',
+          distance: Number(miles.toFixed(2)),
+          error:    'Out of organization service area',
+          code:     'ORG_GEOFENCE_REJECTION',
         },
         422,
       )
@@ -227,6 +230,9 @@ export async function POST(request: NextRequest) {
     if (miles > configRadius) {
       return json(
         {
+          status:       'rejected',
+          reason:       'out_of_bounds',
+          distance:     Number(miles.toFixed(2)),
           error:        'out_of_geofence',
           miles:        Number(miles.toFixed(2)),
           radius_miles: configRadius,
