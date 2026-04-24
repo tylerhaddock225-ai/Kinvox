@@ -3,27 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { resolveImpersonation } from '@/lib/impersonation'
-
-// Zero-Inference: creates write into the impersonated tenant when an HQ
-// admin is "acting as" one; otherwise into the caller's profile org. Never
-// a default — absent either resolution, the action errors rather than
-// silently writing to the wrong tenant.
-async function resolveEffectiveOrgId(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  userId: string,
-): Promise<string | null> {
-  const impersonation = await resolveImpersonation()
-  if (impersonation.active) return impersonation.orgId
-
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('organization_id')
-    .eq('id', userId)
-    .single<{ organization_id: string | null }>()
-
-  return profile?.organization_id ?? null
-}
+import { resolveEffectiveOrgId } from '@/lib/impersonation'
 
 // ── Types (shared with client components) ───────────────────────────────────
 

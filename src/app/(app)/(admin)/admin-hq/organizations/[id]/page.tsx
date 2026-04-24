@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { ArrowLeft, ShieldAlert, Archive, RotateCcw, Sparkles, Megaphone, Mail, CheckCircle2, AlertCircle, Wallet, Radar } from 'lucide-react'
+import { ArrowLeft, ShieldAlert, Archive, RotateCcw, Sparkles, Megaphone, Mail, CheckCircle2, AlertCircle, Wallet, Radar, MapPin } from 'lucide-react'
 import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import {
@@ -7,6 +7,7 @@ import {
   setOrgStatus,
   archiveOrganization,
   restoreOrganization,
+  setOrgGeofence,
 } from '@/app/(app)/(admin)/admin-hq/actions/organizations'
 import { sendOrganizationClaimInvite } from '@/app/(app)/(admin)/admin-hq/actions/claim'
 import ConfirmButton from '@/components/admin/ConfirmButton'
@@ -52,18 +53,20 @@ export default async function AdminOrgDetailPage({
 }: {
   params:       Promise<{ id: string }>
   searchParams: Promise<{
-    tab?:           string
-    error?:         string
-    claim_sent?:    string
-    claim_error?:   string
-    credits_added?: string
-    credits_error?: string
-    topup_saved?:   string
-    new_key?:       string
-    key_error?:     string
-    key_revoked?:   string
-    config_saved?:  string
-    config_error?:  string
+    tab?:             string
+    error?:           string
+    claim_sent?:      string
+    claim_error?:     string
+    credits_added?:   string
+    credits_error?:   string
+    topup_saved?:     string
+    new_key?:         string
+    key_error?:       string
+    key_revoked?:     string
+    config_saved?:    string
+    config_error?:    string
+    geofence_saved?:  string
+    geofence_error?:  string
   }>
 }) {
   const { id } = await params
@@ -85,11 +88,13 @@ export default async function AdminOrgDetailPage({
   const keyRevoked   = sp.key_revoked === '1'
   const configSaved  = sp.config_saved === '1'
   const configError  = typeof sp.config_error === 'string' ? sp.config_error : null
+  const geofenceSaved = sp.geofence_saved === '1'
+  const geofenceError = typeof sp.geofence_error === 'string' ? sp.geofence_error : null
   const supabase = await createClient()
 
   const { data: org } = await supabase
     .from('organizations')
-    .select('id, name, slug, vertical, status, plan, deleted_at, created_at, owner_id, ai_template_id, enabled_ai_features, lead_magnet_slug, lead_magnet_settings, website_url')
+    .select('id, name, slug, vertical, status, plan, deleted_at, created_at, owner_id, ai_template_id, enabled_ai_features, lead_magnet_slug, lead_magnet_settings, website_url, latitude, longitude, signal_radius')
     .eq('id', id)
     .single<{
       id:                   string
@@ -106,6 +111,9 @@ export default async function AdminOrgDetailPage({
       lead_magnet_slug:     string | null
       lead_magnet_settings: { enabled?: boolean; headline?: string; features?: string[] } | null
       website_url:          string | null
+      latitude:             number | null
+      longitude:            number | null
+      signal_radius:        number | null
     }>()
 
   if (!org) notFound()
@@ -309,6 +317,83 @@ export default async function AdminOrgDetailPage({
               className="inline-flex items-center rounded-md bg-violet-600 hover:bg-violet-500 px-4 py-2 text-sm font-medium text-white transition-colors"
             >
               Save changes
+            </button>
+          </div>
+        </form>
+      </section>
+
+      {/* Geofence */}
+      <section className="rounded-xl border border-pvx-border bg-gray-900 p-5">
+        <div className="flex items-center gap-2">
+          <MapPin className="w-4 h-4 text-violet-300" />
+          <h2 className="text-sm font-semibold text-white">Organization Geofence</h2>
+        </div>
+        <p className="mt-1 text-xs text-gray-500">
+          Anchor coordinates + radius scoping incoming signals. Mirrored in the tenant&apos;s Settings page.
+        </p>
+
+        {geofenceSaved && (
+          <div className="mt-4 flex items-start gap-2 rounded-md border border-emerald-800/60 bg-emerald-950/30 px-3 py-2 text-xs text-emerald-200">
+            <CheckCircle2 className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+            <span>Geofence saved.</span>
+          </div>
+        )}
+        {geofenceError && (
+          <div className="mt-4 flex items-start gap-2 rounded-md border border-rose-900/60 bg-rose-950/30 px-3 py-2 text-xs text-rose-200">
+            <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+            <span>{geofenceError}</span>
+          </div>
+        )}
+
+        <form action={setOrgGeofence} className="mt-5 space-y-4">
+          <input type="hidden" name="id" value={org.id} />
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Field label="Latitude">
+              <input
+                name="latitude"
+                type="number"
+                step="any"
+                min={-90}
+                max={90}
+                defaultValue={org.latitude ?? ''}
+                placeholder="35.4676"
+                className="w-full rounded-md bg-pvx-surface border border-pvx-border px-3 py-2 text-sm text-gray-100 font-mono focus:border-violet-500/60 focus:outline-none focus:ring-1 focus:ring-violet-500/40"
+              />
+            </Field>
+            <Field label="Longitude">
+              <input
+                name="longitude"
+                type="number"
+                step="any"
+                min={-180}
+                max={180}
+                defaultValue={org.longitude ?? ''}
+                placeholder="-97.5164"
+                className="w-full rounded-md bg-pvx-surface border border-pvx-border px-3 py-2 text-sm text-gray-100 font-mono focus:border-violet-500/60 focus:outline-none focus:ring-1 focus:ring-violet-500/40"
+              />
+            </Field>
+          </div>
+
+          <Field label="Signal Radius (miles)">
+            <input
+              name="signal_radius"
+              type="number"
+              step="1"
+              min={1}
+              max={500}
+              required
+              defaultValue={org.signal_radius ?? 25}
+              className="w-full rounded-md bg-pvx-surface border border-pvx-border px-3 py-2 text-sm text-gray-100 font-mono focus:border-violet-500/60 focus:outline-none focus:ring-1 focus:ring-violet-500/40"
+            />
+          </Field>
+
+          <div className="pt-2">
+            <button
+              type="submit"
+              className="inline-flex items-center rounded-md bg-violet-600 hover:bg-violet-500 px-4 py-2 text-sm font-medium text-white transition-colors"
+            >
+              Save Geofence
             </button>
           </div>
         </form>

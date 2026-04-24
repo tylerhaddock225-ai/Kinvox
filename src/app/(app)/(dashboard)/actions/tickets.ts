@@ -2,29 +2,10 @@
 
 import { ServerClient } from 'postmark'
 import { createClient } from '@/lib/supabase/server'
-import { resolveImpersonation } from '@/lib/impersonation'
+import { resolveEffectiveOrgId } from '@/lib/impersonation'
 import { revalidatePath } from 'next/cache'
 
 type State = { status: 'success' } | { status: 'error'; error: string } | null
-
-// Zero-Inference: never trust a client-supplied organization_id and never
-// fall back to a default. The effective org is the impersonated tenant when
-// an HQ admin is acting as one; otherwise the caller's own profile org.
-async function resolveEffectiveOrgId(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  userId: string,
-): Promise<string | null> {
-  const impersonation = await resolveImpersonation()
-  if (impersonation.active) return impersonation.orgId
-
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('organization_id')
-    .eq('id', userId)
-    .single<{ organization_id: string | null }>()
-
-  return profile?.organization_id ?? null
-}
 
 export async function createTicket(_prev: State, formData: FormData): Promise<State> {
   const supabase = await createClient()

@@ -1,6 +1,8 @@
 import { cookies } from 'next/headers'
 import { createClient } from '@/lib/supabase/server'
 
+type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>
+
 export const IMPERSONATION_COOKIE = 'kinvox_impersonate_id'
 
 export type ImpersonationContext =
@@ -41,4 +43,27 @@ export async function resolveImpersonation(
   if (!org) return { active: false, orgId: null, orgName: null }
 
   return { active: true, orgId, orgName: org.name }
+}
+
+/**
+ * Zero-Inference: returns the organization_id that a server action should
+ * write into. When an HQ admin is "acting as" a tenant, that's the
+ * impersonated org. Otherwise it's the caller's own profile.organization_id.
+ * Returns null when neither resolves — callers must treat null as an error
+ * and refuse to write, never fall back to a default.
+ */
+export async function resolveEffectiveOrgId(
+  supabase: SupabaseServerClient,
+  userId: string,
+): Promise<string | null> {
+  const impersonation = await resolveImpersonation()
+  if (impersonation.active) return impersonation.orgId
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('organization_id')
+    .eq('id', userId)
+    .single<{ organization_id: string | null }>()
+
+  return profile?.organization_id ?? null
 }

@@ -1,28 +1,9 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
-import { resolveImpersonation } from '@/lib/impersonation'
+import { resolveEffectiveOrgId } from '@/lib/impersonation'
 import { revalidatePath } from 'next/cache'
 import type { Lead } from '@/lib/types/database.types'
-
-// Zero-Inference: an HQ admin impersonating a tenant must write into the
-// impersonated org, not their own home org. Falls back to the caller's
-// profile org only when no impersonation cookie is active.
-async function resolveEffectiveOrgId(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  userId: string,
-): Promise<string | null> {
-  const impersonation = await resolveImpersonation()
-  if (impersonation.active) return impersonation.orgId
-
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('organization_id')
-    .eq('id', userId)
-    .single<{ organization_id: string | null }>()
-
-  return profile?.organization_id ?? null
-}
 
 export type CreateLeadState =
   | { status: 'success' }
