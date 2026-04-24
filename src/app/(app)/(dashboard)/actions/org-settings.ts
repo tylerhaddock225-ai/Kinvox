@@ -93,7 +93,7 @@ export async function updateSupportEmail(_prev: State, formData: FormData): Prom
     return { status: 'error', error: msg }
   }
 
-  revalidatePath('/settings/team')
+  revalidatePath('/[orgSlug]/settings/team', 'page')
   return { status: 'success', message: `Verification email sent to ${email}.` }
 }
 
@@ -126,7 +126,7 @@ export async function initializeInboundEmail(_prev: State, _formData: FormData):
       .is('inbound_email_address', null)   // only set if still unset (avoid clobber)
 
     if (!error) {
-      revalidatePath('/settings/team')
+      revalidatePath('/[orgSlug]/settings/team', 'page')
       return { status: 'success', message: `Forwarding address ${candidate} is ready.` }
     }
     lastError = error.message

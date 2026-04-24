@@ -58,8 +58,8 @@ export async function setEngagementMode(_prev: State, formData: FormData): Promi
 
   if (error) return { status: 'error', error: error.message }
 
-  revalidatePath('/settings/team')
-  revalidatePath('/signals')
+  revalidatePath('/[orgSlug]/settings/team', 'page')
+  revalidatePath('/[orgSlug]/signals', 'page')
   return {
     status:  'success',
     message: mode === 'ai_draft'
@@ -82,7 +82,7 @@ export async function setAiListeningEnabled(_prev: State, formData: FormData): P
 
   if (error) return { status: 'error', error: error.message }
 
-  revalidatePath('/settings/team')
+  revalidatePath('/[orgSlug]/settings/team', 'page')
   return {
     status:  'success',
     message: enabled ? 'Social listening enabled.' : 'Social listening paused.',
@@ -107,7 +107,7 @@ export async function cancelSubscription(_prev: State, _formData: FormData): Pro
 
   if (error) return { status: 'error', error: error.message }
 
-  revalidatePath('/settings/team')
+  revalidatePath('/[orgSlug]/settings/team', 'page')
   return {
     status:  'success',
     message: 'Subscription will cancel at the end of the current billing period.',
@@ -126,7 +126,7 @@ export async function reactivateSubscription(_prev: State, _formData: FormData):
 
   if (error) return { status: 'error', error: error.message }
 
-  revalidatePath('/settings/team')
+  revalidatePath('/[orgSlug]/settings/team', 'page')
   return { status: 'success', message: 'Subscription reactivated.' }
 }
 
@@ -166,7 +166,7 @@ export async function requestTopUp(_prev: State, formData: FormData): Promise<St
 
   if (error) return { status: 'error', error: error.message }
 
-  revalidatePath('/settings/team')
+  revalidatePath('/[orgSlug]/settings/team', 'page')
   return {
     status:  'success',
     message: `Top-up request submitted for ${packageCredits} credits. Our team will follow up shortly.`,
@@ -214,7 +214,7 @@ export async function updateLeadQuestions(_prev: State, formData: FormData): Pro
 
   if (error) return { status: 'error', error: error.message }
 
-  revalidatePath('/settings/team')
+  revalidatePath('/[orgSlug]/settings/team', 'page')
   return {
     status:  'success',
     message: cleaned.length

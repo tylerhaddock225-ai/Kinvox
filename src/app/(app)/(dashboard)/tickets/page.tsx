@@ -122,6 +122,16 @@ export default async function TicketsPage({
   if (!effectiveOrgId) redirect('/onboarding')
 
   const orgId   = effectiveOrgId
+
+  // Slug for the settings/team link further down. Tickets still lives at
+  // the non-scoped /tickets path, so we can't pull orgSlug from route params.
+  const { data: orgRow } = await supabase
+    .from('organizations')
+    .select('slug')
+    .eq('id', orgId)
+    .maybeSingle<{ slug: string | null }>()
+  const orgSlug = orgRow?.slug ?? null
+
   const params  = await searchParams
   const requestedQueue: Queue = params.queue === 'closed' ? 'closed' : 'active'
 
@@ -248,7 +258,10 @@ export default async function TicketsPage({
           <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-yellow-400" />
           <p>
             Emails are currently sending from Kinvox.{' '}
-            <Link href="/settings/team" className="underline decoration-dotted underline-offset-4 hover:text-yellow-100">
+            <Link
+              href={orgSlug ? `/${orgSlug}/settings/team` : '/pending-invite'}
+              className="underline decoration-dotted underline-offset-4 hover:text-yellow-100"
+            >
               Verify your custom domain email in Settings
             </Link>{' '}
             to white-label your support.

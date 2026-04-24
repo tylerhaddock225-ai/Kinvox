@@ -48,6 +48,19 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'no_organization' }, { status: 403 })
   }
 
+  // Need the slug for the post-checkout redirect URLs. Billing pages
+  // live at /{slug}/settings/billing after the tenant-routing migration.
+  const { data: org } = await supabase
+    .from('organizations')
+    .select('slug')
+    .eq('id', orgId)
+    .maybeSingle<{ slug: string | null }>()
+
+  const orgSlug = org?.slug ?? null
+  if (!orgSlug) {
+    return NextResponse.json({ error: 'org_slug_missing' }, { status: 409 })
+  }
+
   let body: Body
   try {
     body = (await request.json()) as Body
@@ -85,8 +98,8 @@ export async function POST(request: NextRequest) {
       // reconciliation. Metadata.organization_id remains authoritative.
       client_reference_id: orgId,
       customer_email:      user.email ?? undefined,
-      success_url:         `${base}/billing?status=success&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url:          `${base}/billing?status=cancelled`,
+      success_url:         `${base}/${orgSlug}/settings/billing?status=success&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url:          `${base}/${orgSlug}/settings/billing?status=cancelled`,
       allow_promotion_codes: true,
     })
 

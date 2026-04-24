@@ -46,7 +46,7 @@ export async function createLead(
   void lead
 
   revalidatePath('/')
-  revalidatePath('/leads')
+  revalidatePath('/[orgSlug]/leads', 'page')
   return { status: 'success' }
 }
 
@@ -134,7 +134,7 @@ export async function updateLead(
   if (error) return { status: 'error', error: error.message }
 
   revalidatePath(`/leads/${leadId}`)
-  revalidatePath('/leads')
+  revalidatePath('/[orgSlug]/leads', 'page')
   return { status: 'success' }
 }
 
@@ -191,7 +191,7 @@ export async function updateLeadStatus(leadId: string, status: string): Promise<
   }
 
   revalidatePath(`/leads/${leadId}`)
-  revalidatePath('/leads')
+  revalidatePath('/[orgSlug]/leads', 'page')
   revalidatePath('/')
 }
 

@@ -76,6 +76,6 @@ export async function saveGeofence(
 
   if (error) return { status: 'error', error: error.message }
 
-  revalidatePath('/settings')
+  revalidatePath('/[orgSlug]/settings', 'page')
   return { status: 'success' }
 }

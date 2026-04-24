@@ -103,8 +103,8 @@ export async function sendSignalReply(signalId: string, text: string): Promise<S
     return { status: 'error', error: 'Reply relay failed — please try again' }
   }
 
-  revalidatePath('/signals')
-  revalidatePath('/leads')
+  revalidatePath('/[orgSlug]/signals', 'page')
+  revalidatePath('/[orgSlug]/leads', 'page')
   return { status: 'success', message: 'Reply sent.' }
 }
 
@@ -129,6 +129,6 @@ export async function dismissSignal(signalId: string): Promise<State> {
   if (error)  return { status: 'error', error: error.message }
   if (!data)  return { status: 'error', error: 'Signal is not pending or is inaccessible' }
 
-  revalidatePath('/signals')
+  revalidatePath('/[orgSlug]/signals', 'page')
   return { status: 'success', message: 'Dismissed.' }
 }

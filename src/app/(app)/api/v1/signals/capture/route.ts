@@ -99,10 +99,11 @@ export async function POST(request: NextRequest) {
   // must produce a working link; without one we'd post a 404.
   const { data: org } = await admin
     .from('organizations')
-    .select('name, ai_listening_enabled, signal_engagement_mode, lead_magnet_slug, deleted_at, latitude, longitude, signal_radius')
+    .select('name, slug, ai_listening_enabled, signal_engagement_mode, lead_magnet_slug, deleted_at, latitude, longitude, signal_radius')
     .eq('id', orgId)
     .maybeSingle<{
       name:                   string
+      slug:                   string | null
       ai_listening_enabled:   boolean
       signal_engagement_mode: 'ai_draft' | 'manual'
       lead_magnet_slug:       string | null
@@ -263,12 +264,13 @@ export async function POST(request: NextRequest) {
     // 402 Payment Required — the Make.com/n8n side surfaces top_up_url to
     // the tenant so they can replenish. The path is relative; the caller's
     // own UI layer decides the full URL.
+    const topUpUrl = org.slug ? `/${org.slug}/settings/billing` : '/settings/billing'
     return json(
       {
         error:        'insufficient_credits',
         requested:    score.intent_score,
         intent_score: score.intent_score,
-        top_up_url:   '/billing/top-up',
+        top_up_url:   topUpUrl,
       },
       402,
     )

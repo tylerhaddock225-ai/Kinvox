@@ -6,8 +6,11 @@ import { Users, UserCircle, CalendarCheck, Ticket, LayoutDashboard, Settings, Sh
 import Logo from "./Logo";
 import { logout } from "@/app/(app)/(auth)/actions";
 
-const leadsNav   = { href: "/leads",   label: "Leads",   icon: Users };
-const signalsNav = { href: "/signals", label: "Signals", icon: Sparkles };
+// Leads and Signals now live under the [orgSlug] route segment; their
+// hrefs are built at render time once we know the current slug. The
+// plain-root labels stay here so the nav is still declared up top.
+const LEADS_LABEL   = { label: "Leads",   icon: Users    };
+const SIGNALS_LABEL = { label: "Signals", icon: Sparkles };
 
 interface SidebarProps {
   canViewLeads?: boolean;
@@ -42,10 +45,15 @@ export default function Sidebar({
   const dashboardSlug = currentSlug ?? orgSlug;
   const dashboardHref = dashboardSlug ? `/${dashboardSlug}` : "/";
   const hqSupportHref = dashboardSlug ? `/${dashboardSlug}/hq-support` : "/support";
+  const settingsHref  = dashboardSlug ? `/${dashboardSlug}/settings/team` : "/settings/team";
+  const leadsHref     = dashboardSlug ? `/${dashboardSlug}/leads`   : "/leads";
+  const signalsHref   = dashboardSlug ? `/${dashboardSlug}/signals` : "/signals";
   const onHqSupport = dashboardSlug
     ? pathname === hqSupportHref || pathname.startsWith(`${hqSupportHref}/`)
     : pathname.startsWith("/support");
 
+  // Customers / Appointments / Tickets still live at the top level —
+  // only Leads, Signals, and Settings moved under [orgSlug] in this sprint.
   const staticNav = [
     { href: dashboardHref,   label: "Dashboard",    icon: LayoutDashboard },
     { href: "/customers",    label: "Customers",    icon: UserCircle },
@@ -56,6 +64,8 @@ export default function Sidebar({
   // Signals slots immediately under Leads. When the viewer can't see
   // Leads we still gate Signals on the same permission since the queue
   // is a read-on-leads concept.
+  const leadsNav   = { href: leadsHref,   ...LEADS_LABEL };
+  const signalsNav = { href: signalsHref, ...SIGNALS_LABEL };
   const navItems = canViewLeads
     ? [staticNav[0], leadsNav, signalsNav, ...staticNav.slice(1)]
     : staticNav;
@@ -120,7 +130,7 @@ export default function Sidebar({
       {/* Main navigation */}
       <nav className="flex-1 px-3 pt-3 pb-4 space-y-1">
         {navItems.map(({ href, label, icon: Icon }) => {
-          const badge = href === "/signals" && pendingSignalCount > 0
+          const badge = href === signalsHref && pendingSignalCount > 0
             ? pendingSignalCount
             : 0
           return (
@@ -142,7 +152,7 @@ export default function Sidebar({
 
       {/* Settings section */}
       <div className="px-3 pb-4 border-t border-pvx-border pt-3 space-y-2">
-        <Link href="/settings/team" className={linkClass("/settings/team")}>
+        <Link href={settingsHref} className={linkClass(settingsHref)}>
           <Settings className="w-4 h-4 shrink-0" />
           Organization Settings
         </Link>

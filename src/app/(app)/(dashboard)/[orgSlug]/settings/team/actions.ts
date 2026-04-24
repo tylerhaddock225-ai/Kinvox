@@ -58,7 +58,7 @@ export async function inviteMember(
     role_id: roleId,
   }).eq('id', data.user.id)
 
-  revalidatePath('/settings/team')
+  revalidatePath('/[orgSlug]/settings/team', 'page')
   return { status: 'success' }
 }
 
@@ -75,7 +75,7 @@ export async function updateMemberRole(formData: FormData): Promise<void> {
     .eq('id', memberId)
     .eq('organization_id', ctx.orgId)
 
-  revalidatePath('/settings/team')
+  revalidatePath('/[orgSlug]/settings/team', 'page')
 }
 
 // ── Roles ────────────────────────────────────────────────────────────────────
@@ -104,7 +104,7 @@ export async function createRole(
 
   if (error) return { status: 'error', error: error.message }
 
-  revalidatePath('/settings/team')
+  revalidatePath('/[orgSlug]/settings/team', 'page')
   return { status: 'success' }
 }
 
@@ -126,7 +126,7 @@ export async function updateRole(
 
   if (error) return { status: 'error', error: error.message }
 
-  revalidatePath('/settings/team')
+  revalidatePath('/[orgSlug]/settings/team', 'page')
   return { status: 'success' }
 }
 
@@ -147,5 +147,5 @@ export async function deleteRole(formData: FormData): Promise<void> {
     .eq('id', roleId)
     .eq('organization_id', ctx.orgId)
 
-  revalidatePath('/settings/team')
+  revalidatePath('/[orgSlug]/settings/team', 'page')
 }
