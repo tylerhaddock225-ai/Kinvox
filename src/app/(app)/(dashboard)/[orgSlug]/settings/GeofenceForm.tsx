@@ -1,12 +1,20 @@
 'use client'
 
-import { useActionState } from 'react'
+import { useActionState, useState } from 'react'
 import { MapPin, CheckCircle2, AlertCircle } from 'lucide-react'
 import { saveGeofence, type SaveGeofenceState } from '@/app/(app)/(dashboard)/actions/organizations'
+import { Slider } from '@/components/ui/slider'
+import { Label } from '@/components/ui/label'
 import type { GeofenceRow } from './page'
+
+const MIN_RADIUS = 1
+const MAX_RADIUS = 50
 
 export default function GeofenceForm({ initial }: { initial: GeofenceRow }) {
   const [state, action, pending] = useActionState<SaveGeofenceState, FormData>(saveGeofence, null)
+
+  const startingRadius = clampRadius(initial.signal_radius ?? 25)
+  const [radius, setRadius] = useState<number>(startingRadius)
 
   return (
     <section className="rounded-xl border border-pvx-border bg-gray-900 p-5">
@@ -31,7 +39,7 @@ export default function GeofenceForm({ initial }: { initial: GeofenceRow }) {
         </div>
       )}
 
-      <form action={action} className="mt-5 space-y-4">
+      <form action={action} className="mt-5 space-y-5">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Field label="Latitude">
             <input
@@ -59,18 +67,35 @@ export default function GeofenceForm({ initial }: { initial: GeofenceRow }) {
           </Field>
         </div>
 
-        <Field label="Signal Radius (miles)">
-          <input
-            name="signal_radius"
-            type="number"
-            step="1"
-            min={1}
-            max={500}
-            required
-            defaultValue={initial.signal_radius ?? 25}
-            className="w-full rounded-md bg-pvx-surface border border-pvx-border px-3 py-2 text-sm text-gray-100 font-mono focus:border-violet-500/60 focus:outline-none focus:ring-1 focus:ring-violet-500/40"
+        <div className="space-y-3 rounded-md border border-pvx-border bg-pvx-surface px-4 py-4">
+          <div className="flex items-baseline justify-between">
+            <Label
+              htmlFor="signal_radius_slider"
+              className="text-[11px] font-medium uppercase tracking-wider text-gray-400"
+            >
+              Coverage Radius
+            </Label>
+            <span className="text-sm font-mono text-violet-200">
+              {radius} {radius === 1 ? 'mile' : 'miles'}
+            </span>
+          </div>
+          <Slider
+            id="signal_radius_slider"
+            min={MIN_RADIUS}
+            max={MAX_RADIUS}
+            step={1}
+            value={[radius]}
+            onValueChange={(next) => {
+              const v = Array.isArray(next) ? next[0] : next
+              if (typeof v === 'number') setRadius(clampRadius(v))
+            }}
           />
-        </Field>
+          <div className="flex justify-between text-[10px] uppercase tracking-wider text-gray-500">
+            <span>{MIN_RADIUS} mi</span>
+            <span>{MAX_RADIUS} mi</span>
+          </div>
+          <input type="hidden" name="signal_radius" value={radius} readOnly />
+        </div>
 
         <div className="pt-2">
           <button
@@ -84,6 +109,14 @@ export default function GeofenceForm({ initial }: { initial: GeofenceRow }) {
       </form>
     </section>
   )
+}
+
+function clampRadius(n: number): number {
+  if (!Number.isFinite(n)) return 25
+  const rounded = Math.round(n)
+  if (rounded < MIN_RADIUS) return MIN_RADIUS
+  if (rounded > MAX_RADIUS) return MAX_RADIUS
+  return rounded
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {

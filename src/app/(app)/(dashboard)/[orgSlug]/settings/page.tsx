@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { resolveImpersonation } from '@/lib/impersonation'
 import GeofenceForm from './GeofenceForm'
+import BrandingForm from './BrandingForm'
 
 export const dynamic = 'force-dynamic'
 
@@ -10,6 +11,8 @@ export type GeofenceRow = {
   longitude:     number | null
   signal_radius: number | null
 }
+
+type OrgSettingsRow = GeofenceRow & { logo_url: string | null }
 
 export default async function SettingsPage() {
   const supabase = await createClient()
@@ -36,9 +39,9 @@ export default async function SettingsPage() {
 
   const { data: org } = await supabase
     .from('organizations')
-    .select('latitude, longitude, signal_radius')
+    .select('latitude, longitude, signal_radius, logo_url')
     .eq('id', effectiveOrgId)
-    .single<GeofenceRow>()
+    .single<OrgSettingsRow>()
 
   const geofence: GeofenceRow = {
     latitude:      org?.latitude      ?? null,
@@ -51,10 +54,11 @@ export default async function SettingsPage() {
       <div>
         <h1 className="text-2xl font-bold text-white">Organization Settings</h1>
         <p className="text-sm text-gray-400 mt-1">
-          Configure where your organization listens for signals.
+          Configure your organization's branding and where it listens for signals.
         </p>
       </div>
 
+      <BrandingForm initialLogoUrl={org?.logo_url ?? null} />
       <GeofenceForm initial={geofence} />
     </div>
   )
