@@ -2,10 +2,17 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
+import { resolveEffectiveOrgId } from '@/lib/impersonation'
+import { deductCredit } from '@/lib/credits'
 
 type State =
   | { status: 'success'; message?: string }
   | { status: 'error';   error: string }
+  | null
+
+export type UnlockSignalState =
+  | { status: 'success' }
+  | { status: 'error'; error: string; reason?: 'insufficient_credits' }
   | null
 
 const MAX_REPLY_CHARS = 280 // leaves headroom over the 250-char draft cap
@@ -131,4 +138,90 @@ export async function dismissSignal(signalId: string): Promise<State> {
 
   revalidatePath('/[orgSlug]/signals', 'page')
   return { status: 'success', message: 'Dismissed.' }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Pay-on-Unlock for signals.
+// ─────────────────────────────────────────────────────────────────────
+
+// Atomically charges 1 credit and reveals a pending signal's raw_text +
+// ai_draft_reply. Mirrors the unlockLead pattern from Sprint 2 — same
+// idempotency story, same Zero-Inference org resolution.
+//
+// Idempotency:
+//   - If status is already 'unlocked' (or anything non-pending), no-op.
+//   - On a concurrent race past the status check, the partial unique
+//     index credit_ledger_signal_dedup raises 23505 inside deduct_credit.
+//     The RPC's transaction rolls back the balance decrement, so the
+//     second caller is treated as already-paid. The status flip is
+//     scoped to status='pending', so only one of the racers writes
+//     unlocked_at / unlocked_by.
+export async function unlockSignal(signalId: string): Promise<UnlockSignalState> {
+  if (typeof signalId !== 'string' || signalId.length === 0) {
+    return { status: 'error', error: 'Missing signalId' }
+  }
+
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { status: 'error', error: 'Not authenticated' }
+
+  const orgId = await resolveEffectiveOrgId(supabase, user.id)
+  if (!orgId) return { status: 'error', error: 'No organization' }
+
+  // Re-resolve the signal server-side and verify ownership. RLS would also
+  // hide cross-tenant rows, but reading organization_id explicitly lets us
+  // distinguish wrong-tenant from missing in error responses.
+  const { data: signal } = await supabase
+    .from('pending_signals')
+    .select('id, organization_id, status')
+    .eq('id', signalId)
+    .maybeSingle<{ id: string; organization_id: string; status: string }>()
+
+  if (!signal)                          return { status: 'error', error: 'Signal not found' }
+  if (signal.organization_id !== orgId) return { status: 'error', error: 'Signal not found' }
+  if (signal.status !== 'pending')      return { status: 'success' }
+
+  // Charge first, reveal second. The partial unique index makes deduct
+  // idempotent on retry, so a half-completed unlock can be re-tried
+  // without double-billing.
+  let chargeResult: Awaited<ReturnType<typeof deductCredit>>
+  try {
+    chargeResult = await deductCredit(orgId, 1, signal.id)
+  } catch (err: unknown) {
+    const code = (err as { code?: string })?.code
+    if (code !== '23505') {
+      const msg = err instanceof Error ? err.message : 'Unlock failed'
+      return { status: 'error', error: msg }
+    }
+    chargeResult = { ok: true, balance: 0 }   // already-charged via the dedup index
+  }
+
+  if (!chargeResult.ok) {
+    return {
+      status: 'error',
+      error:  'Insufficient credits — top up to unlock this signal.',
+      reason: 'insufficient_credits',
+    }
+  }
+
+  // Atomic flip scoped to status='pending' so a concurrent winner doesn't
+  // get its unlocked_at overwritten by ours. Zero rows affected is OK —
+  // the credit was idempotently charged and the signal is unlocked one
+  // way or the other.
+  const { error: updErr } = await supabase
+    .from('pending_signals')
+    .update({
+      status:      'unlocked',
+      unlocked_at: new Date().toISOString(),
+      unlocked_by: user.id,
+    })
+    .eq('id', signal.id)
+    .eq('status', 'pending')
+
+  if (updErr) {
+    return { status: 'error', error: 'Unlock half-completed — refresh and try again.' }
+  }
+
+  revalidatePath('/[orgSlug]/signals', 'page')
+  return { status: 'success' }
 }

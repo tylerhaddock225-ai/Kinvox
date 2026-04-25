@@ -1,23 +1,24 @@
 // POST /api/v1/signals/capture
 //
 // Public ingestion endpoint for AI social-listening agents (Make.com, n8n,
-// custom workers). Authenticates the caller via x-kinvox-api-key, scores
-// the post intent (1/3/6), deducts that many credits via the service-
-// role-locked deduct_credit RPC, then:
-//   - signal_engagement_mode='manual'   → insert into leads (direct).
-//   - signal_engagement_mode='ai_draft' → generate a draft reply and
-//                                         insert into pending_signals.
-// Either path broadcasts via supabase_realtime so dashboards pop.
+// custom workers). Authenticates via x-kinvox-api-key, scores the post
+// intent (1/3/6 — display tier only), and parks every signal into
+// pending_signals with status='pending'. Both engagement modes route to
+// the same table:
+//   - 'ai_draft'  → AI generates a reply, stored in ai_draft_reply.
+//   - 'manual'    → ai_draft_reply is NULL; merchant composes after unlock.
 //
-// Auth: sha256(raw_key) matched against organization_api_keys.key_hash.
-// Billing: deductCredit() is atomic — if it fails the signal is not stored.
-// Top-Up: on 402 we return a top_up_url the caller can surface to the tenant.
+// Billing: this endpoint is BILLING-NEUTRAL. The pay-on-unlock pivot
+// (Sprint 3) moved the credit deduction out of capture and into the
+// unlockSignal server action. deduct_credit is now only called by that
+// action, on the merchant's explicit click. Out-of-area signals are
+// still rejected at capture-time (free of charge).
 // Privacy: both AI steps (score + draft) scrub PII before persistence.
 
 import { createHash, randomUUID } from 'node:crypto'
 import { NextResponse, type NextRequest } from 'next/server'
+import { ServerClient } from 'postmark'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { deductCredit } from '@/lib/credits'
 import { haversineMiles } from '@/lib/geo'
 import { scoreSignalIntent, generateDraftReply } from '@/lib/ai/intent-scorer'
 
@@ -83,18 +84,21 @@ export async function POST(request: NextRequest) {
   // must produce a working link; without one we'd post a 404.
   const { data: org } = await admin
     .from('organizations')
-    .select('name, slug, ai_listening_enabled, signal_engagement_mode, lead_magnet_slug, deleted_at, latitude, longitude, signal_radius')
+    .select('id, name, slug, ai_listening_enabled, signal_engagement_mode, lead_magnet_slug, deleted_at, latitude, longitude, signal_radius, verified_support_email, verified_support_email_confirmed_at')
     .eq('id', orgId)
     .maybeSingle<{
-      name:                   string
-      slug:                   string | null
-      ai_listening_enabled:   boolean
-      signal_engagement_mode: 'ai_draft' | 'manual'
-      lead_magnet_slug:       string | null
-      deleted_at:             string | null
-      latitude:               number | null
-      longitude:              number | null
-      signal_radius:          number | null
+      id:                                  string
+      name:                                string
+      slug:                                string | null
+      ai_listening_enabled:                boolean
+      signal_engagement_mode:              'ai_draft' | 'manual'
+      lead_magnet_slug:                    string | null
+      deleted_at:                          string | null
+      latitude:                            number | null
+      longitude:                           number | null
+      signal_radius:                       number | null
+      verified_support_email:              string | null
+      verified_support_email_confirmed_at: string | null
     }>()
 
   if (!org || org.deleted_at) return json({ error: 'organization_unavailable' }, 404)
@@ -243,142 +247,150 @@ export async function POST(request: NextRequest) {
     author_handle: authorHandle || undefined,
   })
 
-  const deduction = await deductCredit(orgId, score.intent_score, signalId)
-  if (!deduction.ok) {
-    // 402 Payment Required — the Make.com/n8n side surfaces top_up_url to
-    // the tenant so they can replenish. The path is relative; the caller's
-    // own UI layer decides the full URL.
-    const topUpUrl = org.slug ? `/${org.slug}/settings/billing` : '/settings/billing'
-    return json(
-      {
-        error:        'insufficient_credits',
-        requested:    score.intent_score,
-        intent_score: score.intent_score,
-        top_up_url:   topUpUrl,
-      },
-      402,
-    )
-  }
-
-  // Best-effort last_used_at stamp. Never block the response on this —
-  // deduction already committed and the downstream insert is what matters.
+  // Best-effort last_used_at stamp. Never block the response on this.
   void admin
     .from('organization_api_keys')
     .update({ last_used_at: new Date().toISOString() })
     .eq('id', keyRow.id)
 
-  // ── Branch: ai_draft mode ────────────────────────────────────────────
-  // Generate a reply and park the row in pending_signals. The tenant
-  // reviews + approves from the Signals tab; no lead is created here.
+  // ── Unified persistence: every signal lands in pending_signals ───────
+  //
+  // Both engagement modes route here so no signal can bypass the unlock
+  // paywall by going straight to the leads table. Manual mode signals
+  // get a NULL ai_draft_reply — the merchant composes their own reply
+  // after unlock. ai_draft mode signals get the AI's draft reply,
+  // including the lead-magnet URL with signal_id attribution baked in.
+  let draftText:        string | null = null
+  let draftSkipped     = false
+  let draftPiiRedacted = false
+  let draftLinkAppended = false
+
   if (org.signal_engagement_mode === 'ai_draft') {
     const draft = await generateDraftReply({
       organization_name: org.name,
       landing_slug:      org.lead_magnet_slug as string,    // asserted above
+      signal_id:         signalId,
       raw_text:          rawText,
       platform,
       author_name:       authorName || undefined,
       author_handle:     authorHandle || undefined,
     })
-
-    const { data: pending, error: insertErr } = await admin
-      .from('pending_signals')
-      .insert({
-        id:                signalId,
-        organization_id:   orgId,
-        raw_text:          rawText,
-        ai_draft_reply:    draft.text,
-        reasoning_snippet: score.reasoning_snippet,
-        intent_score:      score.intent_score,
-        platform,
-        status:            'pending',
-        external_post_id:  typeof body.source_url === 'string' ? body.source_url : null,
-        signal_config_id:  signalConfigId,
-      })
-      .select('id, created_at')
-      .single<{ id: string; created_at: string }>()
-
-    if (insertErr) {
-      return json(
-        { error: `insert_failed: ${insertErr.message}`, signal_id: signalId },
-        500,
-      )
-    }
-
-    return json({
-      ok:                true,
-      mode:              'ai_draft',
-      pending:           true,
-      signal_id:         pending?.id,
-      ai_draft_reply:    draft.text,
-      intent_score:      score.intent_score,
-      reasoning_snippet: score.reasoning_snippet,
-      balance:           deduction.balance,
-      credits_charged:   score.intent_score,
-      draft_skipped:     draft.draft_skipped || undefined,
-      pii_redacted:      (score.pii_redacted || draft.pii_redacted) || undefined,
-      link_appended:     draft.link_appended || undefined,
-    })
+    draftText         = draft.text
+    draftSkipped      = draft.draft_skipped || false
+    draftPiiRedacted  = draft.pii_redacted  || false
+    draftLinkAppended = draft.link_appended || false
   }
 
-  // ── Branch: manual mode ──────────────────────────────────────────────
-  // Signal flows straight into leads as before.
-  //
-  // leads.first_name is NOT NULL. Use the author's first token → handle →
-  // a literal fallback so we never reject on a required-field technicality
-  // after we've already billed.
-  const firstToken = authorName.split(/\s+/).filter(Boolean)[0]
-    ?? authorHandle
-    ?? 'Signal'
-  const spaceIdx  = authorName.indexOf(' ')
-  const lastName  = spaceIdx === -1 ? null : authorName.slice(spaceIdx + 1).trim() || null
-
-  const metadata: Record<string, unknown> = {
-    signal_id:         signalId,
-    platform,
-    raw_text:          rawText,
-    location,
-    captured_via:      'social_listening',
-    intent_score:      score.intent_score,
-    reasoning_snippet: score.reasoning_snippet,
-  }
-  if (score.scoring_skipped) metadata.scoring_skipped = true
-  if (score.pii_redacted)    metadata.pii_redacted    = true
-  if (authorHandle)          metadata.author_handle   = authorHandle
-  if (body.source_url)       metadata.source_url      = body.source_url
-  if (signalConfigId)        metadata.signal_config_id = signalConfigId
-
-  const { data: lead, error: insertErr } = await admin
-    .from('leads')
+  const { data: pending, error: insertErr } = await admin
+    .from('pending_signals')
     .insert({
-      organization_id: orgId,
-      first_name:      firstToken,
-      last_name:       lastName,
-      status:          'new',
-      source:          'social_listening',
-      metadata,
+      id:                signalId,
+      organization_id:   orgId,
+      raw_text:          rawText,
+      ai_draft_reply:    draftText,
+      reasoning_snippet: score.reasoning_snippet,
+      intent_score:      score.intent_score,
+      platform,
+      status:            'pending',
+      external_post_id:  typeof body.source_url === 'string' ? body.source_url : null,
+      signal_config_id:  signalConfigId,
     })
-    .select('id, display_id')
-    .single<{ id: string; display_id: string | null }>()
+    .select('id, created_at')
+    .single<{ id: string; created_at: string }>()
 
   if (insertErr) {
-    // Credit already deducted. We do NOT auto-refund — HQ reconciles via
-    // the ledger if this ever fires. Signal_id is included so the caller
-    // can retry without double-billing on the ledger side.
     return json(
       { error: `insert_failed: ${insertErr.message}`, signal_id: signalId },
       500,
     )
   }
 
+  // Speed-to-Signal alert: tells the merchant a fresh, locked signal is
+  // sitting in the dashboard and how much intent it carries. PII-free
+  // body (no raw_text, no author handle) so an inbox compromise doesn't
+  // leak the unlock content. Fires for both engagement modes.
+  void sendSignalAlertEmail({
+    orgId,
+    orgName:          org.name,
+    recipient:        org.verified_support_email && org.verified_support_email_confirmed_at
+                        ? org.verified_support_email
+                        : null,
+    intentScore:      score.intent_score,
+    reasoningSnippet: score.reasoning_snippet,
+    platform,
+  })
+
   return json({
     ok:                true,
-    mode:              'manual',
-    signal_id:         signalId,
-    lead_id:           lead?.id,
-    display_id:        lead?.display_id,
-    balance:           deduction.balance,
+    mode:              org.signal_engagement_mode,
+    pending:           true,
+    signal_id:         pending?.id,
+    ai_draft_reply:    draftText,
     intent_score:      score.intent_score,
     reasoning_snippet: score.reasoning_snippet,
-    credits_charged:   score.intent_score,
+    draft_skipped:     draftSkipped     || undefined,
+    pii_redacted:      (score.pii_redacted || draftPiiRedacted) || undefined,
+    link_appended:     draftLinkAppended || undefined,
   })
+}
+
+type SignalAlertArgs = {
+  orgId:            string
+  orgName:          string
+  recipient:        string | null
+  intentScore:      1 | 3 | 6
+  reasoningSnippet: string | null
+  platform:         string
+}
+
+// Sends "New Signal Captured — Unlock Intent in Dashboard" to the merchant.
+// PII-safe: no raw_text, no author handle, no source URL — just the intent
+// tier + the AI's scrubbed reasoning_snippet. Best-effort: any failure
+// logs and returns; the signal is already in the dashboard regardless.
+async function sendSignalAlertEmail({
+  orgId,
+  recipient,
+  intentScore,
+  reasoningSnippet,
+  platform,
+}: SignalAlertArgs): Promise<void> {
+  const LOG = '[signal-alert]'
+
+  const token = process.env.POSTMARK_SERVER_TOKEN
+  if (!token) {
+    console.error(`${LOG} POSTMARK_SERVER_TOKEN not set — skipping alert for org=${orgId}`)
+    return
+  }
+  if (!recipient) {
+    console.warn(`${LOG} org=${orgId} has no verified support email — skipping`)
+    return
+  }
+
+  const tierLabel = intentScore === 6 ? 'Urgent' : intentScore === 3 ? 'Medium' : 'Low'
+
+  const body = [
+    `A new ${tierLabel.toLowerCase()}-intent signal just landed in your dashboard.`,
+    '',
+    `Platform: ${platform}`,
+    `Intent:   ${tierLabel}`,
+    reasoningSnippet ? `AI read:  ${reasoningSnippet}` : 'AI read:  (no snippet — fallback scoring)',
+    '',
+    'Open your dashboard to Unlock Intent and reply (1 credit per unlock).',
+    '',
+    '— Kinvox',
+  ].join('\n')
+
+  try {
+    const client = new ServerClient(token)
+    const result = await client.sendEmail({
+      From:     'Kinvox <support@kinvoxtech.com>',
+      To:       recipient,
+      Subject:  'New Signal Captured — Unlock Intent in Dashboard',
+      TextBody: body,
+    })
+    console.log(`${LOG} dispatched org=${orgId} to=${recipient} intent=${intentScore} postmark_id=${result.MessageID}`)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error(`${LOG} FAILED org=${orgId} to=${recipient}: ${msg}`)
+  }
 }

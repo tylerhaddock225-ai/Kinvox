@@ -394,9 +394,11 @@ export type Database = {
           reasoning_snippet: string | null
           intent_score: 1 | 3 | 6 | null
           platform: string | null
-          status: 'pending' | 'approved' | 'dismissed'
+          status: 'pending' | 'unlocked' | 'approved' | 'dismissed'
           external_post_id: string | null
           signal_config_id: string | null
+          unlocked_at: string | null
+          unlocked_by: string | null
           created_at: string
         }
         Insert: {
@@ -407,9 +409,11 @@ export type Database = {
           reasoning_snippet?: string | null
           intent_score?: 1 | 3 | 6 | null
           platform?: string | null
-          status?: 'pending' | 'approved' | 'dismissed'
+          status?: 'pending' | 'unlocked' | 'approved' | 'dismissed'
           external_post_id?: string | null
           signal_config_id?: string | null
+          unlocked_at?: string | null
+          unlocked_by?: string | null
           created_at?: string
         }
         Update: Partial<Database['public']['Tables']['pending_signals']['Insert']>

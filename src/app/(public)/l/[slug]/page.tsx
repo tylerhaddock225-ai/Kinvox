@@ -31,13 +31,23 @@ function needsHomesteadQuestion(features: string[] | undefined): boolean {
   return features.some((f) => /grant|homestead|soh/i.test(f))
 }
 
+// Accept ?sig=<signal_id> for AI-reply attribution. Anything that isn't a
+// uuid-shaped string gets dropped here; the action also re-validates it.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 export default async function LeadMagnetPage({
   params,
+  searchParams,
 }: {
-  params: Promise<{ slug: string }>
+  params:        Promise<{ slug: string }>
+  searchParams?: Promise<{ sig?: string | string[] }>
 }) {
   const { slug } = await params
   if (!slug) notFound()
+
+  const sigParam = (await searchParams)?.sig
+  const sigRaw   = Array.isArray(sigParam) ? sigParam[0] : sigParam
+  const signalId = typeof sigRaw === 'string' && UUID_RE.test(sigRaw.trim()) ? sigRaw.trim() : null
 
   // Admin client bypasses RLS: we want this page readable anonymously
   // without widening the organizations table's RLS policies. The query
@@ -91,6 +101,7 @@ export default async function LeadMagnetPage({
             slug={org.lead_magnet_slug}
             askHomestead={askHomestead}
             customQuestions={customQuestions}
+            signalId={signalId}
           />
         </div>
 

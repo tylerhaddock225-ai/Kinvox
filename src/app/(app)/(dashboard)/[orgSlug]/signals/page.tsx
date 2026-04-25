@@ -30,11 +30,14 @@ export default async function SignalsPage() {
     : profile?.organization_id ?? null
   if (!effectiveOrgId) redirect('/onboarding')
 
+  // Pending and unlocked rows both stay on the queue. Unlocked signals are
+  // still actionable — the merchant has to send the AI reply or dismiss.
+  // Approved/dismissed rows leave the queue.
   const { data: signals } = await supabase
     .from('pending_signals')
-    .select('id, organization_id, raw_text, ai_draft_reply, reasoning_snippet, intent_score, platform, status, external_post_id, created_at')
+    .select('id, organization_id, raw_text, ai_draft_reply, reasoning_snippet, intent_score, platform, status, external_post_id, unlocked_at, unlocked_by, signal_config_id, created_at')
     .eq('organization_id', effectiveOrgId)
-    .eq('status', 'pending')
+    .in('status', ['pending', 'unlocked'])
     .order('created_at', { ascending: false })
     .limit(100)
     .returns<PendingSignal[]>()

@@ -2,28 +2,31 @@
 
 // Public lead-magnet capture — server action variant.
 //
-// Pay-on-Unlock model:
-//   1. Geocodes the visitor's "Service Address" via lib/geo.ts.
-//   2. Compares the resulting point against the org's saved epicenter +
-//      signal_radius to decide qualified vs out_of_bounds.
-//   3. Persists the lead with status='pending_unlock' regardless of
-//      qualification — the merchant pays per-unlock from the dashboard,
-//      not at capture time. PII is stored but masked in the leads UI
-//      until unlocked.
-//   4. NO credits are deducted at capture. Billing happens via the
-//      unlockLead server action; reference_id on the resulting ledger
-//      row will be this lead's id.
+// Sprint 3 model: leads from this form are *conversions* — the prospect
+// already self-identified after seeing an unlocked AI reply. There is no
+// per-lead paywall; the credit was already spent at the signal-unlock
+// step. So:
+//   1. Geocode the visitor's "Service Address" via lib/geo.ts.
+//   2. Compare the resulting point against the org's saved epicenter +
+//      signal_radius — purely informational; we still capture the lead
+//      either way so the merchant has visibility.
+//   3. Insert the lead with status='new' (no unlock cycle).
+//   4. If the visitor is INSIDE the service area, also insert an
+//      appointments row using the datetime they picked. Out-of-area
+//      visitors are captured but not booked — driving miles for a
+//      non-fit isn't the merchant's preferred outcome.
 //
 // Zero-Inference: organization_id is resolved server-side from the slug
-// embedded in the form. Anything the client claims about org id/coords/
-// fence is ignored.
+// embedded in the form. Anything the client claims about org id, coords,
+// fence, or owner is ignored. The appointments row inherits the same
+// resolved org id, never anything from the form payload.
 
 import { ServerClient } from 'postmark'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { geocodeAddress, haversineMiles } from '@/lib/geo'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-const TEASER_CHARS = 20
+const UUID_RE  = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export type CaptureLeadState =
   | { status: 'success' }
@@ -33,6 +36,7 @@ export type CaptureLeadState =
 type OrgRow = {
   id:                                  string
   name:                                string
+  owner_id:                            string
   latitude:                            number | null
   longitude:                           number | null
   signal_radius:                       number | null
@@ -46,17 +50,34 @@ export async function captureLeadAction(
   _prev: CaptureLeadState,
   formData: FormData,
 ): Promise<CaptureLeadState> {
-  const slug    = String(formData.get('slug')    ?? '').trim().toLowerCase()
-  const name    = String(formData.get('name')    ?? '').trim()
-  const email   = String(formData.get('email')   ?? '').trim().toLowerCase()
-  const phone   = String(formData.get('phone')   ?? '').trim()
-  const address = String(formData.get('address') ?? '').trim()
+  const slug            = String(formData.get('slug')           ?? '').trim().toLowerCase()
+  const name            = String(formData.get('name')           ?? '').trim()
+  const email           = String(formData.get('email')          ?? '').trim().toLowerCase()
+  const phone           = String(formData.get('phone')          ?? '').trim()
+  const address         = String(formData.get('address')        ?? '').trim()
+  const appointmentAt   = String(formData.get('appointment_at') ?? '').trim()
+  const signalIdRaw     = String(formData.get('signal_id')      ?? '').trim()
+  const signalIdCandidate = UUID_RE.test(signalIdRaw) ? signalIdRaw : null
 
   if (!slug)                 return { status: 'error', error: 'Missing slug' }
   if (!name)                 return { status: 'error', error: 'Name is required' }
   if (!EMAIL_RE.test(email)) return { status: 'error', error: 'Enter a valid email address' }
   if (!phone)                return { status: 'error', error: 'Phone is required' }
   if (!address)              return { status: 'error', error: 'Service address is required' }
+  if (!appointmentAt)        return { status: 'error', error: 'Pick a date and time' }
+
+  // datetime-local sends "YYYY-MM-DDTHH:MM" with no timezone. We treat the
+  // value as UTC for storage simplicity in the sandbox; real production
+  // would resolve through the org's saved timezone. The Date round-trip
+  // also rejects malformed values.
+  const apptDate = new Date(appointmentAt)
+  if (Number.isNaN(apptDate.getTime())) {
+    return { status: 'error', error: 'Pick a valid date and time' }
+  }
+  if (apptDate.getTime() < Date.now() - 60_000) {
+    return { status: 'error', error: 'Appointment time must be in the future' }
+  }
+  const apptIso = apptDate.toISOString()
 
   // Service-role: anonymous public submission. We re-resolve the slug here
   // and never trust an organization_id from the form payload (Zero-Inference).
@@ -64,7 +85,7 @@ export async function captureLeadAction(
 
   const { data: org, error: orgErr } = await supabase
     .from('organizations')
-    .select('id, name, latitude, longitude, signal_radius, lead_magnet_settings, deleted_at, verified_support_email, verified_support_email_confirmed_at')
+    .select('id, name, owner_id, latitude, longitude, signal_radius, lead_magnet_settings, deleted_at, verified_support_email, verified_support_email_confirmed_at')
     .ilike('lead_magnet_slug', slug)
     .is('deleted_at', null)
     .maybeSingle<OrgRow>()
@@ -75,12 +96,27 @@ export async function captureLeadAction(
     return { status: 'error', error: 'This landing page is not available' }
   }
 
-  // Geofence is only meaningful when the org has fully configured an anchor +
-  // radius. If any piece is missing we treat the submission as qualified —
-  // the merchant still gets the lead and decides whether to unlock it.
+  // Attribution: only honour the supplied signal_id if it actually points
+  // at a pending_signal that belongs to *this* org. A visitor pasting a
+  // ?sig=<other-tenant-uuid> in the URL must not write attribution into
+  // someone else's tenancy. Zero-Inference: the org id we compare against
+  // came from the slug lookup above, never from the form payload.
+  let attributedSignalId: string | null = null
+  if (signalIdCandidate) {
+    const { data: sig } = await supabase
+      .from('pending_signals')
+      .select('id, organization_id')
+      .eq('id', signalIdCandidate)
+      .maybeSingle<{ id: string; organization_id: string }>()
+    if (sig && sig.organization_id === org.id) {
+      attributedSignalId = sig.id
+    }
+  }
+
+  // Geofence is informational here — leads are captured regardless. The
+  // flag drives whether we book the appointment + which email copy fires.
   let geofence: 'inside' | 'outside' = 'inside'
   let distanceMiles: number | null   = null
-  let qualified = true
 
   if (
     typeof org.latitude      === 'number' &&
@@ -92,8 +128,7 @@ export async function captureLeadAction(
       point.lat, point.lng,
       org.latitude, org.longitude,
     )
-    qualified = distanceMiles <= org.signal_radius
-    geofence  = qualified ? 'inside' : 'outside'
+    geofence = distanceMiles <= org.signal_radius ? 'inside' : 'outside'
   }
 
   // Crude name split — first token is first_name, remainder is last_name.
@@ -119,32 +154,22 @@ export async function captureLeadAction(
   const homesteadRaw = formData.get('homestead_exemption')
   const homestead    = homesteadRaw === 'on' || homesteadRaw === 'true'
 
-  // Teaser snippet: first 20 chars of the joined custom answers, stripped
-  // of newlines. Renders in the locked dashboard row so the merchant has
-  // *some* qualitative signal to weigh against the unlock cost.
-  const teaserSnippet = customAnswers.length
-    ? customAnswers
-        .map((a) => a.answer)
-        .join(' · ')
-        .replace(/\s+/g, ' ')
-        .trim()
-        .slice(0, TEASER_CHARS)
-    : null
-
   const metadata: Record<string, unknown> = {
     captured_via: 'lead_magnet',
     slug,
     address,
     geofence,
-    qualified,
+    requested_appointment_at: apptIso,
     tags:         ['lead_magnet'],
   }
-  if (distanceMiles !== null) metadata.distance_miles      = Number(distanceMiles.toFixed(2))
+  if (distanceMiles !== null)  metadata.distance_miles      = Number(distanceMiles.toFixed(2))
   if (homesteadRaw   !== null) metadata.homestead_exemption = homestead
   if (customAnswers.length)    metadata.custom_answers      = customAnswers
-  if (teaserSnippet)           metadata.teaser_snippet      = teaserSnippet
+  // Attribution trail: links the lead row back to the originating signal so
+  // the merchant (and HQ) can trace social-post → unlock → form submission.
+  if (attributedSignalId)      metadata.signal_id           = attributedSignalId
 
-  const { error: insertErr } = await supabase
+  const { data: lead, error: insertErr } = await supabase
     .from('leads')
     .insert({
       organization_id: org.id,
@@ -152,7 +177,7 @@ export async function captureLeadAction(
       last_name:       lastName,
       email,
       phone,
-      status:          'pending_unlock',
+      status:          'new',
       source:          'web',
       metadata,
     })
@@ -166,13 +191,49 @@ export async function captureLeadAction(
     return { status: 'error', error: 'Submission failed — please try again.' }
   }
 
-  // Speed-to-Lead alert. Pay-on-Unlock means the email no longer claims
-  // a credit was deducted — it nudges the merchant to open the dashboard
-  // and unlock the lead there.
+  // Appointment booking: only for in-area visitors. The created_by FK
+  // requires a real auth user — we use the org's owner since the booking
+  // is being made on the org's behalf, not by an individual employee.
+  // Zero-Inference: org.id and org.owner_id come from the slug lookup,
+  // never from the form payload.
+  let appointmentBooked = false
+  if (geofence === 'inside' && lead?.id) {
+    const { error: apptErr } = await supabase
+      .from('appointments')
+      .insert({
+        organization_id: org.id,
+        lead_id:         lead.id,
+        created_by:      org.owner_id,
+        title:           `Initial consultation — ${trimmedName}`,
+        description:     `Booked from ${slug} lead magnet. Service address: ${address}`,
+        start_at:        apptIso,
+        status:          'scheduled',
+      })
+
+    if (apptErr) {
+      // Lead is captured; surface the booking failure in metadata for HQ
+      // reconciliation but never bubble to the public visitor — they did
+      // their part.
+      console.error(`[lead-capture] appointment insert failed lead=${lead.id}: ${apptErr.message}`)
+      await supabase
+        .from('leads')
+        .update({ metadata: { ...metadata, appointment_error: apptErr.message } })
+        .eq('id', lead.id)
+    } else {
+      appointmentBooked = true
+    }
+  }
+
+  // Notification: tells the merchant about the conversion. Sprint 3 copy:
+  // form-captured leads are confirmed conversions, not paywall teasers,
+  // so the email is celebratory + actionable, not a unlock-CTA.
   await sendLeadAlertEmail({
     org,
     geofence,
     distanceMiles,
+    fullName: trimmedName,
+    phone,
+    appointmentAt: appointmentBooked ? apptIso : null,
   })
 
   return { status: 'success' }
@@ -182,12 +243,18 @@ type LeadAlertArgs = {
   org:           OrgRow
   geofence:      'inside' | 'outside'
   distanceMiles: number | null
+  fullName:      string
+  phone:         string
+  appointmentAt: string | null
 }
 
 async function sendLeadAlertEmail({
   org,
   geofence,
   distanceMiles,
+  fullName,
+  phone,
+  appointmentAt,
 }: LeadAlertArgs): Promise<void> {
   const LOG = '[lead-alert]'
 
@@ -197,9 +264,6 @@ async function sendLeadAlertEmail({
     return
   }
 
-  // Recipient: only the org's verified support address. Unconfirmed
-  // addresses would be rejected by Postmark anyway, and we don't want
-  // the merchant inadvertently spamming a typo-d email they entered.
   const recipient =
     org.verified_support_email && org.verified_support_email_confirmed_at
       ? org.verified_support_email
@@ -210,27 +274,37 @@ async function sendLeadAlertEmail({
     return
   }
 
-  // Pay-on-Unlock: PII (name, phone, address) is intentionally NOT in the
-  // email. Including it here would defeat the unlock paywall — anyone with
-  // mailbox access would have the contact details for free. The email's
-  // job is to drive the merchant back into the dashboard.
   const distanceLine =
     distanceMiles !== null
       ? `Distance from your service epicenter: ${distanceMiles.toFixed(2)} miles`
       : 'Distance: unavailable (geofence not configured)'
 
-  const subject  = 'New Signal Captured — Unlock in Dashboard'
+  // Form-captured leads = paid signals that converted. PII is OK to
+  // include here because the merchant already paid for the signal that
+  // produced this lead.
+  const subject = geofence === 'inside'
+    ? `Lead converted — ${fullName}`
+    : `Lead captured (outside service area) — ${fullName}`
+
   const headline = geofence === 'inside'
-    ? 'A new lead landed inside your service area.'
-    : 'A new lead landed — outside your service area.'
+    ? appointmentAt
+      ? 'A prospect just booked an appointment from your landing page.'
+      : 'A prospect just submitted your landing page.'
+    : 'A prospect submitted your landing page from outside your service area.'
+
+  const apptLine = appointmentAt
+    ? `Requested appointment: ${new Date(appointmentAt).toLocaleString()}`
+    : 'No appointment was booked (out of service area).'
 
   const body = [
     headline,
     '',
-    `Geofence: ${geofence === 'inside' ? 'IN service area' : 'OUTSIDE service area'}`,
+    `Name:    ${fullName}`,
+    `Phone:   ${phone}`,
     distanceLine,
+    apptLine,
     '',
-    'Open your dashboard to review and unlock this lead (1 credit).',
+    'Open your dashboard to view full details.',
     '',
     '— Kinvox',
   ].join('\n')
@@ -243,11 +317,9 @@ async function sendLeadAlertEmail({
       Subject:  subject,
       TextBody: body,
     })
-    console.log(`${LOG} dispatched org=${org.id} to=${recipient} geofence=${geofence} postmark_id=${result.MessageID}`)
+    console.log(`${LOG} dispatched org=${org.id} to=${recipient} geofence=${geofence} appointment=${appointmentAt ? 'yes' : 'no'} postmark_id=${result.MessageID}`)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error(`${LOG} FAILED org=${org.id} to=${recipient}: ${msg}`)
-    // Swallow — the lead is captured. Email is best-effort; merchants
-    // can also see the lead in their dashboard.
   }
 }

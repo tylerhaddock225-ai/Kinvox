@@ -219,6 +219,7 @@ export type DraftReply = {
 type DraftInput = {
   organization_name: string
   landing_slug:      string          // org.lead_magnet_slug
+  signal_id?:        string          // when present, embedded as ?sig= for attribution
   raw_text:          string
   platform:          string
   author_name?:      string
@@ -231,8 +232,13 @@ const DRAFT_CHAR_CAP = 250
 // the public lead-magnet host, this is the single place to swap.
 const DRAFT_LINK_BASE = 'https://kinvoxtech.com/l'
 
-function buildDraftLink(slug: string): string {
-  return `${DRAFT_LINK_BASE}/${encodeURIComponent(slug)}`
+// Builds the lead-magnet URL the AI reply will embed. When a signal id is
+// supplied we tack on `?sig=<uuid>` so the lead-capture action can write
+// the originating signal id into leads.metadata, giving HQ + the merchant
+// a clean attribution trail from social post → unlock → form submission.
+function buildDraftLink(slug: string, signalId?: string): string {
+  const base = `${DRAFT_LINK_BASE}/${encodeURIComponent(slug)}`
+  return signalId ? `${base}?sig=${encodeURIComponent(signalId)}` : base
 }
 
 function ensureLink(text: string, link: string): { text: string; appended: boolean } {
@@ -248,8 +254,8 @@ function capLength(text: string, max: number): string {
   return text.slice(0, max - 1).trimEnd() + '…'
 }
 
-function templateFallback(orgName: string, slug: string): DraftReply {
-  const link = buildDraftLink(slug)
+function templateFallback(orgName: string, slug: string, signalId?: string): DraftReply {
+  const link = buildDraftLink(slug, signalId)
   const body = `Hi! ${orgName} can help with this — see details here: ${link}`
   return {
     text:          capLength(body, DRAFT_CHAR_CAP),
@@ -277,14 +283,14 @@ export async function generateDraftReply(input: DraftInput): Promise<DraftReply>
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) {
     console.warn('[draft-reply] ANTHROPIC_API_KEY unset — using template fallback')
-    return templateFallback(input.organization_name, input.landing_slug)
+    return templateFallback(input.organization_name, input.landing_slug, input.signal_id)
   }
 
   const model = process.env.ANTHROPIC_DRAFTING_MODEL
     || process.env.ANTHROPIC_SCORING_MODEL
     || DEFAULT_MODEL
 
-  const link = buildDraftLink(input.landing_slug)
+  const link = buildDraftLink(input.landing_slug, input.signal_id)
 
   const systemPrompt = [
     `You are a helpful assistant for ${input.organization_name}.`,
@@ -320,16 +326,16 @@ export async function generateDraftReply(input: DraftInput): Promise<DraftReply>
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error('[draft-reply] fetch failed:', msg)
-    return templateFallback(input.organization_name, input.landing_slug)
+    return templateFallback(input.organization_name, input.landing_slug, input.signal_id)
   }
 
   if (!res.ok) {
     console.error('[draft-reply] Anthropic returned', res.status, await res.text().catch(() => ''))
-    return templateFallback(input.organization_name, input.landing_slug)
+    return templateFallback(input.organization_name, input.landing_slug, input.signal_id)
   }
 
   const rawText = extractText(await res.json().catch(() => null))
-  if (!rawText) return templateFallback(input.organization_name, input.landing_slug)
+  if (!rawText) return templateFallback(input.organization_name, input.landing_slug, input.signal_id)
 
   // Strip surrounding quotes if the model added any despite the instruction.
   const stripped = rawText.replace(/^["'`]+|["'`]+$/g, '').trim()

@@ -1,6 +1,5 @@
 import { Suspense } from 'react'
 import { redirect } from 'next/navigation'
-import { MapPin } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { resolveImpersonation } from '@/lib/impersonation'
 import type { Lead } from '@/lib/types/database.types'
@@ -8,7 +7,6 @@ import CreateLeadModal from '@/components/CreateLeadModal'
 import CopyId from '@/components/CopyId'
 import LeadsFilters from './LeadsFilters'
 import LeadRow from './LeadRow'
-import UnlockButton from './UnlockButton'
 
 const STATUS_COLORS: Record<Lead['status'], string> = {
   new:            'bg-blue-500/10 text-blue-400 border-blue-500/20',
@@ -16,16 +14,11 @@ const STATUS_COLORS: Record<Lead['status'], string> = {
   qualified:      'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
   lost:           'bg-red-500/10 text-red-400 border-red-500/20',
   converted:      'bg-purple-500/10 text-purple-400 border-purple-500/20',
+  // pending_unlock is a legacy enum value from Sprint 2's lead-paywall flow.
+  // No active path produces it after the Sprint 3 pivot, but the constraint
+  // value is retained so existing rows (if any) still render with sensible
+  // styling rather than a missing-key crash.
   pending_unlock: 'bg-violet-500/10 text-violet-300 border-violet-500/30',
-}
-
-const STATUS_LABEL: Record<Lead['status'], string> = {
-  new:            'new',
-  contacted:      'contacted',
-  qualified:      'qualified',
-  lost:           'lost',
-  converted:      'converted',
-  pending_unlock: 'locked',
 }
 
 type SearchParams = Promise<{
@@ -34,15 +27,9 @@ type SearchParams = Promise<{
   source?: string
 }>
 
-type LeadMetadata = {
-  geofence?:       string
-  distance_miles?: number
-  teaser_snippet?: string
-}
-
 function pickStatus(v: string | undefined): Lead['status'] | null {
   if (!v) return null
-  const allowed: Lead['status'][] = ['new', 'contacted', 'qualified', 'lost', 'converted', 'pending_unlock']
+  const allowed: Lead['status'][] = ['new', 'contacted', 'qualified', 'lost', 'converted']
   return (allowed as string[]).includes(v) ? (v as Lead['status']) : null
 }
 
@@ -50,16 +37,6 @@ function pickSource(v: string | undefined): NonNullable<Lead['source']> | null {
   if (!v) return null
   const allowed: NonNullable<Lead['source']>[] = ['web', 'referral', 'import', 'manual', 'other']
   return (allowed as string[]).includes(v) ? (v as NonNullable<Lead['source']>) : null
-}
-
-function readMeta(meta: Lead['metadata']): LeadMetadata {
-  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return {}
-  const m = meta as Record<string, unknown>
-  return {
-    geofence:       typeof m.geofence       === 'string' ? m.geofence       : undefined,
-    distance_miles: typeof m.distance_miles === 'number' ? m.distance_miles : undefined,
-    teaser_snippet: typeof m.teaser_snippet === 'string' ? m.teaser_snippet : undefined,
-  }
 }
 
 export default async function LeadsPage({ searchParams }: { searchParams: SearchParams }) {
@@ -92,7 +69,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Search
 
   let query = supabase
     .from('leads')
-    .select('id, display_id, first_name, last_name, email, company, status, source, created_at, metadata')
+    .select('id, display_id, first_name, last_name, email, company, status, source, created_at')
     .eq('organization_id', effectiveOrgId)
     .is('deleted_at', null)
     .order('created_at', { ascending: false })
@@ -108,7 +85,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Search
   }
 
   const { data: leads } = await query
-  const rows = (leads ?? []) as Pick<Lead, 'id' | 'display_id' | 'first_name' | 'last_name' | 'email' | 'company' | 'status' | 'source' | 'created_at' | 'metadata'>[]
+  const rows = (leads ?? []) as Pick<Lead, 'id' | 'display_id' | 'first_name' | 'last_name' | 'email' | 'company' | 'status' | 'source' | 'created_at'>[]
 
   return (
     <div className="px-8 py-8 space-y-6">
@@ -145,59 +122,27 @@ export default async function LeadsPage({ searchParams }: { searchParams: Search
               </tr>
             </thead>
             <tbody className="divide-y divide-pvx-border">
-              {rows.map(lead => {
-                const isLocked = lead.status === 'pending_unlock'
-                const meta     = readMeta(lead.metadata)
-                const cells = (
-                  <>
-                    <td className="pl-6 pr-3 py-3 text-xs">
-                      <CopyId id={lead.display_id} />
-                    </td>
-                    <td className="px-3 py-3">
-                      {isLocked ? (
-                        <UnlockButton leadId={lead.id} />
-                      ) : (
-                        <span className="text-gray-200 font-medium">
-                          {lead.first_name} {lead.last_name ?? ''}
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-3 py-3 text-gray-400">
-                      {isLocked ? <Redacted /> : (lead.company ?? '—')}
-                    </td>
-                    <td className="px-3 py-3 text-gray-400">
-                      {isLocked ? <Redacted /> : (lead.email ?? '—')}
-                    </td>
-                    <td className="px-3 py-3 text-gray-400 capitalize">
-                      {isLocked ? (
-                        <GeofenceBadge meta={meta} />
-                      ) : (
-                        lead.source ?? '—'
-                      )}
-                    </td>
-                    <td className="px-3 py-3">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border capitalize ${STATUS_COLORS[lead.status]}`}>
-                        {STATUS_LABEL[lead.status]}
-                      </span>
-                    </td>
-                    <td className="px-3 py-3 pr-6 text-gray-500">
-                      {new Date(lead.created_at).toLocaleDateString()}
-                    </td>
-                  </>
-                )
-                if (isLocked) {
-                  return (
-                    <tr key={lead.id} className="bg-violet-950/10">
-                      {cells}
-                    </tr>
-                  )
-                }
-                return (
-                  <LeadRow key={lead.id} id={lead.id}>
-                    {cells}
-                  </LeadRow>
-                )
-              })}
+              {rows.map(lead => (
+                <LeadRow key={lead.id} id={lead.id}>
+                  <td className="pl-6 pr-3 py-3 text-xs">
+                    <CopyId id={lead.display_id} />
+                  </td>
+                  <td className="px-3 py-3 text-gray-200 font-medium">
+                    {lead.first_name} {lead.last_name ?? ''}
+                  </td>
+                  <td className="px-3 py-3 text-gray-400">{lead.company ?? '—'}</td>
+                  <td className="px-3 py-3 text-gray-400">{lead.email ?? '—'}</td>
+                  <td className="px-3 py-3 text-gray-400 capitalize">{lead.source ?? '—'}</td>
+                  <td className="px-3 py-3">
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border capitalize ${STATUS_COLORS[lead.status]}`}>
+                      {lead.status}
+                    </span>
+                  </td>
+                  <td className="px-3 py-3 pr-6 text-gray-500">
+                    {new Date(lead.created_at).toLocaleDateString()}
+                  </td>
+                </LeadRow>
+              ))}
             </tbody>
           </table>
         )}
@@ -207,38 +152,5 @@ export default async function LeadsPage({ searchParams }: { searchParams: Search
         <p className="text-xs text-gray-500">Showing {rows.length} lead{rows.length === 1 ? '' : 's'}.</p>
       )}
     </div>
-  )
-}
-
-function Redacted() {
-  return (
-    <span className="inline-block rounded bg-pvx-border/60 px-3 py-1 text-[10px] tracking-widest text-gray-500 select-none">
-      • • • • •
-    </span>
-  )
-}
-
-function GeofenceBadge({ meta }: { meta: LeadMetadata }) {
-  const inside = meta.geofence === 'inside'
-  const dist   = typeof meta.distance_miles === 'number' ? meta.distance_miles : null
-
-  const cls = inside
-    ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200'
-    : 'border-amber-500/40 bg-amber-500/10 text-amber-200'
-
-  const label = dist !== null
-    ? `${dist.toFixed(1)} mi away`
-    : (inside ? 'In service area' : 'Outside service area')
-
-  return (
-    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium normal-case ${cls}`}>
-      <MapPin className="w-3 h-3" />
-      {label}
-      {meta.teaser_snippet && (
-        <span className="ml-1.5 text-[10px] text-gray-400/90 italic">
-          “{meta.teaser_snippet}…”
-        </span>
-      )}
-    </span>
   )
 }

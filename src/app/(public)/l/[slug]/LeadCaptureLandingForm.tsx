@@ -9,12 +9,15 @@ type Props = {
   slug:            string
   askHomestead:    boolean
   customQuestions: LeadQuestion[]
+  /** Optional signal id from `?sig=` — server validates again. */
+  signalId:        string | null
 }
 
 export default function LeadCaptureLandingForm({
   slug,
   askHomestead,
   customQuestions,
+  signalId,
 }: Props) {
   const [state, formAction, pending] = useActionState<CaptureLeadState, FormData>(
     captureLeadAction,
@@ -61,12 +64,22 @@ export default function LeadCaptureLandingForm({
       {/* Slug travels server-side via FormData; the action re-resolves it,
           so a tampered value can't write into someone else's tenant. */}
       <input type="hidden" name="slug" value={slug} readOnly />
+      {signalId && (
+        <input type="hidden" name="signal_id" value={signalId} readOnly />
+      )}
 
       {/* Locked platform-mandatory fields — Name, Email, Phone, Address. */}
       <Field label="Name"            name="name"    required autoComplete="name" />
       <Field label="Email"           name="email"   type="email" required autoComplete="email" />
       <Field label="Phone"           name="phone"   type="tel"   required autoComplete="tel"   />
       <Field label="Service Address" name="address" required autoComplete="street-address" />
+      <Field
+        label="Preferred Appointment Date & Time"
+        name="appointment_at"
+        type="datetime-local"
+        required
+        min={minAppointmentValue()}
+      />
 
       {askHomestead && (
         <label className="flex items-start gap-3 rounded-lg border border-pvx-border bg-pvx-surface/60 p-3 cursor-pointer">
@@ -123,12 +136,14 @@ function Field({
   type = 'text',
   required,
   autoComplete,
+  min,
 }: {
   label:         string
   name:          string
   type?:         string
   required?:     boolean
   autoComplete?: string
+  min?:          string
 }) {
   return (
     <label className="block">
@@ -140,8 +155,18 @@ function Field({
         type={type}
         required={required}
         autoComplete={autoComplete}
+        min={min}
         className="w-full rounded-lg bg-pvx-surface border border-pvx-border px-3 py-2.5 text-sm text-gray-100 placeholder-gray-500 focus:border-emerald-500/60 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
       />
     </label>
   )
+}
+
+// Return today's date+time as a datetime-local value so the picker rejects
+// past slots client-side. The server enforces it again — this is just UX.
+function minAppointmentValue(): string {
+  const d = new Date()
+  // Strip seconds + millis and convert to local YYYY-MM-DDTHH:MM.
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }

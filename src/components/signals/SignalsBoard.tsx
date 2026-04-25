@@ -36,6 +36,8 @@ export default function SignalsBoard({ organizationId, initial }: Props) {
         (payload) => {
           if (payload.eventType === 'INSERT') {
             const row = payload.new as PendingSignal
+            // New signals always start in 'pending'; ignore anything else
+            // arriving via INSERT (shouldn't happen, defensive).
             if (row.status !== 'pending') return
             setSignals((prev) => {
               if (prev.some((s) => s.id === row.id)) return prev
@@ -47,11 +49,13 @@ export default function SignalsBoard({ organizationId, initial }: Props) {
           if (payload.eventType === 'UPDATE') {
             const row = payload.new as PendingSignal
             setSignals((prev) => {
-              // Any transition away from 'pending' drops the card off
-              // the queue — it got approved or dismissed.
-              if (row.status !== 'pending') {
+              // Pending and unlocked both belong on the queue; only the
+              // terminal states (approved/dismissed) drop the card.
+              if (row.status !== 'pending' && row.status !== 'unlocked') {
                 return prev.filter((s) => s.id !== row.id)
               }
+              const exists = prev.some((s) => s.id === row.id)
+              if (!exists) return [row, ...prev]
               return prev.map((s) => (s.id === row.id ? row : s))
             })
             return

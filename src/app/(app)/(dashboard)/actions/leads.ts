@@ -3,7 +3,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { resolveEffectiveOrgId } from '@/lib/impersonation'
 import { revalidatePath } from 'next/cache'
-import { deductCredit } from '@/lib/credits'
 import type { Lead } from '@/lib/types/database.types'
 
 export type CreateLeadState =
@@ -222,108 +221,5 @@ export async function addLeadNote(
   if (error) return { status: 'error', error: error.message }
 
   revalidatePath(`/leads/${leadId}`)
-  return { status: 'success' }
-}
-
-// ─────────────────────────────────────────────────────────────────────
-// Pay-on-Unlock
-// ─────────────────────────────────────────────────────────────────────
-
-export type UnlockLeadState =
-  | { status: 'success' }
-  | { status: 'error'; error: string; reason?: 'insufficient_credits' }
-  | null
-
-// Atomically charges the org 1 credit and reveals a pending_unlock lead.
-//
-// Trust boundary:
-//   - leadId comes from the client, so we re-resolve the lead's org and
-//     verify it matches the caller's effective org. Zero-Inference: the
-//     caller never tells us "this lead belongs to org X."
-//   - HQ admins impersonating a tenant unlock on behalf of that tenant
-//     (resolveEffectiveOrgId returns the impersonated org id).
-//
-// Idempotency:
-//   - If the lead is already non-pending, we treat it as a success no-op.
-//   - If two concurrent calls race past the status check, the partial
-//     unique index credit_ledger_signal_dedup raises 23505 from inside
-//     the deduct_credit RPC; the RPC's transaction rolls back the balance
-//     decrement, and we treat the second caller as already-paid.
-export async function unlockLead(leadId: string): Promise<UnlockLeadState> {
-  if (typeof leadId !== 'string' || leadId.length === 0) {
-    return { status: 'error', error: 'Missing leadId' }
-  }
-
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { status: 'error', error: 'Not authenticated' }
-
-  const orgId = await resolveEffectiveOrgId(supabase, user.id)
-  if (!orgId) return { status: 'error', error: 'No organization' }
-
-  // Re-resolve the lead server-side and verify ownership. RLS would also
-  // hide cross-tenant leads, but we read the org id explicitly so we can
-  // distinguish "wrong tenant" from "missing lead" in error responses.
-  const { data: lead } = await supabase
-    .from('leads')
-    .select('id, organization_id, status')
-    .eq('id', leadId)
-    .is('deleted_at', null)
-    .maybeSingle<{ id: string; organization_id: string; status: string }>()
-
-  if (!lead)                              return { status: 'error', error: 'Lead not found' }
-  if (lead.organization_id !== orgId)     return { status: 'error', error: 'Lead not found' }
-  if (lead.status !== 'pending_unlock')   return { status: 'success' }
-
-  // Charge first, reveal second. The partial unique index makes the
-  // deduct idempotent on retry, so if the status flip below ever fails
-  // (DB outage, etc.) the merchant can re-click without double-billing.
-  let chargeResult: Awaited<ReturnType<typeof deductCredit>>
-  try {
-    chargeResult = await deductCredit(orgId, 1, lead.id)
-  } catch (err: unknown) {
-    // 23505 from the credit_ledger_signal_dedup partial unique index.
-    // The RPC's transaction rolled back the balance decrement, so the
-    // org has NOT been charged twice. Fall through to the status flip
-    // and treat the unlock as already-paid.
-    const code = (err as { code?: string })?.code
-    if (code !== '23505') {
-      const msg = err instanceof Error ? err.message : 'Unlock failed'
-      return { status: 'error', error: msg }
-    }
-    chargeResult = { ok: true, balance: 0 }   // balance value is not surfaced to UI
-  }
-
-  if (!chargeResult.ok) {
-    return {
-      status: 'error',
-      error:  'Insufficient credits — top up to unlock this lead.',
-      reason: 'insufficient_credits',
-    }
-  }
-
-  // Atomic flip: scoped to status='pending_unlock' so a concurrent winner
-  // doesn't get its unlocked_at overwritten by ours. Zero rows affected
-  // here is OK — the credit was already (idempotently) charged and the
-  // lead is unlocked one way or the other.
-  const { error: updErr } = await supabase
-    .from('leads')
-    .update({
-      status:      'new',
-      unlocked_at: new Date().toISOString(),
-      unlocked_by: user.id,
-    })
-    .eq('id', lead.id)
-    .eq('status', 'pending_unlock')
-
-  if (updErr) {
-    // Charge succeeded but the reveal didn't land. Surface as error so the
-    // merchant retries; the partial unique index protects against double
-    // charge on retry.
-    return { status: 'error', error: 'Unlock half-completed — refresh and try again.' }
-  }
-
-  revalidatePath('/[orgSlug]/leads', 'page')
-  revalidatePath(`/leads/${lead.id}`)
   return { status: 'success' }
 }
