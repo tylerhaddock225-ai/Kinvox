@@ -1,8 +1,9 @@
 'use client'
 
-import { useState, type FormEvent } from 'react'
+import { useActionState, useState } from 'react'
 import { Loader2, CheckCircle2, AlertCircle } from 'lucide-react'
-import type { LeadQuestion, LeadAnswer } from '@/lib/lead-questions'
+import type { LeadQuestion } from '@/lib/lead-questions'
+import { captureLeadAction, type CaptureLeadState } from './actions'
 
 type Props = {
   slug:            string
@@ -15,64 +16,32 @@ export default function LeadCaptureLandingForm({
   askHomestead,
   customQuestions,
 }: Props) {
-  const [status, setStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle')
-  const [error, setError]   = useState<string | null>(null)
+  const [state, formAction, pending] = useActionState<CaptureLeadState, FormData>(
+    captureLeadAction,
+    null,
+  )
 
-  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault()
-    setStatus('submitting')
-    setError(null)
+  // Required custom answers are guarded by HTML5 `required` on the input,
+  // but we mirror that with a client-side check so we can show a nicer
+  // inline error rather than the browser tooltip.
+  const [clientError, setClientError] = useState<string | null>(null)
 
+  function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+    setClientError(null)
     const form = new FormData(e.currentTarget)
-
-    // Collect custom answers. Required answers are enforced by the
-    // `required` attribute on the inputs too; this is a belt check.
-    const customAnswers: LeadAnswer[] = []
     for (const q of customQuestions) {
-      const raw = String(form.get(`q_${q.id}`) ?? '').trim()
-      if (!raw) {
-        if (q.required) {
-          setError(`Please answer: ${q.label}`)
-          setStatus('error')
-          return
-        }
-        continue
-      }
-      customAnswers.push({ question_id: q.id, label: q.label, answer: raw })
-    }
-
-    const payload = {
-      slug,
-      name:  String(form.get('name')  ?? '').trim(),
-      email: String(form.get('email') ?? '').trim(),
-      phone: String(form.get('phone') ?? '').trim(),
-      address: String(form.get('address') ?? '').trim(),
-      homestead_exemption: askHomestead
-        ? form.get('homestead_exemption') === 'on'
-        : null,
-      custom_answers: customAnswers,
-    }
-
-    try {
-      const res = await fetch('/api/v1/leads/capture', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({ error: 'submission failed' }))
-        setError(body.error ?? 'Submission failed — please try again.')
-        setStatus('error')
+      if (!q.required) continue
+      const v = String(form.get(`q_${q.id}`) ?? '').trim()
+      if (!v) {
+        e.preventDefault()
+        setClientError(`Please answer: ${q.label}`)
         return
       }
-      setStatus('success')
-    } catch {
-      setError('Network error — please try again.')
-      setStatus('error')
     }
+    // Otherwise let the form submit naturally so useActionState wires up.
   }
 
-  if (status === 'success') {
+  if (state?.status === 'success') {
     return (
       <div className="rounded-2xl border border-emerald-800/60 bg-emerald-950/30 p-6 text-center">
         <CheckCircle2 className="w-10 h-10 text-emerald-400 mx-auto" />
@@ -84,13 +53,20 @@ export default function LeadCaptureLandingForm({
     )
   }
 
+  const errorMessage =
+    clientError ?? (state?.status === 'error' ? state.error : null)
+
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      {/* Locked platform-mandatory fields — Name, Email, Phone. */}
-      <Field label="Name"  name="name"  required autoComplete="name" />
-      <Field label="Email" name="email" type="email" required autoComplete="email" />
-      <Field label="Phone" name="phone" type="tel"   required autoComplete="tel"   />
-      <Field label="Address" name="address" autoComplete="street-address" />
+    <form action={formAction} onSubmit={onSubmit} className="space-y-4">
+      {/* Slug travels server-side via FormData; the action re-resolves it,
+          so a tampered value can't write into someone else's tenant. */}
+      <input type="hidden" name="slug" value={slug} readOnly />
+
+      {/* Locked platform-mandatory fields — Name, Email, Phone, Address. */}
+      <Field label="Name"            name="name"    required autoComplete="name" />
+      <Field label="Email"           name="email"   type="email" required autoComplete="email" />
+      <Field label="Phone"           name="phone"   type="tel"   required autoComplete="tel"   />
+      <Field label="Service Address" name="address" required autoComplete="street-address" />
 
       {askHomestead && (
         <label className="flex items-start gap-3 rounded-lg border border-pvx-border bg-pvx-surface/60 p-3 cursor-pointer">
@@ -108,8 +84,7 @@ export default function LeadCaptureLandingForm({
         </label>
       )}
 
-      {/* Tenant-defined questions. Rendered in the order saved under
-          organizations.custom_lead_questions. */}
+      {/* Tenant-defined questions, in saved order. */}
       {customQuestions.map((q) => (
         <Field
           key={q.id}
@@ -119,20 +94,20 @@ export default function LeadCaptureLandingForm({
         />
       ))}
 
-      {error && (
+      {errorMessage && (
         <div className="flex items-start gap-2 rounded-md border border-rose-900/60 bg-rose-950/30 px-3 py-2 text-xs text-rose-200">
           <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-          <span>{error}</span>
+          <span>{errorMessage}</span>
         </div>
       )}
 
       <button
         type="submit"
-        disabled={status === 'submitting'}
+        disabled={pending}
         className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 disabled:cursor-not-allowed px-4 py-3 text-sm font-semibold text-white transition-colors"
       >
-        {status === 'submitting' && <Loader2 className="w-4 h-4 animate-spin" />}
-        {status === 'submitting' ? 'Submitting…' : 'Check my eligibility'}
+        {pending && <Loader2 className="w-4 h-4 animate-spin" />}
+        {pending ? 'Processing…' : 'Check my eligibility'}
       </button>
 
       <p className="text-[11px] text-center text-gray-500">

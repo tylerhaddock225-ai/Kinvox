@@ -125,13 +125,15 @@ export type Database = {
           email: string | null
           phone: string | null
           company: string | null
-          status: 'new' | 'contacted' | 'qualified' | 'lost' | 'converted'
+          status: 'new' | 'contacted' | 'qualified' | 'lost' | 'converted' | 'pending_unlock'
           source: 'web' | 'referral' | 'import' | 'manual' | 'other' | 'social_listening' | null
           notes: string | null
           tags: string[] | null
           metadata: Json | null
           converted_at: string | null
           deleted_at: string | null
+          unlocked_at: string | null
+          unlocked_by: string | null
           created_at: string
           updated_at: string
         }
@@ -145,13 +147,15 @@ export type Database = {
           email?: string | null
           phone?: string | null
           company?: string | null
-          status?: 'new' | 'contacted' | 'qualified' | 'lost' | 'converted'
+          status?: 'new' | 'contacted' | 'qualified' | 'lost' | 'converted' | 'pending_unlock'
           source?: 'web' | 'referral' | 'import' | 'manual' | 'other' | 'social_listening' | null
           notes?: string | null
           tags?: string[] | null
           metadata?: Json | null
           converted_at?: string | null
           deleted_at?: string | null
+          unlocked_at?: string | null
+          unlocked_by?: string | null
           created_at?: string
           updated_at?: string
         }

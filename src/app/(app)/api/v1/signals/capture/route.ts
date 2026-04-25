@@ -18,6 +18,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { NextResponse, type NextRequest } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { deductCredit } from '@/lib/credits'
+import { haversineMiles } from '@/lib/geo'
 import { scoreSignalIntent, generateDraftReply } from '@/lib/ai/intent-scorer'
 
 export const runtime = 'nodejs'
@@ -42,23 +43,6 @@ function json(body: unknown, status = 200) {
 
 function hashKey(raw: string): string {
   return createHash('sha256').update(raw).digest('hex')
-}
-
-function haversineMiles(
-  lat1: number,
-  lon1: number,
-  lat2: number,
-  lon2: number,
-): number {
-  const R = 3958.7613 // earth radius in miles
-  const toRad = (deg: number) => (deg * Math.PI) / 180
-  const dLat = toRad(lat2 - lat1)
-  const dLon = toRad(lon2 - lon1)
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-  return R * c
 }
 
 export async function POST(request: NextRequest) {
