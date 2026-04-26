@@ -359,3 +359,168 @@ export async function generateDraftReply(input: DraftInput): Promise<DraftReply>
     link_appended: withLink.appended,
   }
 }
+
+
+// ─── Triage: intent + geo extraction in one call ─────────────────────────
+//
+// Used by /api/v1/signals/ingest. Supersets scoreSignalIntent() so we hit
+// the Anthropic API exactly once per ingest, even though we need both the
+// intent tier (for the >=6 fan-out gate) AND the lat/lng/location_name
+// (for the geofence fan-out).
+//
+// scoreSignalIntent() is intentionally left alone — capture route still
+// uses it and shouldn't pay the prompt-size tax for fields it doesn't need.
+
+export type TriageResult = {
+  intent_score:      IntentTier
+  reasoning_snippet: string
+  summary:           string | null
+  location_name:     string | null
+  latitude:          number | null
+  longitude:         number | null
+  /** True when we fell back to a heuristic / parse-failed path. */
+  scoring_skipped:   boolean
+  /** True when scrubber rewrote the snippet/summary. */
+  pii_redacted:      boolean
+}
+
+type TriageInput = {
+  platform:       string
+  title?:         string
+  body?:          string
+  author_name?:   string
+  author_handle?: string
+}
+
+const TRIAGE_SYSTEM_PROMPT = [
+  'Analyze this social post and return a single JSON object with these fields:',
+  '  intent_score      — exactly 1, 3, or 6 (1=browse, 3=need, 6=urgent/emergency)',
+  '  reasoning_snippet — max 15 words, factual, NO names/handles/contacts',
+  '  summary           — max 30 words, neutral one-liner describing the situation',
+  '  location_name     — the most specific place mentioned (city, neighborhood, region) or null',
+  '  latitude          — best-guess decimal degrees for that place, or null if unknown',
+  '  longitude         — best-guess decimal degrees for that place, or null if unknown',
+  '',
+  'Rules:',
+  '  - Coordinates must be plausible for the named location. If unsure, return null.',
+  '  - Do NOT include PII (names, handles, phone, email) in any text field.',
+  '  - Output ONLY the JSON object — no prose, no code fences.',
+].join('\n')
+
+function triageFallback(reason: string): TriageResult {
+  return {
+    intent_score:      1,
+    reasoning_snippet: reason,
+    summary:           null,
+    location_name:     null,
+    latitude:          null,
+    longitude:         null,
+    scoring_skipped:   true,
+    pii_redacted:      false,
+  }
+}
+
+function coerceNum(v: unknown): number | null {
+  if (typeof v === 'number' && Number.isFinite(v)) return v
+  if (typeof v === 'string') {
+    const n = Number.parseFloat(v)
+    return Number.isFinite(n) ? n : null
+  }
+  return null
+}
+
+function coerceStr(v: unknown): string | null {
+  if (typeof v !== 'string') return null
+  const t = v.trim()
+  return t.length === 0 || t.toLowerCase() === 'null' ? null : t
+}
+
+export async function triageSignal(input: TriageInput): Promise<TriageResult> {
+  const apiKey = process.env.ANTHROPIC_API_KEY
+  if (!apiKey) {
+    console.warn('[triage] ANTHROPIC_API_KEY unset — using fallback')
+    return triageFallback('AI triage unavailable')
+  }
+
+  const model = process.env.ANTHROPIC_SCORING_MODEL || DEFAULT_MODEL
+
+  // Same posture as scoreSignalIntent: never pass author identifiers into
+  // the model. Title + body + platform is the entire context surface.
+  const userMessage = JSON.stringify({
+    platform: input.platform,
+    title:    input.title || '',
+    body:     input.body  || '',
+  })
+
+  let res: Response
+  try {
+    res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type':      'application/json',
+        'x-api-key':         apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 400,
+        system:     TRIAGE_SYSTEM_PROMPT,
+        messages:   [{ role: 'user', content: userMessage }],
+      }),
+    })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('[triage] fetch failed:', msg)
+    return triageFallback('AI triage offline')
+  }
+
+  if (!res.ok) {
+    console.error('[triage] Anthropic returned', res.status, await res.text().catch(() => ''))
+    return triageFallback('AI triage rejected')
+  }
+
+  const text = extractText(await res.json().catch(() => null))
+  if (!text) return triageFallback('AI triage empty')
+
+  let parsed: Record<string, unknown>
+  try {
+    parsed = JSON.parse(text) as Record<string, unknown>
+  } catch {
+    const match = text.match(/\{[\s\S]*\}/)
+    if (!match) return triageFallback('AI triage non-JSON')
+    try { parsed = JSON.parse(match[0]) as Record<string, unknown> }
+    catch { return triageFallback('AI triage non-JSON') }
+  }
+
+  const tier        = clampTier(parsed.intent_score)
+  const rawSnippet  = coerceStr(parsed.reasoning_snippet) || 'no reasoning returned'
+  const rawSummary  = coerceStr(parsed.summary)
+  const locName     = coerceStr(parsed.location_name)
+  const lat         = coerceNum(parsed.latitude)
+  const lng         = coerceNum(parsed.longitude)
+
+  // Reject obviously-bogus coords. Out-of-range pairs would silently break
+  // the haversine fan-out by routing nowhere or everywhere.
+  const validLat = lat !== null && lat >= -90  && lat <= 90  ? lat : null
+  const validLng = lng !== null && lng >= -180 && lng <= 180 ? lng : null
+
+  const scrubAuthor = {
+    author_name:   input.author_name,
+    author_handle: input.author_handle,
+  }
+  const scrubbedSnippet = scrubPii(rawSnippet, { ...scrubAuthor, wordCap: 15 })
+  const scrubbedSummary = rawSummary
+    ? scrubPii(rawSummary, { ...scrubAuthor, wordCap: 30 })
+    : { text: '', redacted: false }
+
+  return {
+    intent_score:      tier,
+    reasoning_snippet: scrubbedSnippet.text,
+    summary:           rawSummary ? scrubbedSummary.text : null,
+    location_name:     locName,
+    latitude:          validLat !== null && validLng !== null ? validLat : null,
+    longitude:         validLat !== null && validLng !== null ? validLng : null,
+    scoring_skipped:   false,
+    pii_redacted:      scrubbedSnippet.redacted || scrubbedSummary.redacted,
+  }
+}

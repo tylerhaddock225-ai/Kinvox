@@ -1,37 +1,40 @@
 // POST /api/v1/signals/ingest
 //
-// Global, multi-tenant intake for AI social-listening workers (Reddit-first).
-// Unlike /api/v1/signals/capture — which is per-tenant and authed by an
-// organization API key — this route is HQ-scoped. A single source post
-// (one Reddit URL) gets fanned out to every active organization in the
-// matching vertical whose geofence contains the signal's coordinates.
+// Global, multi-tenant intelligent intake (Reddit-first). The caller (n8n)
+// sends raw post text only — no coordinates, no organization id. The route:
 //
-// Auth: x-kinvox-ingest-key (matched against env INGEST_API_KEY). Tenant
-// org IDs are NEVER read from headers — attribution is derived purely
-// from vertical + geofence containment.
+//   1. Authenticates the caller (HQ-scoped INGEST_API_KEY).
+//   2. Validates `vertical` against the public.verticals lookup.
+//   3. Short-circuits on duplicate URLs (also DB-enforced via partial
+//      unique index on pending_signals(organization_id, external_post_id)).
+//   4. Runs ONE Anthropic call (triageSignal) to extract:
+//        intent_score (1/3/6), reasoning_snippet, summary,
+//        location_name, latitude, longitude.
+//   5. Drops the signal if intent_score < 6 (low-/medium-intent noise) or
+//      no usable coordinates were extracted.
+//   6. Fans out: pulls all active orgs in the vertical, runs Haversine
+//      against the AI's coords, inserts one pending_signals row per
+//      org whose signal_radius covers the point. AI-extracted fields
+//      land in the new metadata jsonb column.
 //
-// Dedup: enforced at the DB layer by a partial unique index on
-// (organization_id, external_post_id). The same URL legitimately fans
-// out to N orgs on first pass; re-emission of the same URL by the
-// upstream worker becomes a per-org no-op. We use upsert with
-// ignoreDuplicates so a partial re-run still completes for the orgs
-// that hadn't received it yet.
+// Zero-Inference: organization routing is derived strictly from the AI's
+// geographic extraction. The caller cannot pass organization_id, latitude,
+// or longitude — those keys, if present, are ignored.
 
 import { NextResponse, type NextRequest } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { haversineMiles } from '@/lib/geo'
+import { triageSignal } from '@/lib/ai/intent-scorer'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 type Payload = {
-  title?:     string
-  body?:      string
-  author?:    string
-  url?:       string
-  vertical?:  string
-  latitude?:  number
-  longitude?: number
+  title?:    string
+  body?:     string
+  author?:   string
+  url?:      string
+  vertical?: string
 }
 
 type OrgRow = {
@@ -74,19 +77,32 @@ export async function POST(request: NextRequest) {
     return json({ error: 'title or body is required' }, 400)
   }
 
-  // Coordinates are optional. When absent, the geofence step degrades to
-  // a vertical-only broadcast — matching the spec's "if present" wording.
-  const sigLat = typeof body.latitude  === 'number' && Number.isFinite(body.latitude)  ? body.latitude  : null
-  const sigLng = typeof body.longitude === 'number' && Number.isFinite(body.longitude) ? body.longitude : null
-
   const admin = createAdminClient()
 
+  // ── Vertical registry pre-check ─────────────────────────────────────
+  // The FK on organizations/signal_configs would also reject an unknown
+  // vertical at INSERT time, but a pre-check returns a cleaner 400 +
+  // doesn't burn an LLM call on a payload we'll never persist.
+  const { data: verticalRow, error: verticalErr } = await admin
+    .from('verticals')
+    .select('id, is_active')
+    .eq('id', vertical)
+    .maybeSingle<{ id: string; is_active: boolean }>()
+
+  if (verticalErr) {
+    return json({ error: `vertical_lookup_failed: ${verticalErr.message}` }, 500)
+  }
+  if (!verticalRow) {
+    return json({ error: 'unknown_vertical', vertical }, 400)
+  }
+  if (!verticalRow.is_active) {
+    return json({ error: 'vertical_inactive', vertical }, 400)
+  }
+
   // ── Dedup short-circuit ─────────────────────────────────────────────
-  // The (organization_id, external_post_id) partial unique index is the
-  // hard guarantee, but we look up first to (a) return a meaningful
-  // response when an upstream worker retries, and (b) avoid spending a
-  // round-trip building the fan-out set when the URL has already been
-  // distributed.
+  // Hard guarantee is the partial unique index on
+  // (organization_id, external_post_id). Look up first to give the caller
+  // a friendly response and avoid spending an LLM call on a known URL.
   const { data: existing, error: existingErr } = await admin
     .from('pending_signals')
     .select('id, organization_id')
@@ -105,11 +121,48 @@ export async function POST(request: NextRequest) {
     })
   }
 
-  // ── Triage: candidate orgs ──────────────────────────────────────────
-  // Active = not soft-deleted, status='active', listening enabled, and
-  // matched on the canonical vertical slug. We pull the geofence columns
-  // here rather than in a SQL function because the radius check is mile-
-  // based (Haversine) and PostGIS isn't enabled on this project.
+  // ── Single LLM call: intent + geo extraction ────────────────────────
+  const triage = await triageSignal({
+    platform:      'reddit',
+    title,
+    body:          postBody,
+    author_handle: author || undefined,
+  })
+
+  // ── Intent gate ─────────────────────────────────────────────────────
+  // <6 = browse / need but not urgent. We drop these to keep noise out
+  // of merchant dashboards. The caller still gets a clean 200 so n8n
+  // doesn't retry.
+  if (triage.intent_score < 6) {
+    return json({
+      ok:           true,
+      gated:        true,
+      reason:       'low_intent',
+      intent_score: triage.intent_score,
+      summary:      triage.summary,
+    })
+  }
+
+  // ── Geo gate ────────────────────────────────────────────────────────
+  // No usable coords from the model → no triage possible. Falling back
+  // to vertical-broadcast would defeat the geofence entirely, so we drop.
+  if (triage.latitude === null || triage.longitude === null) {
+    return json({
+      ok:            true,
+      gated:         true,
+      reason:        'no_location_extracted',
+      intent_score:  triage.intent_score,
+      location_name: triage.location_name,
+    })
+  }
+
+  const sigLat = triage.latitude
+  const sigLng = triage.longitude
+
+  // ── Org fan-out ─────────────────────────────────────────────────────
+  // Active = listening on, not soft-deleted, status='active', vertical match.
+  // Geofence requires lat+lng+radius on the org row; orgs without geo
+  // configured are excluded (they have no way to define their service area).
   const { data: orgs, error: orgErr } = await admin
     .from('organizations')
     .select('id, latitude, longitude, signal_radius')
@@ -127,44 +180,31 @@ export async function POST(request: NextRequest) {
   const matched: OrgRow[] = []
 
   for (const org of candidates) {
-    // Geofence is only enforced when BOTH sides have coordinates. An org
-    // without lat/lng/radius opts into vertical-wide capture; a signal
-    // without coords cannot be filtered geographically. Either gap → match.
-    const orgHasGeo =
-      org.latitude !== null && org.longitude !== null && org.signal_radius !== null
-    const sigHasGeo = sigLat !== null && sigLng !== null
-
-    if (!orgHasGeo || !sigHasGeo) {
-      matched.push(org)
-      continue
-    }
-
-    const miles = haversineMiles(
-      sigLat as number,
-      sigLng as number,
-      org.latitude  as number,
-      org.longitude as number,
-    )
-    if (miles <= (org.signal_radius as number)) {
+    if (org.latitude === null || org.longitude === null || org.signal_radius === null) continue
+    const miles = haversineMiles(sigLat, sigLng, org.latitude, org.longitude)
+    if (miles <= org.signal_radius) {
       matched.push(org)
     }
   }
 
   if (matched.length === 0) {
     return json({
-      ok:           true,
-      matched:      0,
-      inserted:     0,
-      reason:       'no_orgs_in_geofence',
+      ok:            true,
+      matched:       0,
+      inserted:      0,
+      reason:        'no_orgs_in_geofence',
       vertical,
-      candidates:   candidates.length,
+      candidates:    candidates.length,
+      intent_score:  triage.intent_score,
+      location_name: triage.location_name,
+      latitude:      sigLat,
+      longitude:     sigLng,
     })
   }
 
-  // Compose the canonical raw_text from title + body so the dashboard
-  // teaser has something coherent to render. Author is appended as a
-  // lightweight attribution line — no separate column for it on
-  // pending_signals.
+  // raw_text we persist is the canonical post body we got. Author is
+  // appended as a lightweight attribution line — pending_signals has no
+  // dedicated author column.
   const rawText = [
     title,
     postBody,
@@ -174,16 +214,28 @@ export async function POST(request: NextRequest) {
     .join('\n\n')
     .trim()
 
+  const metadata = {
+    location_name:   triage.location_name,
+    summary:         triage.summary,
+    extracted_lat:   sigLat,
+    extracted_lng:   sigLng,
+    pii_redacted:    triage.pii_redacted,
+    scoring_skipped: triage.scoring_skipped,
+  }
+
   const rows = matched.map((org) => ({
-    organization_id:  org.id,
-    raw_text:         rawText,
-    platform:         'reddit',
-    status:           'pending' as const,
-    external_post_id: url,
+    organization_id:   org.id,
+    raw_text:          rawText,
+    platform:          'reddit',
+    status:            'pending' as const,
+    external_post_id:  url,
+    intent_score:      triage.intent_score,
+    reasoning_snippet: triage.reasoning_snippet,
+    metadata,
   }))
 
-  // ignoreDuplicates lets a retry re-fire safely: orgs that were already
-  // covered are skipped by the partial unique index, new candidates land.
+  // ignoreDuplicates lets a retry re-fire safely: orgs already covered
+  // are skipped by the partial unique index, new candidates land.
   const { data: inserted, error: insertErr } = await admin
     .from('pending_signals')
     .upsert(rows, {
@@ -201,6 +253,10 @@ export async function POST(request: NextRequest) {
     matched:          matched.length,
     inserted:         inserted?.length ?? 0,
     candidates:       candidates.length,
+    intent_score:     triage.intent_score,
+    location_name:    triage.location_name,
+    latitude:         sigLat,
+    longitude:        sigLng,
     organization_ids: (inserted ?? []).map((r) => r.organization_id),
     signal_ids:       (inserted ?? []).map((r) => r.id),
   })
