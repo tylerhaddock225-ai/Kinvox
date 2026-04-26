@@ -122,11 +122,14 @@ export async function POST(request: NextRequest) {
   }
 
   // ── Single LLM call: intent + geo extraction ────────────────────────
+  // The vertical is forwarded so the prompt can apply per-vertical
+  // relevance gates (e.g., reject metaphorical "safe room" mentions).
   const triage = await triageSignal({
     platform:      'reddit',
     title,
     body:          postBody,
     author_handle: author || undefined,
+    vertical,
   })
 
   // ── Intent gate ─────────────────────────────────────────────────────
