@@ -2,9 +2,22 @@
 // or intent gates. Reports counts before/after so we can see exactly what
 // went out, and lists what's left so we can decide on follow-up sweeps.
 //
-// Usage: node --env-file=.env.local scripts/cleanup-pending-signals.mjs
+// Usage:
+//   node --env-file=.env.local scripts/cleanup-pending-signals.mjs            # literal gate-criterion sweep only
+//   node --env-file=.env.local scripts/cleanup-pending-signals.mjs --nuke     # also delete known off-vertical subreddits
 
 import { createClient } from '@supabase/supabase-js'
+
+const NUKE = process.argv.includes('--nuke')
+
+// Subreddits whose posts are reliably off-vertical for the storm_shelter
+// vertical — disability/medical/financial/escort communities that scored 6
+// before the vertical relevance gate was deployed.
+const NUKE_SUBS = [
+  'disability', 'AskDocs', 'Methadone_AskNAnswer',
+  'SocialSecurity', 'SSDI', 'stroke',
+  'DisabilityHacks', 'ClientsAndCompanions',
+]
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL
 const key = process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -35,6 +48,18 @@ const { data: offVertRows, error: ovErr } = await admin
   .select('id')
 if (ovErr) { console.error('off-vertical delete failed:', ovErr.message); process.exit(1) }
 console.log(`deleted reasoning_snippet ~ "off-vertical": ${offVertRows?.length ?? 0}`)
+
+if (NUKE) {
+  for (const sub of NUKE_SUBS) {
+    const { data, error } = await admin
+      .from('pending_signals')
+      .delete()
+      .ilike('external_post_id', `%/r/${sub}/%`)
+      .select('id')
+    if (error) { console.error(`nuke r/${sub} failed:`, error.message); continue }
+    console.log(`nuked r/${sub}: ${data?.length ?? 0}`)
+  }
+}
 
 const { count: after } = await admin
   .from('pending_signals')
