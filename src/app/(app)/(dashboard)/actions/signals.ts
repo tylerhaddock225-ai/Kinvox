@@ -21,6 +21,11 @@ export type ApproveAndSendState =
   | { status: 'error';   error: string }
   | null
 
+export type SaveHuntingProfileState =
+  | { status: 'success' }
+  | { status: 'error'; error: string }
+  | null
+
 const MAX_REPLY_CHARS = 280 // leaves headroom over the 250-char draft cap
 const WEBHOOK_TIMEOUT_MS = 10_000
 const BRIDGE_RELAY_TIMEOUT_MS = 15_000  // route-handler call already has its own 10s n8n timeout
@@ -146,6 +151,142 @@ export async function dismissSignal(signalId: string): Promise<State> {
   revalidatePath('/[orgSlug]/signals', 'page')
   return { status: 'success', message: 'Dismissed.' }
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// Hunting Profile (per-vertical signal_configs upsert).
+//
+// Tenants edit one row per (org, vertical). The form addresses the
+// primary config — the oldest active row for the caller's org. If none
+// exists, we INSERT one keyed to the org's vertical. The org's vertical
+// is required (signal_configs.vertical is NOT NULL); orgs without a
+// vertical assigned get a clean error rather than a constraint failure.
+// ─────────────────────────────────────────────────────────────────────
+
+const HUNTING_RADIUS_MIN = 5
+const HUNTING_RADIUS_MAX = 500
+const HUNTING_KEYWORD_MAX_LEN = 60
+const HUNTING_KEYWORD_LIMIT = 25
+const HUNTING_ADDRESS_MAX = 500
+
+function parseKeywordCsv(raw: string): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const piece of raw.split(/[,\n]/)) {
+    const k = piece.trim()
+    if (!k) continue
+    if (k.length > HUNTING_KEYWORD_MAX_LEN) continue
+    const key = k.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(k)
+    if (out.length >= HUNTING_KEYWORD_LIMIT) break
+  }
+  return out
+}
+
+export async function saveHuntingProfile(
+  _prev: SaveHuntingProfileState,
+  formData: FormData,
+): Promise<SaveHuntingProfileState> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { status: 'error', error: 'Not authenticated' }
+
+  const orgId = await resolveEffectiveOrgId(supabase, user.id)
+  if (!orgId) return { status: 'error', error: 'No organization' }
+
+  // Tenant-admin gate. HQ admins acting via impersonation are already
+  // resolved to orgId by resolveEffectiveOrgId; for own-org tenants we
+  // require role='admin' here so non-admins on the same org can't
+  // rewrite hunting parameters.
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('organization_id, role')
+    .eq('id', user.id)
+    .single<{ organization_id: string | null; role: string | null }>()
+
+  const impersonating = profile?.organization_id !== orgId
+  if (!impersonating && profile?.role !== 'admin') {
+    return { status: 'error', error: 'Only org admins can edit the hunting profile' }
+  }
+
+  const officeAddressRaw = String(formData.get('office_address') ?? '').trim()
+  const radiusRaw        = String(formData.get('radius_miles')   ?? '').trim()
+  const keywordsRaw      = String(formData.get('keywords')       ?? '')
+
+  if (officeAddressRaw.length > HUNTING_ADDRESS_MAX) {
+    return { status: 'error', error: `Office address must be ≤ ${HUNTING_ADDRESS_MAX} characters` }
+  }
+
+  const radius = Number(radiusRaw)
+  if (
+    !Number.isFinite(radius) ||
+    !Number.isInteger(radius) ||
+    radius < HUNTING_RADIUS_MIN ||
+    radius > HUNTING_RADIUS_MAX
+  ) {
+    return {
+      status: 'error',
+      error:  `Search radius must be a whole number between ${HUNTING_RADIUS_MIN} and ${HUNTING_RADIUS_MAX} miles`,
+    }
+  }
+
+  const keywords = parseKeywordCsv(keywordsRaw)
+
+  const officeAddress = officeAddressRaw === '' ? null : officeAddressRaw
+
+  // Find the primary config (oldest active row). If none exists we
+  // insert keyed to the org's vertical — that's the only field we can't
+  // derive from the form alone.
+  const { data: existing } = await supabase
+    .from('signal_configs')
+    .select('id')
+    .eq('organization_id', orgId)
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle<{ id: string }>()
+
+  if (existing) {
+    const { error } = await supabase
+      .from('signal_configs')
+      .update({
+        office_address: officeAddress,
+        radius_miles:   radius,
+        keywords,
+      })
+      .eq('id', existing.id)
+    if (error) return { status: 'error', error: error.message }
+  } else {
+    const { data: org } = await supabase
+      .from('organizations')
+      .select('vertical')
+      .eq('id', orgId)
+      .single<{ vertical: string | null }>()
+
+    if (!org?.vertical) {
+      return {
+        status: 'error',
+        error:  'Assign a vertical to the organization before configuring hunting',
+      }
+    }
+
+    const { error } = await supabase
+      .from('signal_configs')
+      .insert({
+        organization_id: orgId,
+        vertical:        org.vertical,
+        office_address:  officeAddress,
+        radius_miles:    radius,
+        keywords,
+        is_active:       true,
+      })
+    if (error) return { status: 'error', error: error.message }
+  }
+
+  revalidatePath('/[orgSlug]/settings/integrations', 'page')
+  return { status: 'success' }
+}
+
 
 // ─────────────────────────────────────────────────────────────────────
 // Approve & Send via the n8n bridge (KINV-006/008).

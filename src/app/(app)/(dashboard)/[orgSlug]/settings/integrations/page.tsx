@@ -4,6 +4,8 @@ import { CheckCircle2, AlertCircle, ExternalLink } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { resolveImpersonation } from '@/lib/impersonation'
 import { Button, buttonVariants } from '@/components/ui/button'
+import HuntingProfileForm from './HuntingProfileForm'
+import DisconnectButton from './DisconnectButton'
 
 export const dynamic = 'force-dynamic'
 
@@ -68,11 +70,34 @@ export default async function IntegrationsPage({
 
   // Column-level grants on organization_credentials hide secret_id from
   // authenticated callers — we only ever read the metadata fields here.
-  const { data: creds } = await supabase
-    .from('organization_credentials')
-    .select('platform, account_handle, status, expires_at')
-    .eq('organization_id', effectiveOrgId)
-    .returns<CredentialRow[]>()
+  // The primary signal_configs row (oldest active for the org) backs the
+  // hunting profile section. We also need the org's vertical so the
+  // form can display it and the upsert path can populate vertical when
+  // inserting a brand-new config row.
+  const [{ data: creds }, { data: org }, { data: primaryConfig }] = await Promise.all([
+    supabase
+      .from('organization_credentials')
+      .select('platform, account_handle, status, expires_at')
+      .eq('organization_id', effectiveOrgId)
+      .returns<CredentialRow[]>(),
+    supabase
+      .from('organizations')
+      .select('vertical')
+      .eq('id', effectiveOrgId)
+      .single<{ vertical: string | null }>(),
+    supabase
+      .from('signal_configs')
+      .select('id, office_address, radius_miles, keywords')
+      .eq('organization_id', effectiveOrgId)
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle<{
+        id:             string
+        office_address: string | null
+        radius_miles:   number
+        keywords:       string[]
+      }>(),
+  ])
 
   const byPlatform = new Map<Platform, CredentialRow>()
   for (const row of creds ?? []) byPlatform.set(row.platform, row)
@@ -82,14 +107,32 @@ export default async function IntegrationsPage({
   return (
     <div className="px-8 py-8 space-y-6 max-w-3xl">
       <div>
-        <h1 className="text-2xl font-bold text-white">Integrations</h1>
+        <h1 className="text-2xl font-bold text-white">Signal &amp; Social Settings</h1>
         <p className="text-sm text-gray-400 mt-1">
-          Connect the social accounts Kinvox replies from. Tokens are stored
-          encrypted in Supabase Vault and never touch the browser.
+          Tune what Kinvox listens for and which social accounts it can reply
+          from. Tokens are stored encrypted in Supabase Vault and never touch
+          the browser.
         </p>
       </div>
 
       {banner}
+
+      {/* Part A — Searchlight (Hunting Profile) */}
+      <HuntingProfileForm
+        orgVertical={org?.vertical ?? null}
+        initialAddress={primaryConfig?.office_address ?? null}
+        initialRadius={primaryConfig?.radius_miles ?? 25}
+        initialKeywords={primaryConfig?.keywords ?? []}
+      />
+
+      {/* Part B — Connectivity Hub */}
+      <div className="pt-2">
+        <h2 className="text-base font-semibold text-white">Connected Accounts</h2>
+        <p className="mt-1 text-xs text-gray-500">
+          One account per platform. Disconnecting revokes the credential
+          immediately — Kinvox stops being able to reply on your behalf until you reconnect.
+        </p>
+      </div>
 
       <section className="space-y-3">
         {PLATFORMS.map((p) => {
@@ -120,23 +163,26 @@ export default async function IntegrationsPage({
                 )}
               </div>
 
-              <div className="shrink-0">
+              <div className="shrink-0 flex flex-col items-end gap-2">
                 {p.loginPath === null ? (
                   <Button variant="outline" size="sm" disabled>
                     Coming soon
                   </Button>
                 ) : (
-                  <Link
-                    href={p.loginPath}
-                    prefetch={false}
-                    className={buttonVariants({
-                      variant: connected ? 'outline' : 'default',
-                      size:    'sm',
-                    })}
-                  >
-                    {connected ? 'Reconnect' : 'Connect'}
-                    <ExternalLink className="ml-1.5" />
-                  </Link>
+                  <>
+                    <Link
+                      href={p.loginPath}
+                      prefetch={false}
+                      className={buttonVariants({
+                        variant: connected ? 'outline' : 'default',
+                        size:    'sm',
+                      })}
+                    >
+                      {connected ? 'Reconnect' : 'Connect'}
+                      <ExternalLink className="ml-1.5" />
+                    </Link>
+                    {connected && <DisconnectButton platform={p.id} />}
+                  </>
                 )}
               </div>
             </div>

@@ -75,6 +75,41 @@ export async function restoreOrganization(formData: FormData) {
   revalidatePath('/admin-hq/organizations')
 }
 
+// Master kill switch for tenant signal capture. HQ-only — flips
+// organizations.ai_listening_enabled, which is the boolean both
+// /api/v1/signals/capture and /api/v1/signals/ingest gate on. When off,
+// the capture route returns 'feature_disabled_by_organization' (403)
+// and the ingest route excludes the org from fan-out.
+//
+// Returns a discriminated result so the client can revert an optimistic
+// flip without involving the redirect dance — needed for snappy switch UX.
+export async function updateCaptureStatus(
+  orgId: string,
+  enabled: boolean,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (typeof orgId !== 'string' || orgId.length === 0) {
+    return { ok: false, error: 'Missing organization id' }
+  }
+  if (typeof enabled !== 'boolean') {
+    return { ok: false, error: 'Invalid toggle state' }
+  }
+
+  const supabase = await requireAdmin()
+
+  const { error } = await supabase
+    .from('organizations')
+    .update({ ai_listening_enabled: enabled })
+    .eq('id', orgId)
+
+  if (error) return { ok: false, error: error.message }
+
+  // Bust the org detail server-render cache so a subsequent navigation
+  // shows the new state authoritatively. The optimistic UI handles the
+  // immediate visual flip.
+  revalidatePath(`/admin-hq/organizations/${orgId}`)
+  return { ok: true }
+}
+
 const MAX_RADIUS_MILES = 500
 
 // HQ-gated geofence write. Target org comes from the hidden form field; the

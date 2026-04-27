@@ -16,6 +16,7 @@ import OrgLeadCaptureForm from '@/components/admin/OrgLeadCaptureForm'
 import OrgCreditManager from '@/components/hq/org-credit-manager'
 import OrgApiKeyList from '@/components/hq/org-api-key-list'
 import OrgSignalConfigs from '@/components/hq/org-signal-configs'
+import OrgCaptureToggle from '@/components/admin/OrgCaptureToggle'
 import type { AiTemplate } from '@/lib/ai-templates'
 import type {
   OrganizationCredits,
@@ -94,26 +95,27 @@ export default async function AdminOrgDetailPage({
 
   const { data: org } = await supabase
     .from('organizations')
-    .select('id, name, slug, vertical, status, plan, deleted_at, created_at, owner_id, ai_template_id, enabled_ai_features, lead_magnet_slug, lead_magnet_settings, website_url, latitude, longitude, signal_radius')
+    .select('id, name, slug, vertical, status, plan, deleted_at, created_at, owner_id, ai_template_id, enabled_ai_features, ai_listening_enabled, lead_magnet_slug, lead_magnet_settings, website_url, latitude, longitude, signal_radius')
     .eq('id', id)
     .single<{
-      id:                   string
-      name:                 string
-      slug:                 string | null
-      vertical:             string | null
-      status:               string | null
-      plan:                 string | null
-      deleted_at:           string | null
-      created_at:           string
-      owner_id:             string
-      ai_template_id:       string | null
-      enabled_ai_features:  Record<string, boolean> | null
-      lead_magnet_slug:     string | null
-      lead_magnet_settings: { enabled?: boolean; headline?: string; features?: string[] } | null
-      website_url:          string | null
-      latitude:             number | null
-      longitude:            number | null
-      signal_radius:        number | null
+      id:                    string
+      name:                  string
+      slug:                  string | null
+      vertical:              string | null
+      status:                string | null
+      plan:                  string | null
+      deleted_at:            string | null
+      created_at:            string
+      owner_id:              string
+      ai_template_id:        string | null
+      enabled_ai_features:   Record<string, boolean> | null
+      ai_listening_enabled:  boolean
+      lead_magnet_slug:      string | null
+      lead_magnet_settings:  { enabled?: boolean; headline?: string; features?: string[] } | null
+      website_url:           string | null
+      latitude:              number | null
+      longitude:             number | null
+      signal_radius:         number | null
     }>()
 
   if (!org) notFound()
@@ -534,23 +536,28 @@ export default async function AdminOrgDetailPage({
       )}
 
       {activeTab === 'signal-configs' && (
-        <section className="rounded-xl border border-pvx-border bg-gray-900 p-5">
-          <div className="flex items-center gap-2">
-            <Radar className="w-4 h-4 text-violet-300" />
-            <h2 className="text-sm font-semibold text-white">Signal Configs</h2>
+        <section className="rounded-xl border border-pvx-border bg-gray-900 p-5 space-y-5">
+          <div>
+            <div className="flex items-center gap-2">
+              <Radar className="w-4 h-4 text-violet-300" />
+              <h2 className="text-sm font-semibold text-white">Signal Configs</h2>
+            </div>
+            <p className="mt-1 text-xs text-gray-500">
+              Geofence + keyword configs routed by <span className="font-mono">/api/v1/signals/capture</span>. A signal must match at least one active config for this org to land in the review queue.
+            </p>
           </div>
-          <p className="mt-1 text-xs text-gray-500">
-            Geofence + keyword configs routed by <span className="font-mono">/api/v1/signals/capture</span>. A signal must match at least one active config for this org to land in the review queue.
-          </p>
 
-          <div className="mt-5">
-            <OrgSignalConfigs
-              orgId={org.id}
-              configs={signalConfigs}
-              verticals={verticalOptions}
-              flash={{ saved: configSaved, error: configError }}
-            />
-          </div>
+          <OrgCaptureToggle
+            orgId={org.id}
+            initialEnabled={org.ai_listening_enabled}
+          />
+
+          <OrgSignalConfigs
+            orgId={org.id}
+            configs={signalConfigs}
+            verticals={verticalOptions}
+            flash={{ saved: configSaved, error: configError }}
+          />
         </section>
       )}
 

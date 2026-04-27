@@ -430,6 +430,7 @@ export type Database = {
           radius_miles: number
           keywords: string[]
           is_active: boolean
+          office_address: string | null
           created_at: string
         }
         Insert: {
@@ -441,6 +442,7 @@ export type Database = {
           radius_miles?: number
           keywords?: string[]
           is_active?: boolean
+          office_address?: string | null
           created_at?: string
         }
         Update: Partial<Database['public']['Tables']['signal_configs']['Insert']>
