@@ -3,7 +3,7 @@
 import { cookies } from 'next/headers'
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
-import { resolveEffectiveOrgId } from '@/lib/impersonation'
+import { resolveEffectiveOrgId, requireTenantAdmin } from '@/lib/impersonation'
 import { deductCredit } from '@/lib/credits'
 
 type State =
@@ -195,20 +195,11 @@ export async function saveHuntingProfile(
   const orgId = await resolveEffectiveOrgId(supabase, user.id)
   if (!orgId) return { status: 'error', error: 'No organization' }
 
-  // Tenant-admin gate. HQ admins acting via impersonation are already
-  // resolved to orgId by resolveEffectiveOrgId; for own-org tenants we
-  // require role='admin' here so non-admins on the same org can't
-  // rewrite hunting parameters.
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('organization_id, role')
-    .eq('id', user.id)
-    .single<{ organization_id: string | null; role: string | null }>()
-
-  const impersonating = profile?.organization_id !== orgId
-  if (!impersonating && profile?.role !== 'admin') {
-    return { status: 'error', error: 'Only org admins can edit the hunting profile' }
-  }
+  const gate = await requireTenantAdmin(
+    supabase, user.id, orgId,
+    'Only org admins can edit the hunting profile',
+  )
+  if (!gate.ok) return { status: 'error', error: gate.error }
 
   const officeAddressRaw = String(formData.get('office_address') ?? '').trim()
   const radiusRaw        = String(formData.get('radius_miles')   ?? '').trim()
@@ -283,7 +274,7 @@ export async function saveHuntingProfile(
     if (error) return { status: 'error', error: error.message }
   }
 
-  revalidatePath('/[orgSlug]/settings/integrations', 'page')
+  revalidatePath('/[orgSlug]/settings/signal', 'page')
   return { status: 'success' }
 }
 

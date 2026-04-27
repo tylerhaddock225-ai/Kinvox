@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { resolveEffectiveOrgId } from '@/lib/impersonation'
+import { resolveEffectiveOrgId, requireTenantAdmin } from '@/lib/impersonation'
 
 export type DisconnectSocialState =
   | { status: 'success'; platform: string }
@@ -45,16 +45,11 @@ export async function disconnectSocialPlatform(
   }
   const platform = platformRaw as (typeof ALLOWED)[number]
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('organization_id, role')
-    .eq('id', user.id)
-    .single<{ organization_id: string | null; role: string | null }>()
-
-  const impersonating = profile?.organization_id !== orgId
-  if (!impersonating && profile?.role !== 'admin') {
-    return { status: 'error', error: 'Only org admins can disconnect social accounts' }
-  }
+  const gate = await requireTenantAdmin(
+    supabase, user.id, orgId,
+    'Only org admins can disconnect social accounts',
+  )
+  if (!gate.ok) return { status: 'error', error: gate.error }
 
   const admin = createAdminClient()
   const { error } = await admin

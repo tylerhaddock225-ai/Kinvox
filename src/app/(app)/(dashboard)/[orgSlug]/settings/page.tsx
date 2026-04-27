@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { resolveImpersonation } from '@/lib/impersonation'
+import { getOrgContext } from '@/lib/auth-context'
 import GeofenceForm from './GeofenceForm'
 import BrandingForm from './BrandingForm'
 
@@ -15,27 +15,16 @@ export type GeofenceRow = {
 type OrgSettingsRow = GeofenceRow & { logo_url: string | null }
 
 export default async function SettingsPage() {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/login')
-
-  const [{ data: profile }, impersonation] = await Promise.all([
-    supabase
-      .from('profiles')
-      .select('organization_id, role')
-      .eq('id', user.id)
-      .single<{ organization_id: string | null; role: string | null }>(),
-    resolveImpersonation(),
-  ])
-
-  const effectiveOrgId = impersonation.active
-    ? impersonation.orgId
-    : profile?.organization_id ?? null
-  if (!effectiveOrgId) redirect('/onboarding')
+  const ctx = await getOrgContext()
+  if (!ctx) redirect('/login')
+  if (!ctx.effectiveOrgId) redirect('/onboarding')
 
   // Mirror /settings/team: HQ admin impersonating passes the is_admin_hq
   // gate inside resolveImpersonation; a tenant user must have role='admin'.
-  if (!impersonation.active && profile?.role !== 'admin') redirect('/')
+  if (!ctx.impersonation.active && ctx.profile.role !== 'admin') redirect('/')
+
+  const effectiveOrgId = ctx.effectiveOrgId
+  const supabase = await createClient()
 
   const { data: org } = await supabase
     .from('organizations')

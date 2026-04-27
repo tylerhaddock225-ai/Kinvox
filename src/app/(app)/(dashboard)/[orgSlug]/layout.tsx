@@ -1,6 +1,6 @@
 import { notFound, redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { resolveImpersonation } from '@/lib/impersonation'
+import { getOrgContext } from '@/lib/auth-context'
 
 export default async function OrgSlugLayout({
   children,
@@ -10,28 +10,18 @@ export default async function OrgSlugLayout({
   params:   Promise<{ orgSlug: string }>
 }) {
   const { orgSlug } = await params
+
+  // Cached: child pages calling getOrgContext() get the same result with
+  // zero extra round-trips. The org slug check is the layout-only piece.
+  const ctx = await getOrgContext()
+  if (!ctx) redirect('/login')
+  if (!ctx.profile.organization_id) redirect('/onboarding')
+
   const supabase = await createClient()
-
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/login')
-
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('organization_id')
-    .eq('id', user.id)
-    .single()
-
-  if (!profile?.organization_id) redirect('/onboarding')
-
-  const impersonation = await resolveImpersonation()
-  const effectiveOrgId = impersonation.active
-    ? impersonation.orgId
-    : profile.organization_id
-
   const { data: effectiveOrg } = await supabase
     .from('organizations')
     .select('slug')
-    .eq('id', effectiveOrgId)
+    .eq('id', ctx.effectiveOrgId)
     .single<{ slug: string | null }>()
 
   if (!effectiveOrg?.slug || effectiveOrg.slug !== orgSlug) notFound()
