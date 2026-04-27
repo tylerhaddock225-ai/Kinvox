@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Users, UserCircle, CalendarCheck, Ticket, LayoutDashboard, Settings, Shield, LifeBuoy, LogOut, Sparkles, Crosshair } from "lucide-react";
+import { Users, UserCircle, CalendarCheck, Ticket, LayoutDashboard, Settings, Shield, LifeBuoy, LogOut, Sparkles } from "lucide-react";
 import Logo from "./Logo";
 import { logout } from "@/app/(app)/(auth)/actions";
 
@@ -45,9 +45,7 @@ export default function Sidebar({
   const dashboardSlug = currentSlug ?? orgSlug;
   const dashboardHref = dashboardSlug ? `/${dashboardSlug}` : "/";
   const hqSupportHref = dashboardSlug ? `/${dashboardSlug}/hq-support` : "/support";
-  const settingsHref  = dashboardSlug ? `/${dashboardSlug}/settings/team`   : "/settings/team";
-  const signalSettingsHref =
-    dashboardSlug ? `/${dashboardSlug}/settings/signal` : "/settings/signal";
+  const settingsHref  = dashboardSlug ? `/${dashboardSlug}/settings/team` : "/settings/team";
   const leadsHref     = dashboardSlug ? `/${dashboardSlug}/leads`   : "/leads";
   const signalsHref   = dashboardSlug ? `/${dashboardSlug}/signals` : "/signals";
   const onHqSupport = dashboardSlug
@@ -157,10 +155,6 @@ export default function Sidebar({
         <Link href={settingsHref} className={linkClass(settingsHref)}>
           <Settings className="w-4 h-4 shrink-0" />
           Organization Settings
-        </Link>
-        <Link href={signalSettingsHref} className={linkClass(signalSettingsHref)}>
-          <Crosshair className="w-4 h-4 shrink-0" />
-          Signal Settings
         </Link>
         <Link
           href={hqSupportHref}

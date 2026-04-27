@@ -274,7 +274,7 @@ export async function saveHuntingProfile(
     if (error) return { status: 'error', error: error.message }
   }
 
-  revalidatePath('/[orgSlug]/settings/signal', 'page')
+  revalidatePath('/[orgSlug]/settings/team', 'page')
   return { status: 'success' }
 }
 

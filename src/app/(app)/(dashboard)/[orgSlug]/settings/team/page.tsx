@@ -51,8 +51,11 @@ export default async function TeamSettingsPage() {
 
   const orgId = effectiveOrgId
 
-  // Fetch members, roles, and the org settings row in parallel
-  const [membersRes, rolesRes, orgRes] = await Promise.all([
+  // Fetch members, roles, the org settings row, and the primary
+  // signal_configs row in parallel. signal_configs is the row that
+  // backs the Signal Settings tab — oldest active row for the org, or
+  // null if the org hasn't configured one yet.
+  const [membersRes, rolesRes, orgRes, signalConfigRes] = await Promise.all([
     supabase
       .from('profiles')
       .select('id, full_name, role, role_id, roles(id, name)')
@@ -64,9 +67,21 @@ export default async function TeamSettingsPage() {
       .order('name'),
     supabase
       .from('organizations')
-      .select('inbound_email_address, verified_support_email, verified_support_email_confirmed_at, ai_listening_enabled, cancel_at_period_end, current_period_end, custom_lead_questions, signal_engagement_mode')
+      .select('inbound_email_address, verified_support_email, verified_support_email_confirmed_at, ai_listening_enabled, cancel_at_period_end, current_period_end, custom_lead_questions, signal_engagement_mode, vertical')
       .eq('id', orgId)
       .single(),
+    supabase
+      .from('signal_configs')
+      .select('id, office_address, radius_miles, keywords')
+      .eq('organization_id', orgId)
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle<{
+        id:             string
+        office_address: string | null
+        radius_miles:   number
+        keywords:       string[]
+      }>(),
   ])
 
   const { data: creditsRow } = await supabase
@@ -116,6 +131,13 @@ export default async function TeamSettingsPage() {
     signal_engagement_mode: (orgRes.data?.signal_engagement_mode ?? 'ai_draft') as 'ai_draft' | 'manual',
   }
 
+  const signalSettings = {
+    orgVertical:     orgRes.data?.vertical                  ?? null,
+    initialAddress:  signalConfigRes.data?.office_address   ?? null,
+    initialRadius:   signalConfigRes.data?.radius_miles     ?? 25,
+    initialKeywords: signalConfigRes.data?.keywords         ?? [],
+  }
+
   return (
     <div className="px-8 py-8 space-y-6 max-w-5xl">
       <div>
@@ -129,6 +151,7 @@ export default async function TeamSettingsPage() {
         roles={roles}
         orgSettings={orgSettings}
         leadSupport={leadSupport}
+        signalSettings={signalSettings}
       />
     </div>
   )

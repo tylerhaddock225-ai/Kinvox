@@ -11,6 +11,7 @@ import {
 } from './actions'
 import { updateSupportEmail, initializeInboundEmail } from '@/app/(app)/(dashboard)/actions/org-settings'
 import LeadSupportTab, { type LeadSupportState } from '@/components/settings/lead-support-tab'
+import HuntingProfileForm from './HuntingProfileForm'
 import { PERMISSION_KEYS, DEFAULT_PERMISSIONS, type Permissions } from '@/lib/permissions'
 import type { MemberRow, RoleRow } from './page'
 
@@ -586,20 +587,30 @@ const TABS = [
   { id: 'users',        label: 'User Administration' },
   { id: 'support',      label: 'Support Settings'    },
   { id: 'lead-support', label: 'Lead Support'        },
+  { id: 'signal',       label: 'Signal Settings'     },
 ] as const
 
 type TabId = typeof TABS[number]['id']
+
+export type SignalSettingsState = {
+  orgVertical:     string | null
+  initialAddress:  string | null
+  initialRadius:   number
+  initialKeywords: string[]
+}
 
 export default function TeamTabs({
   members,
   roles,
   orgSettings,
   leadSupport,
+  signalSettings,
 }: {
-  members:     MemberRow[]
-  roles:       RoleRow[]
-  orgSettings: OrgSettings
-  leadSupport: LeadSupportState
+  members:        MemberRow[]
+  roles:          RoleRow[]
+  orgSettings:    OrgSettings
+  leadSupport:    LeadSupportState
+  signalSettings: SignalSettingsState
 }) {
   const [activeTab, setActiveTab] = useState<TabId>('users')
 
@@ -649,6 +660,15 @@ export default function TeamTabs({
 
       {activeTab === 'lead-support' && (
         <LeadSupportTab state={leadSupport} />
+      )}
+
+      {activeTab === 'signal' && (
+        <HuntingProfileForm
+          orgVertical={signalSettings.orgVertical}
+          initialAddress={signalSettings.initialAddress}
+          initialRadius={signalSettings.initialRadius}
+          initialKeywords={signalSettings.initialKeywords}
+        />
       )}
     </div>
   )
