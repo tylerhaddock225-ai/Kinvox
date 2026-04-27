@@ -1,32 +1,38 @@
-import { redirect } from 'next/navigation'
+'use client'
+
 import Link from 'next/link'
 import { CheckCircle2, AlertCircle, ExternalLink } from 'lucide-react'
-import { createClient } from '@/lib/supabase/server'
-import { getOrgContext } from '@/lib/auth-context'
 import { Button, buttonVariants } from '@/components/ui/button'
 import DisconnectButton from './DisconnectButton'
 
-export const dynamic = 'force-dynamic'
+export type SocialPlatform = 'reddit' | 'x' | 'facebook' | 'threads'
 
-type Platform = 'reddit' | 'x' | 'facebook' | 'threads'
-
-type CredentialRow = {
-  platform:       Platform
+export type CredentialRow = {
+  platform:       SocialPlatform
   account_handle: string | null
   status:         string
   expires_at:     string | null
 }
 
-type PlatformDef = {
-  id:        Platform
-  name:      string
-  blurb:     string
-  loginPath: string | null    // null = "Coming soon"
+export type SocialBannerState = {
+  reddit?: 'connected' | 'denied' | 'error' | string
+  detail?: string
 }
 
-// Reddit is the only writer we ship in this sprint — the rest are stubbed
-// so the surface is visible but un-clickable. Each will get its own
-// /api/auth/social/<p>/login route as those flows are built.
+type Props = {
+  credentials: CredentialRow[]
+  banner:      SocialBannerState
+}
+
+type PlatformDef = {
+  id:        SocialPlatform
+  name:      string
+  blurb:     string
+  loginPath: string | null
+}
+
+// Reddit is the live writer. X/FB/Threads are stubbed with `loginPath: null`
+// so the surface is visible but un-clickable until each OAuth flow lands.
 const PLATFORMS: PlatformDef[] = [
   {
     id:        'reddit',
@@ -39,50 +45,24 @@ const PLATFORMS: PlatformDef[] = [
   { id: 'threads',  name: 'Threads',     blurb: 'Mirror replies into your Threads presence.',  loginPath: null },
 ]
 
-type SearchParams = { reddit?: string; detail?: string }
-
-export default async function IntegrationsPage({
-  searchParams,
-}: {
-  searchParams: Promise<SearchParams>
-}) {
-  const params = await searchParams
-  const ctx    = await getOrgContext()
-  if (!ctx) redirect('/login')
-  if (!ctx.effectiveOrgId) redirect('/onboarding')
-  if (!ctx.impersonation.active && ctx.profile.role !== 'admin') redirect('/')
-
-  const supabase = await createClient()
-
-  // Column-level grants on organization_credentials hide secret_id from
-  // authenticated callers — we only ever read the metadata fields here.
-  // KINV-013: Hunting Profile moved to /settings/signal, so this page no
-  // longer needs to load signal_configs or org.vertical.
-  const { data: creds } = await supabase
-    .from('organization_credentials')
-    .select('platform, account_handle, status, expires_at')
-    .eq('organization_id', ctx.effectiveOrgId)
-    .returns<CredentialRow[]>()
-
-  const byPlatform = new Map<Platform, CredentialRow>()
-  for (const row of creds ?? []) byPlatform.set(row.platform, row)
-
-  const banner = renderBanner(params)
+export default function SocialConnectionsTab({ credentials, banner }: Props) {
+  const byPlatform = new Map<SocialPlatform, CredentialRow>()
+  for (const row of credentials) byPlatform.set(row.platform, row)
 
   return (
-    <div className="px-8 py-8 space-y-6 max-w-3xl">
+    <section className="space-y-5">
       <div>
-        <h1 className="text-2xl font-bold text-white">Social Connections</h1>
-        <p className="text-sm text-gray-400 mt-1">
+        <h3 className="text-sm font-semibold text-white">Social Connections</h3>
+        <p className="mt-1 text-xs text-gray-500">
           Connect the social accounts Kinvox replies from. Tokens are stored
           encrypted in Supabase Vault and never touch the browser. One account
           per platform — disconnecting revokes the credential immediately.
         </p>
       </div>
 
-      {banner}
+      <Banner state={banner} />
 
-      <section className="space-y-3">
+      <div className="space-y-3">
         {PLATFORMS.map((p) => {
           const cred      = byPlatform.get(p.id) ?? null
           const connected = cred?.status === 'active'
@@ -94,7 +74,7 @@ export default async function IntegrationsPage({
             >
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <h2 className="text-base font-semibold text-white">{p.name}</h2>
+                  <h4 className="text-base font-semibold text-white">{p.name}</h4>
                   <StatusPill connected={connected} comingSoon={p.loginPath === null} />
                 </div>
                 <p className="mt-1 text-sm text-gray-400">{p.blurb}</p>
@@ -136,8 +116,8 @@ export default async function IntegrationsPage({
             </div>
           )
         })}
-      </section>
-    </div>
+      </div>
+    </section>
   )
 }
 
@@ -169,10 +149,10 @@ function StatusPill({
   )
 }
 
-function renderBanner(params: SearchParams) {
-  if (!params?.reddit) return null
+function Banner({ state }: { state: SocialBannerState }) {
+  if (!state?.reddit) return null
 
-  if (params.reddit === 'connected') {
+  if (state.reddit === 'connected') {
     return (
       <div className="rounded-lg border border-emerald-700/60 bg-emerald-900/20 p-3 text-sm text-emerald-200 flex items-start gap-2">
         <CheckCircle2 className="mt-0.5 shrink-0" />
@@ -186,7 +166,7 @@ function renderBanner(params: SearchParams) {
     )
   }
 
-  if (params.reddit === 'denied') {
+  if (state.reddit === 'denied') {
     return (
       <div className="rounded-lg border border-amber-700/60 bg-amber-900/20 p-3 text-sm text-amber-200 flex items-start gap-2">
         <AlertCircle className="mt-0.5 shrink-0" />
@@ -200,14 +180,13 @@ function renderBanner(params: SearchParams) {
     )
   }
 
-  // anything else → generic error
   return (
     <div className="rounded-lg border border-red-700/60 bg-red-900/20 p-3 text-sm text-red-200 flex items-start gap-2">
       <AlertCircle className="mt-0.5 shrink-0" />
       <div>
         <p className="font-medium">Couldn't connect to Reddit.</p>
         <p className="text-xs text-red-300/80 mt-0.5">
-          {params.detail ? `Reason: ${params.detail}` : 'Please try again.'}
+          {state.detail ? `Reason: ${state.detail}` : 'Please try again.'}
         </p>
       </div>
     </div>

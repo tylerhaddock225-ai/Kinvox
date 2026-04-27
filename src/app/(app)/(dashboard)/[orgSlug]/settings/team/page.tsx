@@ -1,12 +1,19 @@
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { resolveImpersonation } from '@/lib/impersonation'
+import { getOrgContext } from '@/lib/auth-context'
 import { redirect } from 'next/navigation'
 import TeamTabs from './TeamTabs'
 import type { Permissions } from '@/lib/permissions'
 import { normalizeLeadQuestions } from '@/lib/lead-questions'
+import type { CredentialRow } from './SocialConnectionsTab'
 
 export const dynamic = 'force-dynamic'
+
+type SearchParams = {
+  tab?:    string
+  reddit?: string
+  detail?: string
+}
 
 export type MemberRow = {
   id: string
@@ -24,38 +31,31 @@ export type RoleRow = {
   is_system_role: boolean
 }
 
-export default async function TeamSettingsPage() {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/login')
-
-  const [{ data: profile }, impersonation] = await Promise.all([
-    supabase
-      .from('profiles')
-      .select('organization_id, role')
-      .eq('id', user.id)
-      .single<{ organization_id: string | null; role: string | null }>(),
-    resolveImpersonation(),
-  ])
-
-  const effectiveOrgId = impersonation.active
-    ? impersonation.orgId
-    : profile?.organization_id ?? null
-  if (!effectiveOrgId) redirect('/onboarding')
+export default async function TeamSettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<SearchParams>
+}) {
+  const sp  = await searchParams
+  const ctx = await getOrgContext()
+  if (!ctx) redirect('/login')
+  if (!ctx.effectiveOrgId) redirect('/onboarding')
 
   // An HQ admin who has passed resolveImpersonation's is_admin_hq gate
   // is treated as a tenant admin on the impersonated org for read
   // access; tenant role is only enforced when the caller is acting as
   // themselves.
-  if (!impersonation.active && profile?.role !== 'admin') redirect('/')
+  if (!ctx.impersonation.active && ctx.profile.role !== 'admin') redirect('/')
 
-  const orgId = effectiveOrgId
+  const orgId    = ctx.effectiveOrgId
+  const supabase = await createClient()
 
-  // Fetch members, roles, the org settings row, and the primary
-  // signal_configs row in parallel. signal_configs is the row that
-  // backs the Signal Settings tab — oldest active row for the org, or
-  // null if the org hasn't configured one yet.
-  const [membersRes, rolesRes, orgRes, signalConfigRes] = await Promise.all([
+  // Fetch members, roles, the org settings row, primary signal_configs,
+  // and the social credentials in parallel. signal_configs backs the
+  // Signal Settings tab; organization_credentials backs Social Connections.
+  // Column-level grants on organization_credentials hide secret_id from
+  // authenticated callers, so this is safe to project narrowly.
+  const [membersRes, rolesRes, orgRes, signalConfigRes, credsRes] = await Promise.all([
     supabase
       .from('profiles')
       .select('id, full_name, role, role_id, roles(id, name)')
@@ -82,6 +82,11 @@ export default async function TeamSettingsPage() {
         radius_miles:   number
         keywords:       string[]
       }>(),
+    supabase
+      .from('organization_credentials')
+      .select('platform, account_handle, status, expires_at')
+      .eq('organization_id', orgId)
+      .returns<CredentialRow[]>(),
   ])
 
   const { data: creditsRow } = await supabase
@@ -138,6 +143,19 @@ export default async function TeamSettingsPage() {
     initialKeywords: signalConfigRes.data?.keywords         ?? [],
   }
 
+  const credentials: CredentialRow[] = credsRes.data ?? []
+  const socialBanner = {
+    reddit: typeof sp.reddit === 'string' ? sp.reddit : undefined,
+    detail: typeof sp.detail === 'string' ? sp.detail : undefined,
+  }
+
+  // OAuth callback redirects back here with ?reddit=connected — auto-select
+  // the Social tab in that case so the success banner is visible. Otherwise
+  // honor an explicit ?tab=… or fall back to the default 'users'.
+  const initialTab =
+    sp.reddit ? 'social'
+              : (typeof sp.tab === 'string' && sp.tab.length > 0 ? sp.tab : undefined)
+
   return (
     <div className="px-8 py-8 space-y-6 max-w-5xl">
       <div>
@@ -152,6 +170,9 @@ export default async function TeamSettingsPage() {
         orgSettings={orgSettings}
         leadSupport={leadSupport}
         signalSettings={signalSettings}
+        credentials={credentials}
+        socialBanner={socialBanner}
+        initialTab={initialTab}
       />
     </div>
   )

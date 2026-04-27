@@ -40,9 +40,12 @@ type RedditMeResponse = { name?: string }
 
 function bounce(slug: string | null, params: Record<string, string>): NextResponse {
   const appBase = process.env.NEXT_PUBLIC_APP_URL?.trim() || 'http://localhost:3000'
+  // KINV-017: Social Connections is now a tab inside Organization Settings
+  // at /settings/team. Land there with the reddit=… param so TeamTabs
+  // auto-switches to the Social tab and renders the success/error banner.
   const url = new URL(
     slug
-      ? `/${encodeURIComponent(slug)}/settings/integrations`
+      ? `/${encodeURIComponent(slug)}/settings/team`
       : '/',
     appBase,
   )

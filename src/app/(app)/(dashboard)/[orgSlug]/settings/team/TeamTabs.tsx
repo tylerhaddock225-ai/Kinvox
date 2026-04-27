@@ -12,6 +12,10 @@ import {
 import { updateSupportEmail, initializeInboundEmail } from '@/app/(app)/(dashboard)/actions/org-settings'
 import LeadSupportTab, { type LeadSupportState } from '@/components/settings/lead-support-tab'
 import HuntingProfileForm from './HuntingProfileForm'
+import SocialConnectionsTab, {
+  type CredentialRow,
+  type SocialBannerState,
+} from './SocialConnectionsTab'
 import { PERMISSION_KEYS, DEFAULT_PERMISSIONS, type Permissions } from '@/lib/permissions'
 import type { MemberRow, RoleRow } from './page'
 
@@ -588,9 +592,16 @@ const TABS = [
   { id: 'support',      label: 'Support Settings'    },
   { id: 'lead-support', label: 'Lead Support'        },
   { id: 'signal',       label: 'Signal Settings'     },
+  { id: 'social',       label: 'Social Connections'  },
 ] as const
 
 type TabId = typeof TABS[number]['id']
+
+const TAB_IDS: ReadonlySet<TabId> = new Set(TABS.map(t => t.id))
+
+function isTabId(value: string | undefined): value is TabId {
+  return value !== undefined && TAB_IDS.has(value as TabId)
+}
 
 export type SignalSettingsState = {
   orgVertical:     string | null
@@ -605,14 +616,22 @@ export default function TeamTabs({
   orgSettings,
   leadSupport,
   signalSettings,
+  credentials,
+  socialBanner,
+  initialTab,
 }: {
   members:        MemberRow[]
   roles:          RoleRow[]
   orgSettings:    OrgSettings
   leadSupport:    LeadSupportState
   signalSettings: SignalSettingsState
+  credentials:    CredentialRow[]
+  socialBanner:   SocialBannerState
+  initialTab?:    string
 }) {
-  const [activeTab, setActiveTab] = useState<TabId>('users')
+  const [activeTab, setActiveTab] = useState<TabId>(
+    isTabId(initialTab) ? initialTab : 'users',
+  )
 
   return (
     <div className="space-y-6">
@@ -669,6 +688,10 @@ export default function TeamTabs({
           initialRadius={signalSettings.initialRadius}
           initialKeywords={signalSettings.initialKeywords}
         />
+      )}
+
+      {activeTab === 'social' && (
+        <SocialConnectionsTab credentials={credentials} banner={socialBanner} />
       )}
     </div>
   )

@@ -61,6 +61,6 @@ export async function disconnectSocialPlatform(
 
   if (error) return { status: 'error', error: error.message }
 
-  revalidatePath('/[orgSlug]/settings/integrations', 'page')
+  revalidatePath('/[orgSlug]/settings/team', 'page')
   return { status: 'success', platform }
 }
