@@ -397,6 +397,7 @@ export type Database = {
           status: 'pending' | 'unlocked' | 'approved' | 'dismissed'
           external_post_id: string | null
           signal_config_id: string | null
+          metadata: Json | null
           unlocked_at: string | null
           unlocked_by: string | null
           created_at: string
@@ -412,6 +413,7 @@ export type Database = {
           status?: 'pending' | 'unlocked' | 'approved' | 'dismissed'
           external_post_id?: string | null
           signal_config_id?: string | null
+          metadata?: Json | null
           unlocked_at?: string | null
           unlocked_by?: string | null
           created_at?: string
@@ -498,11 +500,91 @@ export type Database = {
         }
         Update: Partial<Database['public']['Tables']['credit_ledger']['Insert']>
       }
+      organization_credentials: {
+        Row: {
+          id: string
+          organization_id: string
+          platform: 'reddit' | 'x' | 'facebook' | 'threads'
+          secret_id: string
+          account_handle: string | null
+          scopes: string[]
+          expires_at: string | null
+          status: 'active' | 'revoked' | 'expired'
+          created_by: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          organization_id: string
+          platform: 'reddit' | 'x' | 'facebook' | 'threads'
+          secret_id: string
+          account_handle?: string | null
+          scopes?: string[]
+          expires_at?: string | null
+          status?: 'active' | 'revoked' | 'expired'
+          created_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['organization_credentials']['Insert']>
+      }
+      outbound_messages: {
+        Row: {
+          id: string
+          organization_id: string
+          signal_id: string
+          platform: 'reddit' | 'x' | 'facebook' | 'threads'
+          body: string
+          status: 'draft' | 'pending_approval' | 'sent' | 'failed'
+          external_post_id: string | null
+          error_message: string | null
+          approved_by: string | null
+          sent_at: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          organization_id: string
+          signal_id: string
+          platform: 'reddit' | 'x' | 'facebook' | 'threads'
+          body: string
+          status?: 'draft' | 'pending_approval' | 'sent' | 'failed'
+          external_post_id?: string | null
+          error_message?: string | null
+          approved_by?: string | null
+          sent_at?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['outbound_messages']['Insert']>
+      }
     }
     Functions: {
       deduct_credit: {
         Args: { org_id: string; amount: number; ref_id: string }
         Returns: number
+      }
+      get_decrypted_credential: {
+        Args: { p_org_id: string; p_platform: 'reddit' | 'x' | 'facebook' | 'threads' }
+        Returns: string
+      }
+      set_organization_credential: {
+        Args: {
+          p_org_id:     string
+          p_platform:   'reddit' | 'x' | 'facebook' | 'threads'
+          p_token:      string
+          p_handle:     string | null
+          p_scopes:     string[]
+          p_expires_at: string | null
+          p_created_by: string | null
+        }
+        Returns: string
+      }
+      record_outbound_send: {
+        Args: { p_outbound_id: string; p_external_post_id: string; p_charge?: number }
+        Returns: number | null
       }
     }
   }
@@ -523,3 +605,5 @@ export type OrganizationApiKey  = Database['public']['Tables']['organization_api
 export type PendingSignal       = Database['public']['Tables']['pending_signals']['Row']
 export type SignalConfig        = Database['public']['Tables']['signal_configs']['Row']
 export type Vertical            = Database['public']['Tables']['verticals']['Row']
+export type OutboundMessage         = Database['public']['Tables']['outbound_messages']['Row']
+export type OrganizationCredential  = Database['public']['Tables']['organization_credentials']['Row']

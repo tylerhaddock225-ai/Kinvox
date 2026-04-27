@@ -16,7 +16,7 @@ import {
   Tag,
   MapPin,
 } from 'lucide-react'
-import { sendSignalReply, dismissSignal } from '@/app/(app)/(dashboard)/actions/signals'
+import { approveAndSendSignal, dismissSignal } from '@/app/(app)/(dashboard)/actions/signals'
 import SignalUnlockButton from './SignalUnlockButton'
 import type { PendingSignal } from '@/lib/types/database.types'
 
@@ -61,6 +61,18 @@ function extractKeywords(snippet: string | null): string[] {
     if (out.length >= 5) break
   }
   return out
+}
+
+/**
+ * pending_signals.metadata is jsonb (extracted by the AI ingest route).
+ * The 'location_name' key is the city/region the LLM pinned the post to,
+ * e.g. "Norman, OK". We render it as the Service Zone badge — keep the
+ * accessor narrow so a future shape change can't silently break the UI.
+ */
+function locationName(metadata: PendingSignal['metadata']): string | null {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return null
+  const v = (metadata as Record<string, unknown>).location_name
+  return typeof v === 'string' && v.trim().length > 0 ? v.trim() : null
 }
 
 function platformIcon(platform: string | null) {
@@ -122,6 +134,7 @@ export default function SignalCard({ signal, onRemove }: Props) {
 
   const badge = intentBadge(signal.intent_score)
   const keywords = extractKeywords(signal.reasoning_snippet)
+  const serviceZone = locationName(signal.metadata)
   const tooLong  = draft.length > REPLY_CHAR_LIMIT
 
   function handleSend() {
@@ -130,7 +143,7 @@ export default function SignalCard({ signal, onRemove }: Props) {
     setError(null)
     setAction('send')
     startTransition(async () => {
-      const result = await sendSignalReply(signal.id, draft.trim())
+      const result = await approveAndSendSignal(signal.id, draft.trim())
       if (result?.status === 'error') {
         setError(result.error)
         setAction(null)
@@ -181,6 +194,12 @@ export default function SignalCard({ signal, onRemove }: Props) {
             <MapPin className="w-3 h-3" />
             Inside Radius
           </span>
+          {serviceZone && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-slate-500/40 bg-slate-500/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-slate-200">
+              <MapPin className="w-3 h-3" />
+              {serviceZone}
+            </span>
+          )}
           <span className="text-[11px] text-gray-500">{formatWhen(signal.created_at)}</span>
         </div>
         {signal.external_post_id && signal.external_post_id.startsWith('http') && (

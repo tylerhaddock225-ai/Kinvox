@@ -1,5 +1,6 @@
 'use server'
 
+import { cookies } from 'next/headers'
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { resolveEffectiveOrgId } from '@/lib/impersonation'
@@ -15,8 +16,14 @@ export type UnlockSignalState =
   | { status: 'error'; error: string; reason?: 'insufficient_credits' }
   | null
 
+export type ApproveAndSendState =
+  | { status: 'success'; external_post_id: string }
+  | { status: 'error';   error: string }
+  | null
+
 const MAX_REPLY_CHARS = 280 // leaves headroom over the 250-char draft cap
 const WEBHOOK_TIMEOUT_MS = 10_000
+const BRIDGE_RELAY_TIMEOUT_MS = 15_000  // route-handler call already has its own 10s n8n timeout
 
 // We update + roll back with the authenticated user's session — RLS on
 // pending_signals (tenant-or-HQ update policy) is the enforcement edge.
@@ -139,6 +146,175 @@ export async function dismissSignal(signalId: string): Promise<State> {
   revalidatePath('/[orgSlug]/signals', 'page')
   return { status: 'success', message: 'Dismissed.' }
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// Approve & Send via the n8n bridge (KINV-006/008).
+//
+// Replaces the legacy Make.com path used by sendSignalReply. The flow:
+//
+//   1. Resolve the effective org and verify the signal is unlocked +
+//      ours. The Send button only renders post-unlock, so 'unlocked' is
+//      the expected starting status.
+//   2. INSERT outbound_messages with status='pending_approval'. This
+//      doubles as the click-de-dup lock: the partial unique index
+//      outbound_messages_signal_unique_per_platform makes a concurrent
+//      second click fail with 23505, which we surface as a clean error.
+//   3. POST /api/v1/social/reddit/reply with the new outbound id. The
+//      route validates session + org again, pulls the vault token,
+//      relays through n8n, and on bridge success calls
+//      record_outbound_send (atomic flip + ledger debit).
+//   4. Only when the route returns ok=true do we flip
+//      pending_signals.status to 'approved' so the card leaves the queue.
+//      A bridge failure leaves pending_signals at 'unlocked' and the
+//      outbound row at 'failed' (the route does that), so the user can
+//      retry without losing the unlocked state.
+//
+// Atomicity: the credit deduction happens inside record_outbound_send,
+// which only runs after the bridge returns ok. Bridge failure ⇒ no
+// charge, full stop.
+// ─────────────────────────────────────────────────────────────────────
+
+export async function approveAndSendSignal(
+  signalId: string,
+  text: string,
+): Promise<ApproveAndSendState> {
+  if (typeof signalId !== 'string' || signalId.length === 0) {
+    return { status: 'error', error: 'Missing signalId' }
+  }
+
+  const trimmed = typeof text === 'string' ? text.trim() : ''
+  if (!trimmed) return { status: 'error', error: 'Reply cannot be empty' }
+  if (trimmed.length > MAX_REPLY_CHARS) {
+    return { status: 'error', error: `Reply exceeds ${MAX_REPLY_CHARS} characters` }
+  }
+
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { status: 'error', error: 'Not authenticated' }
+
+  const orgId = await resolveEffectiveOrgId(supabase, user.id)
+  if (!orgId) return { status: 'error', error: 'No organization' }
+
+  // Verify the signal exists, belongs to this org, and is in 'unlocked'.
+  // RLS would already hide cross-tenant rows, but reading organization_id
+  // explicitly lets us return distinct error codes for "missing" vs
+  // "wrong tenant".
+  const { data: signal } = await supabase
+    .from('pending_signals')
+    .select('id, organization_id, status')
+    .eq('id', signalId)
+    .maybeSingle<{ id: string; organization_id: string; status: string }>()
+
+  if (!signal)                          return { status: 'error', error: 'Signal not found' }
+  if (signal.organization_id !== orgId) return { status: 'error', error: 'Signal not found' }
+  if (signal.status !== 'unlocked') {
+    return { status: 'error', error: 'Unlock the signal before sending a reply' }
+  }
+
+  // Step 1: claim the send by inserting an outbound_messages row.
+  // The partial unique index on (signal_id, platform) WHERE status IN
+  // ('pending_approval','sent') is what stops double-sends — a second
+  // click while one is in flight gets 23505 and we surface it cleanly.
+  const { data: outbound, error: insertErr } = await supabase
+    .from('outbound_messages')
+    .insert({
+      organization_id: orgId,
+      signal_id:       signalId,
+      platform:        'reddit',
+      body:            trimmed,
+      status:          'pending_approval',
+      approved_by:     user.id,
+    })
+    .select('id')
+    .single<{ id: string }>()
+
+  if (insertErr || !outbound) {
+    const code = (insertErr as { code?: string } | null)?.code
+    if (code === '23505') {
+      return { status: 'error', error: 'A reply for this signal is already in flight' }
+    }
+    return {
+      status: 'error',
+      error:  insertErr?.message ?? 'Could not queue reply for sending',
+    }
+  }
+
+  // Step 2: relay to /api/v1/social/reddit/reply. We forward the user's
+  // session cookies so the route's auth.getUser() sees the same caller.
+  // The route owns the bridge call + atomic record_outbound_send.
+  const appBase   = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '') || 'http://localhost:3000'
+  const cookieJar = await cookies()
+  const cookieHdr = cookieJar.getAll().map((c) => `${c.name}=${c.value}`).join('; ')
+
+  let routeOk          = false
+  let routeStatus      = 0
+  let externalPostId: string | null = null
+  let routeErr:        string | null = null
+
+  try {
+    const controller = new AbortController()
+    const timer      = setTimeout(() => controller.abort(), BRIDGE_RELAY_TIMEOUT_MS)
+    const res = await fetch(`${appBase}/api/v1/social/reddit/reply`, {
+      method:  'POST',
+      headers: {
+        'content-type': 'application/json',
+        cookie:         cookieHdr,
+      },
+      body:    JSON.stringify({ outbound_message_id: outbound.id }),
+      signal:  controller.signal,
+      cache:   'no-store',
+    })
+    clearTimeout(timer)
+    routeStatus = res.status
+
+    let payload:
+      | { ok?: boolean; external_post_id?: string; error?: string; detail?: string }
+      | null = null
+    try { payload = await res.json() } catch { /* leave null */ }
+
+    if (res.ok && payload?.ok && typeof payload.external_post_id === 'string') {
+      routeOk        = true
+      externalPostId = payload.external_post_id
+    } else {
+      routeErr = payload?.detail ?? payload?.error ?? `bridge_status_${res.status}`
+    }
+  } catch (err) {
+    const aborted = err instanceof Error && err.name === 'AbortError'
+    routeErr = aborted ? 'bridge_timeout' : err instanceof Error ? err.message : String(err)
+  }
+
+  if (!routeOk || !externalPostId) {
+    // The route already marked outbound_messages.status='failed' on its
+    // failure path. Nothing else to clean up here — pending_signals stays
+    // 'unlocked', so the user can retry. No credit was charged.
+    void routeStatus // referenced for the error string below
+    return {
+      status: 'error',
+      error:  routeErr ?? 'Reply relay failed — please try again',
+    }
+  }
+
+  // Step 3: bridge accepted + ledger debited (inside the route). Move the
+  // signal off the queue. Guarded by status='unlocked' so a concurrent
+  // dismiss can't be silently overwritten.
+  const { error: flipErr } = await supabase
+    .from('pending_signals')
+    .update({ status: 'approved' })
+    .eq('id', signalId)
+    .eq('status', 'unlocked')
+
+  if (flipErr) {
+    // Reply was sent + credit charged. The card may stick around in the
+    // queue until realtime/refresh — surface a soft warning rather than
+    // a hard error so the user knows the send itself worked.
+    console.error('[approveAndSendSignal] post-send status flip failed', flipErr)
+  }
+
+  revalidatePath('/[orgSlug]/signals', 'page')
+  revalidatePath('/[orgSlug]/leads', 'page')
+  return { status: 'success', external_post_id: externalPostId }
+}
+
 
 // ─────────────────────────────────────────────────────────────────────
 // Pay-on-Unlock for signals.
