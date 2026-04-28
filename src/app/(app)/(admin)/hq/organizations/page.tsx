@@ -73,7 +73,7 @@ export default async function AdminOrganizationsPage({
           </div>
           {archived > 0 && (
             <Link
-              href={showArchived ? '/admin-hq/organizations' : '/admin-hq/organizations?show=all'}
+              href={showArchived ? '/hq/organizations' : '/hq/organizations?show=all'}
               className="inline-flex items-center gap-1.5 text-[11px] font-medium text-violet-300 hover:text-violet-200 transition-colors"
             >
               <Archive className="w-3 h-3" />
@@ -164,7 +164,7 @@ export default async function AdminOrganizationsPage({
                           </form>
                         )}
                         <Link
-                          href={`/admin-hq/organizations/${org.id}`}
+                          href={`/hq/organizations/${org.id}`}
                           className="inline-flex items-center rounded-md border border-pvx-border bg-pvx-surface px-3 py-1.5 text-xs font-medium text-gray-200 hover:bg-pvx-border hover:text-white transition-colors"
                         >
                           Manage

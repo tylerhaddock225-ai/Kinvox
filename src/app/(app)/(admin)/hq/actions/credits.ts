@@ -15,7 +15,7 @@ async function requireHqAdmin() {
 }
 
 function integrationsTab(orgId: string, extra = ''): string {
-  const base = `/admin-hq/organizations/${orgId}?tab=integrations-billing`
+  const base = `/hq/organizations/${orgId}?tab=integrations-billing`
   return extra ? `${base}&${extra}` : base
 }
 
@@ -31,7 +31,7 @@ export async function addCredits(formData: FormData) {
   const amount = parseInt(String(formData.get('amount') ?? ''), 10)
   const type   = String(formData.get('type') ?? 'purchase').trim() as LedgerType
 
-  if (!orgId)               redirect('/admin-hq/organizations')
+  if (!orgId)               redirect('/hq/organizations')
   if (!Number.isFinite(amount) || amount === 0) {
     redirect(integrationsTab(orgId, 'credits_error=' + encodeURIComponent('Enter a non-zero amount')))
   }
@@ -81,7 +81,7 @@ export async function addCredits(formData: FormData) {
     redirect(integrationsTab(orgId, 'credits_error=' + encodeURIComponent('Balance updated but ledger insert failed: ' + ledgerErr.message)))
   }
 
-  revalidatePath(`/admin-hq/organizations/${orgId}`)
+  revalidatePath(`/hq/organizations/${orgId}`)
   redirect(integrationsTab(orgId, 'credits_added=' + encodeURIComponent(String(amount))))
 }
 
@@ -97,7 +97,7 @@ export async function updateAutoTopUp(formData: FormData) {
   const threshold = parseInt(String(formData.get('threshold') ?? ''), 10)
   const topUp     = parseInt(String(formData.get('top_up_amount') ?? ''), 10)
 
-  if (!orgId) redirect('/admin-hq/organizations')
+  if (!orgId) redirect('/hq/organizations')
 
   const patch: {
     auto_top_up_enabled: boolean
@@ -118,6 +118,6 @@ export async function updateAutoTopUp(formData: FormData) {
     redirect(integrationsTab(orgId, 'credits_error=' + encodeURIComponent(error.message)))
   }
 
-  revalidatePath(`/admin-hq/organizations/${orgId}`)
+  revalidatePath(`/hq/organizations/${orgId}`)
   redirect(integrationsTab(orgId, 'topup_saved=1'))
 }

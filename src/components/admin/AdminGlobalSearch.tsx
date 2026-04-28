@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Search } from 'lucide-react'
-import { adminGlobalSearch } from '@/app/(app)/(admin)/admin-hq/actions/search'
+import { adminGlobalSearch } from '@/app/(app)/(admin)/hq/actions/search'
 
 export default function AdminGlobalSearch() {
   const [q, setQ] = useState('')
@@ -24,9 +24,9 @@ export default function AdminGlobalSearch() {
         return
       }
       if (hit.type === 'organization') {
-        router.push(`/admin-hq/organizations/${hit.id}`)
+        router.push(`/hq/organizations/${hit.id}`)
       } else {
-        router.push(`/admin-hq/tickets/${hit.id}`)
+        router.push(`/hq/tickets/${hit.id}`)
       }
       setQ('')
     })

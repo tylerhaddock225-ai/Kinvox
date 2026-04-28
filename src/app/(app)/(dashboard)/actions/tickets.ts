@@ -62,7 +62,7 @@ type AffectedTab    = typeof AFFECTED_TABS[number]
 
 // HQ support tickets live in the merchant's own org (so insert RLS passes
 // without bypass) and are flagged is_platform_support=true. Merchant-facing
-// ticket queries filter the flag out; Admin HQ's /admin-hq/tickets surfaces
+// ticket queries filter the flag out; Admin HQ's /hq/tickets surfaces
 // them via ?scope=platform.
 export async function createHQSupportTicket(_prev: State, formData: FormData): Promise<State> {
   const supabase = await createClient()
@@ -114,7 +114,7 @@ export async function createHQSupportTicket(_prev: State, formData: FormData): P
 
   revalidatePath('/support')
   revalidatePath('/[orgSlug]/hq-support', 'page')
-  revalidatePath('/admin-hq/tickets')
+  revalidatePath('/hq/tickets')
   return { status: 'success' }
 }
 
@@ -160,9 +160,9 @@ export async function updateTicketStatus(formData: FormData): Promise<void> {
   revalidatePath('/tickets')
   revalidatePath(`/tickets/${ticket_id}`)
   // Mirror the revalidations for the HQ views so inline edits from
-  // /admin-hq/tickets refresh the grid counts + detail immediately.
-  revalidatePath('/admin-hq/tickets')
-  revalidatePath(`/admin-hq/tickets/${ticket_id}`)
+  // /hq/tickets refresh the grid counts + detail immediately.
+  revalidatePath('/hq/tickets')
+  revalidatePath(`/hq/tickets/${ticket_id}`)
   revalidatePath('/support')
   revalidatePath('/[orgSlug]/hq-support', 'page')
   revalidatePath('/[orgSlug]/hq-support/[id]', 'page')
@@ -185,8 +185,8 @@ export async function updateTicketPriority(formData: FormData): Promise<void> {
 
   revalidatePath('/tickets')
   revalidatePath(`/tickets/${ticket_id}`)
-  revalidatePath('/admin-hq/tickets')
-  revalidatePath(`/admin-hq/tickets/${ticket_id}`)
+  revalidatePath('/hq/tickets')
+  revalidatePath(`/hq/tickets/${ticket_id}`)
   revalidatePath('/[orgSlug]/hq-support', 'page')
   revalidatePath('/[orgSlug]/hq-support/[id]', 'page')
 }

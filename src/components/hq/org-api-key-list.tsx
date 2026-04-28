@@ -12,7 +12,7 @@ import {
   X,
   Trash2,
 } from 'lucide-react'
-import { generateApiKey, revokeApiKey } from '@/app/(app)/(admin)/admin-hq/actions/api-keys'
+import { generateApiKey, revokeApiKey } from '@/app/(app)/(admin)/hq/actions/api-keys'
 import ConfirmButton from '@/components/admin/ConfirmButton'
 
 type ApiKeyRow = {

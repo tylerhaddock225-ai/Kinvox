@@ -26,7 +26,7 @@ export default async function HqRolesPage() {
   if (!user) redirect('/login')
 
   // Only HQ staff with manage_global_roles may land here. Every other
-  // HQ staffer lands at /admin-hq (read-only access to this page would
+  // HQ staffer lands at /hq (read-only access to this page would
   // be misleading because they can't persist changes anyway).
   const { data: profile } = await supabase
     .from('profiles')
@@ -38,7 +38,7 @@ export default async function HqRolesPage() {
     }>()
 
   if (!profile?.system_role) redirect('/login')
-  if (!hasHqPermission(profile, 'manage_global_roles')) redirect('/admin-hq')
+  if (!hasHqPermission(profile, 'manage_global_roles')) redirect('/hq')
 
   // Fetch roles + in-use counts in parallel. The count query lives in
   // a grouped aggregate; we read both sides and merge client-side.

@@ -1,7 +1,7 @@
 'use client'
 
 import { useRef, useTransition, type MouseEvent } from 'react'
-import { updateHQTicketCategory } from '@/app/(app)/(admin)/admin-hq/actions/tickets'
+import { updateHQTicketCategory } from '@/app/(app)/(admin)/hq/actions/tickets'
 
 type HQCategory = 'bug' | 'billing' | 'feature_request' | 'question'
 

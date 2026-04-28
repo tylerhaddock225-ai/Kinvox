@@ -15,7 +15,7 @@ import {
   createSignalConfig,
   updateSignalConfig,
   deleteSignalConfig,
-} from '@/app/(app)/(admin)/admin-hq/actions/signal-configs'
+} from '@/app/(app)/(admin)/hq/actions/signal-configs'
 import ConfirmButton from '@/components/admin/ConfirmButton'
 import type { SignalConfig, Vertical } from '@/lib/types/database.types'
 

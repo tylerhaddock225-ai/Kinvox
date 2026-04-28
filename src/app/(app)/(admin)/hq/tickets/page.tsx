@@ -23,7 +23,7 @@ function QueueTab({ queue, current, count, label }: {
   label:   string
 }) {
   const isActive = current === queue
-  const href = queue === 'active' ? '/admin-hq/tickets' : '/admin-hq/tickets?queue=closed'
+  const href = queue === 'active' ? '/hq/tickets' : '/hq/tickets?queue=closed'
   return (
     <Link
       href={href}
@@ -125,7 +125,7 @@ export default async function AdminTicketsPage({
           <tbody className="divide-y divide-pvx-border">
             {tickets?.length ? (
               tickets.map((t) => (
-                <TicketRow key={t.id} href={`/admin-hq/tickets/${t.id}`}>
+                <TicketRow key={t.id} href={`/hq/tickets/${t.id}`}>
                   <td className="px-5 py-4 text-xs">
                     <CopyId id={t.display_id} />
                   </td>

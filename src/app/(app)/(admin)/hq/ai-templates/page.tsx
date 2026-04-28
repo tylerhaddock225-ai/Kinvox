@@ -56,7 +56,7 @@ export default async function AdminAiTemplatesPage() {
           return (
             <Link
               key={t.id}
-              href={`/admin-hq/ai-templates/${t.id}`}
+              href={`/hq/ai-templates/${t.id}`}
               className="group block rounded-xl border border-pvx-border bg-gray-900 p-5 shadow-sm transition-all hover:border-violet-500/40 hover:shadow-lg hover:shadow-violet-500/15"
             >
               <div className="flex items-start justify-between gap-3">

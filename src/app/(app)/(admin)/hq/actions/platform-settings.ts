@@ -45,7 +45,7 @@ export async function updateTicketIdPrefix(_prev: State, formData: FormData): Pr
 
   if (error) return { status: 'error', error: error.message }
 
-  revalidatePath('/admin-hq/settings')
+  revalidatePath('/hq/settings')
   return { status: 'success', message: `Saved — new tickets will use "${prefix}123".` }
 }
 
@@ -80,5 +80,5 @@ export async function updatePlatformToggle(formData: FormData): Promise<void> {
       updated_by: user.id,
     })
 
-  revalidatePath('/admin-hq/settings')
+  revalidatePath('/hq/settings')
 }

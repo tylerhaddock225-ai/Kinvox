@@ -18,7 +18,7 @@ export async function updateOrganization(formData: FormData) {
   const name     = String(formData.get('name')     ?? '').trim()
   const vertical = String(formData.get('vertical') ?? '').trim()
   const plan     = String(formData.get('plan')     ?? '').trim() as Plan
-  if (!id || !name) redirect('/admin-hq/organizations')
+  if (!id || !name) redirect('/hq/organizations')
 
   const supabase = await requireAdmin()
   await supabase
@@ -30,9 +30,9 @@ export async function updateOrganization(formData: FormData) {
     })
     .eq('id', id)
 
-  revalidatePath(`/admin-hq/organizations/${id}`)
-  revalidatePath('/admin-hq/organizations')
-  redirect(`/admin-hq/organizations/${id}`)
+  revalidatePath(`/hq/organizations/${id}`)
+  revalidatePath('/hq/organizations')
+  redirect(`/hq/organizations/${id}`)
 }
 
 export async function setOrgStatus(formData: FormData) {
@@ -43,8 +43,8 @@ export async function setOrgStatus(formData: FormData) {
   const supabase = await requireAdmin()
   await supabase.from('organizations').update({ status }).eq('id', id)
 
-  revalidatePath(`/admin-hq/organizations/${id}`)
-  revalidatePath('/admin-hq/organizations')
+  revalidatePath(`/hq/organizations/${id}`)
+  revalidatePath('/hq/organizations')
 }
 
 export async function archiveOrganization(formData: FormData) {
@@ -57,8 +57,8 @@ export async function archiveOrganization(formData: FormData) {
     .update({ deleted_at: new Date().toISOString() })
     .eq('id', id)
 
-  revalidatePath('/admin-hq/organizations')
-  redirect('/admin-hq/organizations')
+  revalidatePath('/hq/organizations')
+  redirect('/hq/organizations')
 }
 
 export async function restoreOrganization(formData: FormData) {
@@ -71,8 +71,8 @@ export async function restoreOrganization(formData: FormData) {
     .update({ deleted_at: null })
     .eq('id', id)
 
-  revalidatePath(`/admin-hq/organizations/${id}`)
-  revalidatePath('/admin-hq/organizations')
+  revalidatePath(`/hq/organizations/${id}`)
+  revalidatePath('/hq/organizations')
 }
 
 // Master kill switch for tenant signal capture. HQ-only — flips
@@ -106,7 +106,7 @@ export async function updateCaptureStatus(
   // Bust the org detail server-render cache so a subsequent navigation
   // shows the new state authoritatively. The optimistic UI handles the
   // immediate visual flip.
-  revalidatePath(`/admin-hq/organizations/${orgId}`)
+  revalidatePath(`/hq/organizations/${orgId}`)
   return { ok: true }
 }
 
@@ -121,7 +121,7 @@ export async function setOrgGeofence(formData: FormData) {
   const latRaw    = String(formData.get('latitude')      ?? '').trim()
   const lngRaw    = String(formData.get('longitude')     ?? '').trim()
   const radiusRaw = String(formData.get('signal_radius') ?? '').trim()
-  if (!id) redirect('/admin-hq/organizations')
+  if (!id) redirect('/hq/organizations')
 
   const supabase = await requireAdmin()
 
@@ -130,7 +130,7 @@ export async function setOrgGeofence(formData: FormData) {
   const radius    = radiusRaw === '' ? null : Number(radiusRaw)
 
   const fail = (msg: string) =>
-    redirect(`/admin-hq/organizations/${id}?tab=details&geofence_error=${encodeURIComponent(msg)}`)
+    redirect(`/hq/organizations/${id}?tab=details&geofence_error=${encodeURIComponent(msg)}`)
 
   if ((latitude === null) !== (longitude === null)) {
     fail('Enter both latitude and longitude, or leave both blank')
@@ -151,9 +151,9 @@ export async function setOrgGeofence(formData: FormData) {
     .eq('id', id)
 
   if (error) {
-    redirect(`/admin-hq/organizations/${id}?tab=details&geofence_error=${encodeURIComponent(error.message)}`)
+    redirect(`/hq/organizations/${id}?tab=details&geofence_error=${encodeURIComponent(error.message)}`)
   }
 
-  revalidatePath(`/admin-hq/organizations/${id}`)
-  redirect(`/admin-hq/organizations/${id}?tab=details&geofence_saved=1`)
+  revalidatePath(`/hq/organizations/${id}`)
+  redirect(`/hq/organizations/${id}?tab=details&geofence_saved=1`)
 }

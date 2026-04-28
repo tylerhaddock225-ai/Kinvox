@@ -230,9 +230,24 @@ type DraftInput = {
 
 const DRAFT_CHAR_CAP = 250
 
-// Canonical base URL — keeps templates and prompts aligned. If you change
-// the public lead-magnet host, this is the single place to swap.
-const DRAFT_LINK_BASE = 'https://kinvoxtech.com/l'
+// Canonical base URL for the public lead-magnet host, resolved at module
+// load. Order of precedence:
+//   1. NEXT_PUBLIC_PUBLIC_URL — explicit override for environments where
+//      the marketing host differs from the app host (sandbox, custom prod).
+//   2. NEXT_PUBLIC_APP_URL — primary fallback. Dev (.env.local) and
+//      sandbox (.env.sandbox) both point this at the local/sandbox app
+//      host, which serves /l/* via the (public) route tree, so AI replies
+//      generated in those envs link to those envs instead of leaking to
+//      production.
+//   3. https://kinvoxtech.com — final safety net. Should only be hit if
+//      both env vars are unset (a misconfigured deploy), in which case
+//      shipping a prod link is preferable to a broken one.
+// The trailing-slash strip keeps `${BASE}/${slug}` from becoming `//slug`.
+const DRAFT_LINK_BASE = (
+  process.env.NEXT_PUBLIC_PUBLIC_URL
+  ?? process.env.NEXT_PUBLIC_APP_URL
+  ?? 'https://kinvoxtech.com'
+).replace(/\/$/, '') + '/l'
 
 // Builds the lead-magnet URL the AI reply will embed. When a signal id is
 // supplied we tack on `?sig=<uuid>` so the lead-capture action can write

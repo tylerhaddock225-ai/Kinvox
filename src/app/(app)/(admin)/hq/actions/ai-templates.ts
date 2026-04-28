@@ -26,7 +26,7 @@ async function requirePlatformOwner() {
 export async function setOrgAiStrategy(formData: FormData) {
   const orgId      = String(formData.get('org_id')      ?? '').trim()
   const templateId = String(formData.get('template_id') ?? '').trim()
-  if (!orgId) redirect('/admin-hq/organizations')
+  if (!orgId) redirect('/hq/organizations')
 
   const supabase = await requirePlatformOwner()
 
@@ -38,8 +38,8 @@ export async function setOrgAiStrategy(formData: FormData) {
       .update({ ai_template_id: null, enabled_ai_features: {} })
       .eq('id', orgId)
 
-    revalidatePath(`/admin-hq/organizations/${orgId}`)
-    redirect(`/admin-hq/organizations/${orgId}`)
+    revalidatePath(`/hq/organizations/${orgId}`)
+    redirect(`/hq/organizations/${orgId}`)
   }
 
   const { data: template } = await supabase
@@ -51,7 +51,7 @@ export async function setOrgAiStrategy(formData: FormData) {
   if (!template) {
     // Template vanished between page load and submit — don't write a
     // dangling FK; bounce back so the user re-selects.
-    redirect(`/admin-hq/organizations/${orgId}`)
+    redirect(`/hq/organizations/${orgId}`)
   }
 
   // Build the toggle map from form fields. Checkbox semantics: only
@@ -75,6 +75,6 @@ export async function setOrgAiStrategy(formData: FormData) {
     })
     .eq('id', orgId)
 
-  revalidatePath(`/admin-hq/organizations/${orgId}`)
-  redirect(`/admin-hq/organizations/${orgId}`)
+  revalidatePath(`/hq/organizations/${orgId}`)
+  redirect(`/hq/organizations/${orgId}`)
 }

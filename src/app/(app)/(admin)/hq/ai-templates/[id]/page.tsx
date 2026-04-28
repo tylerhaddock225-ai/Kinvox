@@ -35,7 +35,7 @@ export default async function AdminAiTemplateDetailPage({
   return (
     <div className="space-y-8 max-w-4xl">
       <Link
-        href="/admin-hq/ai-templates"
+        href="/hq/ai-templates"
         className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-400 hover:text-gray-200 transition-colors"
       >
         <ArrowLeft className="w-3.5 h-3.5" />

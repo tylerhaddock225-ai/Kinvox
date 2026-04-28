@@ -12,7 +12,7 @@ import AuthLoading from '@/components/AuthLoading'
 // Until the client-side check resolves, render AuthLoading — never
 // the "Pending invitation" copy. That eliminates the flicker where
 // a just-logged-in platform_owner briefly sees the orphan screen
-// before window.location swaps them over to /admin-hq.
+// before window.location swaps them over to /hq.
 export default function PendingInviteGate({ children }: { children: ReactNode }) {
   const [resolved, setResolved] = useState(false)
 
@@ -45,7 +45,7 @@ export default function PendingInviteGate({ children }: { children: ReactNode })
       if (profile?.system_role) {
         // Hard nav — bypasses the Next.js soft router so the new
         // page is a fresh server render, not a stale prefetch.
-        window.location.href = '/admin-hq'
+        window.location.href = '/hq'
         return
       }
 

@@ -24,7 +24,7 @@ interface SidebarProps {
 const RESERVED_TOP = new Set([
   "leads", "signals", "tickets", "customers", "appointments", "settings", "support",
   "login", "signup", "forgot-password", "reset-password",
-  "onboarding", "admin", "admin-hq", "api",
+  "onboarding", "admin", "hq", "api",
 ]);
 
 export default function Sidebar({
@@ -118,7 +118,7 @@ export default function Sidebar({
       {isHqAdmin && (
         <div className="px-3 pt-3">
           <Link
-            href="/admin-hq"
+            href="/hq"
             className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold uppercase tracking-wider text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 hover:bg-emerald-500/20 hover:text-emerald-200 hover:border-emerald-400 transition-colors"
           >
             <Shield className="w-3.5 h-3.5 shrink-0" />

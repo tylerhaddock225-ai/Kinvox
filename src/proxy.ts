@@ -94,7 +94,8 @@ export async function proxy(request: NextRequest) {
   }
 
   // Marketing host. Anything that isn't `/` or `/apply*` is an app
-  // route that landed on the wrong subdomain — bounce to the app host.
+  // route that landed on the wrong subdomain — bounce to the app host
+  // (preserving path + query so invite/?token=… links survive).
   if (!isMarketingPath(pathname)) {
     return hostRedirect(buildUrlOnHost(request, appHostFor(request)))
   }

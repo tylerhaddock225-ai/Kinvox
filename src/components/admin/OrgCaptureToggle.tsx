@@ -3,7 +3,7 @@
 import { useOptimistic, useTransition, useState } from 'react'
 import { AlertTriangle, Radar } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
-import { updateCaptureStatus } from '@/app/(app)/(admin)/admin-hq/actions/organizations'
+import { updateCaptureStatus } from '@/app/(app)/(admin)/hq/actions/organizations'
 
 type Props = {
   orgId:           string

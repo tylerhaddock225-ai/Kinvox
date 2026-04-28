@@ -17,6 +17,15 @@ export default function LoginPage() {
     if (result?.error) {
       setError(result.error)
       setLoading(false)
+      return
+    }
+    if (result?.redirect) {
+      // Hard navigation, on purpose. See the long comment in actions.ts:
+      // Next.js 16's server-action redirect() rewrites absolute URLs to
+      // the bound interface, dropping our `app.` subdomain mid-flow.
+      // window.location.href bypasses Next's router and lets the browser
+      // resolve the URL we built against the actual Host header.
+      window.location.href = result.redirect
     }
   }
 

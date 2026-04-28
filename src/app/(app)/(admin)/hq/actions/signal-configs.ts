@@ -12,7 +12,7 @@ async function requireHqAdmin() {
 }
 
 function configsTab(orgId: string, extra = ''): string {
-  const base = `/admin-hq/organizations/${orgId}?tab=signal-configs`
+  const base = `/hq/organizations/${orgId}?tab=signal-configs`
   return extra ? `${base}&${extra}` : base
 }
 
@@ -37,7 +37,7 @@ export async function createSignalConfig(formData: FormData) {
 
   const orgId    = String(formData.get('org_id')   ?? '').trim()
   const vertical = String(formData.get('vertical') ?? '').trim()
-  if (!orgId)    redirect('/admin-hq/organizations')
+  if (!orgId)    redirect('/hq/organizations')
   if (!vertical) redirect(configsTab(orgId, 'config_error=' + encodeURIComponent('Pick a vertical')))
 
   const centerLat    = parseNumeric(String(formData.get('center_lat')  ?? ''))
@@ -63,7 +63,7 @@ export async function createSignalConfig(formData: FormData) {
     redirect(configsTab(orgId, 'config_error=' + encodeURIComponent(error.message)))
   }
 
-  revalidatePath(`/admin-hq/organizations/${orgId}`)
+  revalidatePath(`/hq/organizations/${orgId}`)
   redirect(configsTab(orgId, 'config_saved=1'))
 }
 
@@ -73,7 +73,7 @@ export async function updateSignalConfig(formData: FormData) {
   const orgId    = String(formData.get('org_id')    ?? '').trim()
   const configId = String(formData.get('config_id') ?? '').trim()
   const vertical = String(formData.get('vertical')  ?? '').trim()
-  if (!orgId || !configId) redirect('/admin-hq/organizations')
+  if (!orgId || !configId) redirect('/hq/organizations')
   if (!vertical) redirect(configsTab(orgId, 'config_error=' + encodeURIComponent('Pick a vertical')))
 
   const centerLat    = parseNumeric(String(formData.get('center_lat')   ?? ''))
@@ -100,7 +100,7 @@ export async function updateSignalConfig(formData: FormData) {
     redirect(configsTab(orgId, 'config_error=' + encodeURIComponent(error.message)))
   }
 
-  revalidatePath(`/admin-hq/organizations/${orgId}`)
+  revalidatePath(`/hq/organizations/${orgId}`)
   redirect(configsTab(orgId, 'config_saved=1'))
 }
 
@@ -109,7 +109,7 @@ export async function deleteSignalConfig(formData: FormData) {
 
   const orgId    = String(formData.get('org_id')    ?? '').trim()
   const configId = String(formData.get('config_id') ?? '').trim()
-  if (!orgId || !configId) redirect('/admin-hq/organizations')
+  if (!orgId || !configId) redirect('/hq/organizations')
 
   const { error } = await supabase
     .from('signal_configs')
@@ -121,6 +121,6 @@ export async function deleteSignalConfig(formData: FormData) {
     redirect(configsTab(orgId, 'config_error=' + encodeURIComponent(error.message)))
   }
 
-  revalidatePath(`/admin-hq/organizations/${orgId}`)
+  revalidatePath(`/hq/organizations/${orgId}`)
   redirect(configsTab(orgId, 'config_saved=1'))
 }

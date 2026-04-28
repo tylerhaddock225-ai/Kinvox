@@ -14,7 +14,7 @@ async function requireHqAdmin() {
 }
 
 function integrationsTab(orgId: string, extra = ''): string {
-  const base = `/admin-hq/organizations/${orgId}?tab=integrations-billing`
+  const base = `/hq/organizations/${orgId}?tab=integrations-billing`
   return extra ? `${base}&${extra}` : base
 }
 
@@ -43,7 +43,7 @@ export async function generateApiKey(formData: FormData) {
 
   const orgId = String(formData.get('org_id') ?? '').trim()
   const label = String(formData.get('label')  ?? '').trim() || null
-  if (!orgId) redirect('/admin-hq/organizations')
+  if (!orgId) redirect('/hq/organizations')
 
   const raw      = generateRawKey()
   const key_hash = sha256Hex(raw)
@@ -61,7 +61,7 @@ export async function generateApiKey(formData: FormData) {
     redirect(integrationsTab(orgId, 'key_error=' + encodeURIComponent(error.message)))
   }
 
-  revalidatePath(`/admin-hq/organizations/${orgId}`)
+  revalidatePath(`/hq/organizations/${orgId}`)
   // new_key lives in the URL only for the immediate redirect; the client
   // component shows it in a one-shot modal and never re-renders it.
   redirect(integrationsTab(orgId, 'new_key=' + encodeURIComponent(raw)))
@@ -72,7 +72,7 @@ export async function revokeApiKey(formData: FormData) {
 
   const orgId = String(formData.get('org_id') ?? '').trim()
   const keyId = String(formData.get('key_id') ?? '').trim()
-  if (!orgId || !keyId) redirect('/admin-hq/organizations')
+  if (!orgId || !keyId) redirect('/hq/organizations')
 
   const { error } = await supabase
     .from('organization_api_keys')
@@ -84,6 +84,6 @@ export async function revokeApiKey(formData: FormData) {
     redirect(integrationsTab(orgId, 'key_error=' + encodeURIComponent(error.message)))
   }
 
-  revalidatePath(`/admin-hq/organizations/${orgId}`)
+  revalidatePath(`/hq/organizations/${orgId}`)
   redirect(integrationsTab(orgId, 'key_revoked=1'))
 }

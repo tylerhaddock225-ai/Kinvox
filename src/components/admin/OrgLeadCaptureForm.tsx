@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type MouseEvent } from 'react'
 import { Copy, Check, ExternalLink, AlertCircle } from 'lucide-react'
-import { updateLeadMagnet } from '@/app/(app)/(admin)/admin-hq/actions/lead-magnet'
+import { updateLeadMagnet } from '@/app/(app)/(admin)/hq/actions/lead-magnet'
 
 type LeadMagnetSettings = {
   enabled?:  boolean

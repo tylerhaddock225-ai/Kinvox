@@ -34,7 +34,7 @@ async function requireHqRoleManager() {
     }>()
 
   if (!profile?.system_role) redirect('/login')
-  if (!hasHqPermission(profile, 'manage_global_roles')) redirect('/admin-hq')
+  if (!hasHqPermission(profile, 'manage_global_roles')) redirect('/hq')
 
   return supabase
 }
@@ -64,7 +64,7 @@ export async function createHqRole(
   })
   if (error) return { status: 'error', error: error.message }
 
-  revalidatePath('/admin-hq/settings/roles')
+  revalidatePath('/hq/settings/roles')
   return { status: 'success' }
 }
 
@@ -86,7 +86,7 @@ export async function updateHqRole(
     .is('organization_id', null)
   if (error) return { status: 'error', error: error.message }
 
-  revalidatePath('/admin-hq/settings/roles')
+  revalidatePath('/hq/settings/roles')
   return { status: 'success' }
 }
 
@@ -107,5 +107,5 @@ export async function deleteHqRole(formData: FormData): Promise<void> {
     .eq('id', roleId)
     .is('organization_id', null)
 
-  revalidatePath('/admin-hq/settings/roles')
+  revalidatePath('/hq/settings/roles')
 }

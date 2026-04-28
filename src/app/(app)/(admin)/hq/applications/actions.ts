@@ -19,6 +19,6 @@ export async function approveApplication(formData: FormData) {
     throw new Error(`Approve failed: ${error.message}`)
   }
 
-  revalidatePath('/admin-hq/applications')
-  revalidatePath('/admin-hq/organizations')
+  revalidatePath('/hq/applications')
+  revalidatePath('/hq/organizations')
 }

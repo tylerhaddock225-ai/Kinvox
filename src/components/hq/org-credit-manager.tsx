@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { Wallet, Plus, Zap, AlertCircle, CheckCircle2 } from 'lucide-react'
-import { addCredits, updateAutoTopUp } from '@/app/(app)/(admin)/admin-hq/actions/credits'
+import { addCredits, updateAutoTopUp } from '@/app/(app)/(admin)/hq/actions/credits'
 
 type CreditsRow = {
   balance:              number

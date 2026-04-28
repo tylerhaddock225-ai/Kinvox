@@ -25,7 +25,7 @@ function parseFeatures(raw: string): string[] {
 
 export async function updateLeadMagnet(formData: FormData) {
   const orgId       = String(formData.get('org_id')       ?? '').trim()
-  if (!orgId) redirect('/admin-hq/organizations')
+  if (!orgId) redirect('/hq/organizations')
 
   const rawSlug     = String(formData.get('slug')         ?? '').trim().toLowerCase()
   const enabled     = formData.get('enabled') === 'on'
@@ -37,7 +37,7 @@ export async function updateLeadMagnet(formData: FormData) {
   const redirectTo = (msg?: string) => {
     const qs = new URLSearchParams({ tab: 'lead-capture' })
     if (msg) qs.set('error', msg)
-    return redirect(`/admin-hq/organizations/${orgId}?${qs.toString()}`)
+    return redirect(`/hq/organizations/${orgId}?${qs.toString()}`)
   }
 
   // Empty slug → explicit "disabled" intent. Accept it and clear the column.
@@ -86,6 +86,6 @@ export async function updateLeadMagnet(formData: FormData) {
     return redirectTo(error.message)
   }
 
-  revalidatePath(`/admin-hq/organizations/${orgId}`)
-  redirect(`/admin-hq/organizations/${orgId}${tabSuffix}`)
+  revalidatePath(`/hq/organizations/${orgId}`)
+  redirect(`/hq/organizations/${orgId}${tabSuffix}`)
 }

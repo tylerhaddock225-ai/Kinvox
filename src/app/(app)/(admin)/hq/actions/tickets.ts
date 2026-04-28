@@ -52,13 +52,13 @@ export async function sendHQTicketMessage(_prev: State, formData: FormData): Pro
 
   if (error) return { status: 'error', error: error.message }
 
-  revalidatePath(`/admin-hq/tickets/${ticket_id}`)
-  revalidatePath('/admin-hq/tickets')
+  revalidatePath(`/hq/tickets/${ticket_id}`)
+  revalidatePath('/hq/tickets')
   return { status: 'success' }
 }
 
 // Thin wrapper around updateTicketStatus for inline Close buttons in the
-// grid. Kept in the admin-hq action set so the merchant action file doesn't
+// grid. Kept in the hq action set so the merchant action file doesn't
 // have to know about HQ flows.
 export async function closeHQTicket(formData: FormData): Promise<void> {
   const supabase = await createClient()
@@ -82,8 +82,8 @@ export async function closeHQTicket(formData: FormData): Promise<void> {
     .update({ status: 'closed' })
     .eq('id', ticket_id)
 
-  revalidatePath('/admin-hq/tickets')
-  revalidatePath(`/admin-hq/tickets/${ticket_id}`)
+  revalidatePath('/hq/tickets')
+  revalidatePath(`/hq/tickets/${ticket_id}`)
 }
 
 const HQ_CATEGORIES = ['bug', 'billing', 'feature_request', 'question'] as const
@@ -117,6 +117,6 @@ export async function updateHQTicketCategory(formData: FormData): Promise<void> 
     .eq('id', ticket_id)
     .eq('is_platform_support', true)
 
-  revalidatePath('/admin-hq/tickets')
-  revalidatePath(`/admin-hq/tickets/${ticket_id}`)
+  revalidatePath('/hq/tickets')
+  revalidatePath(`/hq/tickets/${ticket_id}`)
 }

@@ -94,10 +94,10 @@ export async function sendOrganizationClaimInvite(formData: FormData) {
 
   const orgId = String(formData.get('org_id') ?? '').trim()
   const email = String(formData.get('email')  ?? '').trim().toLowerCase()
-  if (!orgId) redirect('/admin-hq/organizations')
+  if (!orgId) redirect('/hq/organizations')
 
   const redirectTo = (flag: string) =>
-    redirect(`/admin-hq/organizations/${orgId}?${flag}`)
+    redirect(`/hq/organizations/${orgId}?${flag}`)
 
   if (!EMAIL_RE.test(email)) return redirectTo('claim_error=' + encodeURIComponent('Enter a valid email'))
 
@@ -133,6 +133,6 @@ export async function sendOrganizationClaimInvite(formData: FormData) {
     return redirectTo('claim_error=' + encodeURIComponent('Email delivery failed — claim still valid. Retry or resend.'))
   }
 
-  revalidatePath(`/admin-hq/organizations/${orgId}`)
+  revalidatePath(`/hq/organizations/${orgId}`)
   redirectTo('claim_sent=' + encodeURIComponent(email))
 }

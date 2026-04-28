@@ -10,7 +10,7 @@ type State =
   | null
 
 // Zero-Inference: actions bind to the caller's OWN profile.organization_id.
-// HQ admins have their own mutation path under /admin-hq and must use it;
+// HQ admins have their own mutation path under /hq and must use it;
 // an impersonating HQ admin will fail the owner/admin role check here.
 async function requireOrgAdmin(supabase: Awaited<ReturnType<typeof createClient>>) {
   const { data: { user } } = await supabase.auth.getUser()

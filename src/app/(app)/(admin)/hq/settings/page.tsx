@@ -3,7 +3,7 @@ import SettingsTabs from './SettingsTabs'
 
 export const dynamic = 'force-dynamic'
 
-// The admin-hq layout already gates on system_role \u2014 no re-check needed here.
+// The hq layout already gates on system_role \u2014 no re-check needed here.
 // Pull every setting this tab reads in one round trip and pluck by key client-side.
 export default async function AdminSettingsPage() {
   const supabase = await createClient()

@@ -18,7 +18,7 @@ export default function OrgFilters() {
   function push(next: URLSearchParams) {
     const qs = next.toString()
     startTrans(() => {
-      router.replace(qs ? `/admin-hq/organizations?${qs}` : '/admin-hq/organizations')
+      router.replace(qs ? `/hq/organizations?${qs}` : '/hq/organizations')
     })
   }
 

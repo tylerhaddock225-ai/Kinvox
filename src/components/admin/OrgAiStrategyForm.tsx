@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { Sparkles } from 'lucide-react'
-import { setOrgAiStrategy } from '@/app/(app)/(admin)/admin-hq/actions/ai-templates'
+import { setOrgAiStrategy } from '@/app/(app)/(admin)/hq/actions/ai-templates'
 import {
   getTemplateFeatures,
   resolveEnabledFeatures,

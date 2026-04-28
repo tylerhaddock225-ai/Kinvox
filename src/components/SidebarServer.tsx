@@ -11,7 +11,7 @@ export default async function SidebarServer() {
   // Resolve impersonation FIRST so the sidebar's "current org" reflects
   // the merchant the HQ admin is acting as, not the admin's own (null)
   // tenant org. Without this, navigating /leads → Dashboard falls back
-  // to "/" which sorting-hats platform_owners straight to /admin-hq,
+  // to "/" which sorting-hats platform_owners straight to /hq,
   // kicking them out of the impersonation context.
   const impersonation = await resolveImpersonation()
 

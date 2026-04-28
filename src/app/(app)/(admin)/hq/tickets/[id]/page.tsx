@@ -41,7 +41,7 @@ export default async function HQTicketDetailPage({ params }: { params: Promise<{
   const { id } = await params
   const supabase = await createClient()
 
-  // Layout (admin-hq/layout.tsx) already gates on profile.system_role,
+  // Layout (hq/layout.tsx) already gates on profile.system_role,
   // so the caller here is an HQ admin. RLS lets them read across orgs.
   const { data: ticketData } = await supabase
     .from('tickets')
@@ -70,7 +70,7 @@ export default async function HQTicketDetailPage({ params }: { params: Promise<{
     <div className="max-w-4xl mx-auto space-y-6">
       <div>
         <Link
-          href={isPlatform ? '/admin-hq/tickets?scope=platform' : '/admin-hq/tickets'}
+          href={isPlatform ? '/hq/tickets?scope=platform' : '/hq/tickets'}
           className="inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-300 transition-colors"
         >
           <ArrowLeft className="w-3.5 h-3.5" />

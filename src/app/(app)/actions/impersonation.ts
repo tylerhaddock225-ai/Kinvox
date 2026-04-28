@@ -12,7 +12,7 @@ const MAX_AGE_SECONDS = 60 * 60 * 4
 
 export async function startImpersonation(formData: FormData) {
   const orgId = String(formData.get('orgId') ?? '').trim()
-  if (!orgId) redirect('/admin-hq/organizations')
+  if (!orgId) redirect('/hq/organizations')
 
   const supabase = await createClient()
   const { data: isAdmin } = await supabase.rpc('is_admin_hq')
@@ -24,7 +24,7 @@ export async function startImpersonation(formData: FormData) {
     .select('slug')
     .eq('id', orgId)
     .single<{ slug: string | null }>()
-  if (!org?.slug) redirect('/admin-hq/organizations')
+  if (!org?.slug) redirect('/hq/organizations')
 
   const jar = await cookies()
   jar.set(IMPERSONATION_COOKIE, orgId, {
@@ -44,5 +44,5 @@ export async function stopImpersonation() {
   jar.delete(IMPERSONATION_COOKIE)
 
   revalidatePath('/', 'layout')
-  redirect('/admin-hq')
+  redirect('/hq')
 }

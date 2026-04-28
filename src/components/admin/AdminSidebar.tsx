@@ -5,8 +5,7 @@ import { usePathname } from "next/navigation";
 import { Building2, Ticket, Sparkles, CreditCard, Zap, Eye, Inbox, LayoutDashboard, Settings, LogOut, ShieldCheck } from "lucide-react";
 import { startImpersonation } from "@/app/(app)/actions/impersonation";
 import { logout } from "@/app/(app)/(auth)/actions";
-
-type SystemRole = "platform_owner" | "platform_support";
+import { getRoleLabel, type SystemRole } from "@/lib/types/auth";
 
 interface AdminSidebarProps {
   systemRole: SystemRole;
@@ -21,19 +20,19 @@ type NavItem = {
 };
 
 const baseNav: NavItem[] = [
-  { href: "/admin-hq",               label: "Dashboard",     icon: LayoutDashboard, exact: true },
-  { href: "/admin-hq/organizations", label: "Organizations", icon: Building2 },
-  { href: "/admin-hq/applications",  label: "Applications",  icon: Inbox },
-  { href: "/admin-hq/tickets",       label: "Tickets",       icon: Ticket },
-  { href: "/admin-hq/ai-templates",  label: "AI Templates",  icon: Sparkles },
+  { href: "/hq",               label: "Dashboard",     icon: LayoutDashboard, exact: true },
+  { href: "/hq/organizations", label: "Organizations", icon: Building2 },
+  { href: "/hq/applications",  label: "Applications",  icon: Inbox },
+  { href: "/hq/tickets",       label: "Tickets",       icon: Ticket },
+  { href: "/hq/ai-templates",  label: "AI Templates",  icon: Sparkles },
 ];
 
 const ownerOnlyNav: NavItem[] = [
-  { href: "/admin-hq/billing",        label: "Billing", icon: CreditCard },
-  { href: "/admin-hq/settings/roles", label: "Roles",   icon: ShieldCheck },
+  { href: "/hq/billing",        label: "Billing", icon: CreditCard },
+  { href: "/hq/settings/roles", label: "Roles",   icon: ShieldCheck },
 ];
 
-const ORG_DETAIL_RE = /^\/admin-hq\/organizations\/([^/]+)\/?$/;
+const ORG_DETAIL_RE = /^\/hq\/organizations\/([^/]+)\/?$/;
 
 export default function AdminSidebar({ systemRole }: AdminSidebarProps) {
   const pathname = usePathname();
@@ -57,7 +56,7 @@ export default function AdminSidebar({ systemRole }: AdminSidebarProps) {
   // Settings sits in the footer with a violet active state to distinguish it
   // visually from the emerald primary nav — spacing/hover match the merchant
   // sidebar's footer Settings link.
-  const settingsHref = "/admin-hq/settings";
+  const settingsHref = "/hq/settings";
   const settingsActive =
     pathname === settingsHref || pathname.startsWith(settingsHref + "/");
   const settingsClass = `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors border-l-2 ${
@@ -76,7 +75,7 @@ export default function AdminSidebar({ systemRole }: AdminSidebarProps) {
         <div className="mt-1 text-lg font-semibold text-gray-100">Command Center</div>
         <div className="mt-3 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-pvx-bg border border-pvx-border text-[10px] font-medium text-gray-300 uppercase tracking-wider">
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-          {systemRole === "platform_owner" ? "Platform Owner" : "Platform Support"}
+          {getRoleLabel(systemRole)}
         </div>
       </div>
 

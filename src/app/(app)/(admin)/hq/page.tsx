@@ -1,8 +1,7 @@
 import Link from 'next/link'
 import { Building2, LifeBuoy, Users, Activity } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
-
-type SystemRole = 'platform_owner' | 'platform_support'
+import { getRoleLabel, type SystemRole } from '@/lib/types/auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -47,7 +46,7 @@ export default async function AdminHqOverviewPage() {
   ])
 
   const systemRole           = profileResp.data?.system_role ?? 'platform_support'
-  const roleLabel            = systemRole === 'platform_owner' ? 'Platform Owner' : 'Platform Support'
+  const roleLabel            = getRoleLabel(systemRole)
   const activeOrgsCount      = activeOrgsResp.count      ?? 0
   const platformLeadsCount   = platformLeadsResp.count   ?? 0
   const pendingHQSupportCount = pendingHQSupportResp.count ?? 0
@@ -71,7 +70,7 @@ export default async function AdminHqOverviewPage() {
           label="Organizations"
           value={activeOrgsCount.toLocaleString()}
           icon={Building2}
-          href="/admin-hq/organizations"
+          href="/hq/organizations"
           cta="Manage organizations"
           hint="active"
         />
@@ -79,7 +78,7 @@ export default async function AdminHqOverviewPage() {
           label="Platform Leads"
           value={platformLeadsCount.toLocaleString()}
           icon={Users}
-          href="/admin-hq/tickets"
+          href="/hq/tickets"
           cta="Explore"
           hint="all organizations"
         />
@@ -87,7 +86,7 @@ export default async function AdminHqOverviewPage() {
           label="Pending HQ Support"
           value={pendingHQSupportCount.toLocaleString()}
           icon={LifeBuoy}
-          href="/admin-hq/tickets?scope=platform"
+          href="/hq/tickets?scope=platform"
           cta="Triage queue"
           hint="open requests"
         />

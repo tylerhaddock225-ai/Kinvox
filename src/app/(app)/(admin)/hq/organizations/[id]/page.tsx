@@ -8,8 +8,8 @@ import {
   archiveOrganization,
   restoreOrganization,
   setOrgGeofence,
-} from '@/app/(app)/(admin)/admin-hq/actions/organizations'
-import { sendOrganizationClaimInvite } from '@/app/(app)/(admin)/admin-hq/actions/claim'
+} from '@/app/(app)/(admin)/hq/actions/organizations'
+import { sendOrganizationClaimInvite } from '@/app/(app)/(admin)/hq/actions/claim'
 import ConfirmButton from '@/components/admin/ConfirmButton'
 import OrgAiStrategyForm from '@/components/admin/OrgAiStrategyForm'
 import OrgLeadCaptureForm from '@/components/admin/OrgLeadCaptureForm'
@@ -175,7 +175,7 @@ export default async function AdminOrgDetailPage({
   return (
     <div className="space-y-8 max-w-3xl">
       <Link
-        href="/admin-hq/organizations"
+        href="/hq/organizations"
         className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-400 hover:text-gray-200 transition-colors"
       >
         <ArrowLeft className="w-3.5 h-3.5" />
@@ -204,8 +204,8 @@ export default async function AdminOrgDetailPage({
         {TABS.map(({ key, label, icon: Icon }) => {
           const active = key === activeTab
           const href = key === 'details'
-            ? `/admin-hq/organizations/${org.id}`
-            : `/admin-hq/organizations/${org.id}?tab=${key}`
+            ? `/hq/organizations/${org.id}`
+            : `/hq/organizations/${org.id}?tab=${key}`
           return (
             <Link
               key={key}
