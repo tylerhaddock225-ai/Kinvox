@@ -1,6 +1,6 @@
 'use client'
 
-import { useActionState, useEffect, useMemo, useRef, useState } from 'react'
+import { useActionState, useEffect, useMemo, useState } from 'react'
 import { Sparkles, CheckCircle2, AlertCircle } from 'lucide-react'
 import { updateLeadMagnetFeatures } from '@/app/(app)/(dashboard)/actions/lead-support'
 
@@ -25,10 +25,15 @@ const TEXTAREA    = 'w-full rounded-lg border border-gray-700 bg-gray-800 px-3 p
 export default function LeadMagnetFeaturesEditor({ initial }: Props) {
   // Local text state lets us drive the dirty/saved indicator and the
   // inline "X / 50" counter without round-tripping through the server.
+  // `lastSaved` MUST be state, not a ref: the success transition has to
+  // re-render so isDirty flips to false and the "Saved" UI appears in
+  // one click. A ref's mutation is invisible to the render pipeline,
+  // which previously left the post-success render reading isDirty=true
+  // and forced the user to click Save twice to see confirmation.
   const initialText = initial.join('\n')
-  const [text, setText] = useState<string>(initialText)
-  const lastSavedRef = useRef<string>(initialText)
-  const isDirty = text !== lastSavedRef.current
+  const [text, setText]           = useState<string>(initialText)
+  const [lastSaved, setLastSaved] = useState<string>(initialText)
+  const isDirty = text !== lastSaved
 
   const linesCount = useMemo(
     () => text.split('\n').map((l) => l.trim()).filter(Boolean).length,
@@ -45,7 +50,7 @@ export default function LeadMagnetFeaturesEditor({ initial }: Props) {
   )
 
   useEffect(() => {
-    if (state?.status === 'ok') lastSavedRef.current = text
+    if (state?.status === 'ok') setLastSaved(text)
     // Only re-snapshot when the action confirms success; intentionally
     // not depending on `text` here so we don't snapshot mid-edit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
