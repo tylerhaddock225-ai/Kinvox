@@ -222,3 +222,51 @@ export async function updateLeadQuestions(_prev: State, formData: FormData): Pro
       : 'Custom questions cleared.',
   }
 }
+
+// Hard cap mirrored from the (now retired) HQ parseFeatures so the org-side
+// editor produces the same shape HQ used to write. Keeps /l/[slug] rendering
+// unchanged across the move.
+const MAX_FEATURES = 50
+
+type FeaturesUpdateResult =
+  | { status: 'ok' }
+  | { status: 'error'; error: string }
+
+/**
+ * Org-side write path for the lead-magnet "What we offer" bullet list.
+ *
+ * Sprint 3 split: HQ owns slug/enabled/headline/website; the Organization
+ * owns features + custom questions. Both surfaces target the same jsonb
+ * column, so the merge happens server-side via merge_lead_magnet_settings —
+ * concurrent HQ + org saves cannot clobber each other.
+ *
+ * Zero-Inference: organization_id is resolved from the caller's session
+ * via requireOrgAdmin. The form payload is parsed but never trusted for
+ * tenant scoping.
+ */
+export async function updateLeadMagnetFeatures(
+  formData: FormData,
+): Promise<FeaturesUpdateResult> {
+  const supabase = await createClient()
+  const guard = await requireOrgAdmin(supabase)
+  if (!guard.ok) return { status: 'error', error: guard.error }
+
+  const raw = String(formData.get('features') ?? '')
+  const parsed = raw
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+
+  if (parsed.length > MAX_FEATURES) {
+    return { status: 'error', error: `Maximum ${MAX_FEATURES} features` }
+  }
+
+  const { error: writeErr } = await supabase.rpc('merge_lead_magnet_settings', {
+    p_org_id: guard.orgId,
+    p_patch:  { features: parsed },
+  })
+  if (writeErr) return { status: 'error', error: writeErr.message }
+
+  revalidatePath('/[orgSlug]/settings/team', 'page')
+  return { status: 'ok' }
+}

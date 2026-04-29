@@ -46,7 +46,6 @@ export default function OrgLeadCaptureForm({
     [landingBase, normalizedSlug, isSlugEmpty],
   )
 
-  const featuresText = (settings?.features ?? []).join('\n')
   const enabledInDb  = !!settings?.enabled && !!slug
   const disabledBadge = !slug
     ? { label: 'Disabled — no slug', tone: 'gray' as const }
@@ -133,18 +132,9 @@ export default function OrgLeadCaptureForm({
           />
         </Field>
 
-        <Field
-          label="Features"
-          hint="One per line. These render as bullet points on the lead-magnet page."
-        >
-          <textarea
-            name="features"
-            defaultValue={featuresText}
-            rows={4}
-            placeholder={'Free eligibility check\nSame-day installer match\n...'}
-            className="w-full rounded-md bg-pvx-surface border border-pvx-border px-3 py-2 text-sm text-gray-100 font-mono focus:border-violet-500/60 focus:outline-none focus:ring-1 focus:ring-violet-500/40"
-          />
-        </Field>
+        <p className="text-[11px] text-gray-500">
+          Page features are now managed by the Organization in their Lead Support settings.
+        </p>
 
         <Field
           label="Website URL"

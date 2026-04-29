@@ -22,6 +22,7 @@ import {
   setEngagementMode,
 } from '@/app/(app)/(dashboard)/actions/lead-support'
 import LeadQuestionManager from '@/components/settings/LeadQuestionManager'
+import LeadMagnetFeaturesEditor from '@/components/settings/LeadMagnetFeaturesEditor'
 import type { LeadQuestion } from '@/lib/lead-questions'
 
 export type LeadSupportState = {
@@ -30,6 +31,7 @@ export type LeadSupportState = {
   cancel_at_period_end:   boolean
   current_period_end:     string | null
   custom_lead_questions:  LeadQuestion[]
+  lead_magnet_features:   string[]
   signal_engagement_mode: 'ai_draft' | 'manual'
 }
 
@@ -441,6 +443,9 @@ export default function LeadSupportTab({ state: initialState }: { state: LeadSup
           </div>
         )}
       </div>
+
+      {/* Page Features (org-side editor; HQ retains slug/enabled/headline/website) */}
+      <LeadMagnetFeaturesEditor initial={initialState.lead_magnet_features} />
 
       {/* Lead Questionnaire */}
       <LeadQuestionManager initial={initialState.custom_lead_questions} />

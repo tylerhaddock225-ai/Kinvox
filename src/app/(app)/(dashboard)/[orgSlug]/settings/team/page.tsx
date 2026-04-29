@@ -67,7 +67,7 @@ export default async function TeamSettingsPage({
       .order('name'),
     supabase
       .from('organizations')
-      .select('inbound_email_address, verified_support_email, verified_support_email_confirmed_at, ai_listening_enabled, cancel_at_period_end, current_period_end, custom_lead_questions, signal_engagement_mode, vertical')
+      .select('inbound_email_address, verified_support_email, verified_support_email_confirmed_at, ai_listening_enabled, cancel_at_period_end, current_period_end, custom_lead_questions, signal_engagement_mode, vertical, lead_magnet_settings')
       .eq('id', orgId)
       .single(),
     supabase
@@ -127,12 +127,24 @@ export default async function TeamSettingsPage({
     verified_support_email_confirmed_at: orgRes.data?.verified_support_email_confirmed_at ?? null,
   }
 
+  // The features bullet list is owned by the Organization (org-side editor)
+  // post-Sprint-3; HQ no longer writes this key. Pull from the same jsonb
+  // the public /l/[slug] page reads from so the UI is always in sync.
+  const leadMagnetSettings = (orgRes.data?.lead_magnet_settings ?? null) as
+    | { features?: unknown }
+    | null
+  const featuresRaw = leadMagnetSettings?.features
+  const leadMagnetFeatures: string[] = Array.isArray(featuresRaw)
+    ? featuresRaw.filter((f): f is string => typeof f === 'string')
+    : []
+
   const leadSupport = {
     ai_listening_enabled:   orgRes.data?.ai_listening_enabled   ?? true,
     balance:                creditsRow?.balance                 ?? 0,
     cancel_at_period_end:   orgRes.data?.cancel_at_period_end   ?? false,
     current_period_end:     orgRes.data?.current_period_end     ?? null,
     custom_lead_questions:  normalizeLeadQuestions(orgRes.data?.custom_lead_questions),
+    lead_magnet_features:   leadMagnetFeatures,
     signal_engagement_mode: (orgRes.data?.signal_engagement_mode ?? 'ai_draft') as 'ai_draft' | 'manual',
   }
 

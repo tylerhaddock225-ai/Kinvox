@@ -15,14 +15,6 @@ async function requireAdmin() {
   return supabase
 }
 
-function parseFeatures(raw: string): string[] {
-  return raw
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .slice(0, 50) // hard cap — an org listing 50+ features on a lead page is a UX problem
-}
-
 export async function updateLeadMagnet(formData: FormData) {
   const orgId       = String(formData.get('org_id')       ?? '').trim()
   if (!orgId) redirect('/hq/organizations')
@@ -30,7 +22,6 @@ export async function updateLeadMagnet(formData: FormData) {
   const rawSlug     = String(formData.get('slug')         ?? '').trim().toLowerCase()
   const enabled     = formData.get('enabled') === 'on'
   const headline    = String(formData.get('headline')     ?? '').trim()
-  const featuresTxt = String(formData.get('features')     ?? '')
   const websiteUrl  = String(formData.get('website_url')  ?? '').trim()
 
   const tabSuffix = '?tab=lead-capture'
@@ -61,19 +52,33 @@ export async function updateLeadMagnet(formData: FormData) {
     }
   }
 
-  const settings = {
-    enabled: enabled && !!slug,        // no slug ⇒ implicitly disabled
-    headline: headline || 'Check your eligibility',
-    features: parseFeatures(featuresTxt),
-  }
-
   const supabase = await requireAdmin()
+
+  // Sprint 3 split: HQ owns slug/enabled/headline; the Organization owns
+  // `features` via their own Lead Support editor. The jsonb merge happens
+  // server-side via merge_lead_magnet_settings — concurrent HQ + org saves
+  // cannot clobber each other's keys.
+  const { error: rpcErr } = await supabase.rpc('merge_lead_magnet_settings', {
+    p_org_id: orgId,
+    p_patch:  {
+      enabled:  enabled && !!slug,        // no slug ⇒ implicitly disabled
+      headline: headline || 'Check your eligibility',
+    },
+  })
+  if (rpcErr) return redirectTo(rpcErr.message)
+
+  // Top-level columns (not inside the jsonb) still need a normal UPDATE.
+  // Trade-off: the RPC and this UPDATE are not transactional with each
+  // other — if this fails after the RPC succeeds, the jsonb has the new
+  // headline/enabled but slug/website are stale. Same partial-failure
+  // surface area the previous one-write code had (mid-statement crash);
+  // not worse. If we ever need true atomicity, fold these columns into
+  // the RPC signature.
   const { error } = await supabase
     .from('organizations')
     .update({
-      lead_magnet_slug:     slug,
-      lead_magnet_settings: settings,
-      website_url:          normalizedWebsite,
+      lead_magnet_slug: slug,
+      website_url:      normalizedWebsite,
     })
     .eq('id', orgId)
 

@@ -24,6 +24,7 @@
 import { ServerClient } from 'postmark'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { geocodeAddress, haversineMiles } from '@/lib/geo'
+import { isLeadCaptureLive } from '@/lib/lead-magnet'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const UUID_RE  = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -44,6 +45,8 @@ type OrgRow = {
   deleted_at:                          string | null
   verified_support_email:              string | null
   verified_support_email_confirmed_at: string | null
+  feature_flags:                       Record<string, unknown> | null
+  subscription_status:                 string | null
 }
 
 export async function captureLeadAction(
@@ -85,14 +88,14 @@ export async function captureLeadAction(
 
   const { data: org, error: orgErr } = await supabase
     .from('organizations')
-    .select('id, name, owner_id, latitude, longitude, signal_radius, lead_magnet_settings, deleted_at, verified_support_email, verified_support_email_confirmed_at')
+    .select('id, name, owner_id, latitude, longitude, signal_radius, lead_magnet_settings, deleted_at, verified_support_email, verified_support_email_confirmed_at, feature_flags, subscription_status')
     .ilike('lead_magnet_slug', slug)
     .is('deleted_at', null)
     .maybeSingle<OrgRow>()
 
   if (orgErr) return { status: 'error', error: 'Lookup failed' }
   if (!org)   return { status: 'error', error: 'This landing page is not available' }
-  if (!org.lead_magnet_settings?.enabled) {
+  if (!isLeadCaptureLive(org)) {
     return { status: 'error', error: 'This landing page is not available' }
   }
 

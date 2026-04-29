@@ -3,6 +3,7 @@ import { Check, ExternalLink } from 'lucide-react'
 import { createAdminClient } from '@/lib/supabase/admin'
 import LeadCaptureLandingForm from './LeadCaptureLandingForm'
 import { normalizeLeadQuestions } from '@/lib/lead-questions'
+import { isLeadCaptureLive } from '@/lib/lead-magnet'
 
 export const dynamic = 'force-dynamic'
 
@@ -19,6 +20,8 @@ type Org = {
   lead_magnet_settings:  Settings | null
   website_url:           string | null
   custom_lead_questions: unknown
+  feature_flags:         Record<string, unknown> | null
+  subscription_status:   string | null
 }
 
 // If the merchant opted into a feature that resembles a grant screener,
@@ -56,15 +59,16 @@ export default async function LeadMagnetPage({
   const supabase = createAdminClient()
   const { data: org } = await supabase
     .from('organizations')
-    .select('id, name, lead_magnet_slug, lead_magnet_settings, website_url, custom_lead_questions')
+    .select('id, name, lead_magnet_slug, lead_magnet_settings, website_url, custom_lead_questions, feature_flags, subscription_status')
     .ilike('lead_magnet_slug', slug)
     .is('deleted_at', null)
     .single<Org>()
 
   if (!org) notFound()
+  if (!org.lead_magnet_slug) notFound()
+  if (!isLeadCaptureLive(org)) notFound()
 
   const settings = org.lead_magnet_settings ?? {}
-  if (!settings.enabled || !org.lead_magnet_slug) notFound()
 
   const headline = settings.headline || 'Check your eligibility'
   const features = Array.isArray(settings.features) ? settings.features : []
