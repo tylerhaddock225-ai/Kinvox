@@ -92,5 +92,10 @@ export async function updateLeadMagnet(formData: FormData) {
   }
 
   revalidatePath(`/hq/organizations/${orgId}`)
+  // Bust the public lead-magnet page so the next visit re-renders with
+  // the new headline / enabled toggle even if Vercel's CDN or the App
+  // Router data cache held a snapshot. Skipping when slug is null —
+  // there is no /l/<null> URL to revalidate.
+  if (slug) revalidatePath(`/l/${slug}`, 'page')
   redirect(`/hq/organizations/${orgId}${tabSuffix}`)
 }

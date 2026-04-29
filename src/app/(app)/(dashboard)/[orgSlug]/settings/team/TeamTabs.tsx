@@ -635,8 +635,10 @@ export default function TeamTabs({
 
   return (
     <div className="space-y-6">
-      {/* Tab bar */}
-      <div className="flex gap-1 border-b border-pvx-border">
+      {/* Tab bar — sticky below the dashboard header (z-30 at top:0).
+          top-16 clears the header's ~64px height; bg + backdrop mask
+          content scrolling underneath. */}
+      <div className="sticky top-16 z-20 flex gap-1 border-b border-pvx-border bg-pvx-bg/80 backdrop-blur">
         {TABS.map(tab => (
           <button
             key={tab.id}

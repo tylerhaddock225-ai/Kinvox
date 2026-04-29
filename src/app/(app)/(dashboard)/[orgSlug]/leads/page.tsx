@@ -27,6 +27,8 @@ type SearchParams = Promise<{
   source?: string
 }>
 
+type RouteParams = Promise<{ orgSlug: string }>
+
 function pickStatus(v: string | undefined): Lead['status'] | null {
   if (!v) return null
   const allowed: Lead['status'][] = ['new', 'contacted', 'qualified', 'lost', 'converted']
@@ -39,9 +41,16 @@ function pickSource(v: string | undefined): NonNullable<Lead['source']> | null {
   return (allowed as string[]).includes(v) ? (v as NonNullable<Lead['source']>) : null
 }
 
-export default async function LeadsPage({ searchParams }: { searchParams: SearchParams }) {
-  const params   = await searchParams
-  const supabase = await createClient()
+export default async function LeadsPage({
+  params,
+  searchParams,
+}: {
+  params:       RouteParams
+  searchParams: SearchParams
+}) {
+  const { orgSlug } = await params
+  const sp          = await searchParams
+  const supabase    = await createClient()
 
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
@@ -63,9 +72,9 @@ export default async function LeadsPage({ searchParams }: { searchParams: Search
     : profile?.organization_id ?? null
   if (!effectiveOrgId) redirect('/onboarding')
 
-  const q      = params.q?.trim() ?? ''
-  const status = pickStatus(params.status)
-  const source = pickSource(params.source)
+  const q      = sp.q?.trim() ?? ''
+  const status = pickStatus(sp.status)
+  const source = pickSource(sp.source)
 
   let query = supabase
     .from('leads')
@@ -123,7 +132,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Search
             </thead>
             <tbody className="divide-y divide-pvx-border">
               {rows.map(lead => (
-                <LeadRow key={lead.id} id={lead.id}>
+                <LeadRow key={lead.id} orgSlug={orgSlug} id={lead.id}>
                   <td className="pl-6 pr-3 py-3 text-xs">
                     <CopyId id={lead.display_id} />
                   </td>

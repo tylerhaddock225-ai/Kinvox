@@ -268,5 +268,19 @@ export async function updateLeadMagnetFeatures(
   if (writeErr) return { status: 'error', error: writeErr.message }
 
   revalidatePath('/[orgSlug]/settings/team', 'page')
+
+  // Public lead-magnet page is force-dynamic, but Vercel's CDN and the
+  // App Router data cache can still serve a stale RSC payload to the
+  // visitor's tab. Explicitly bust the public surface so the next visit
+  // re-renders with the new features.
+  const { data: slugRow } = await supabase
+    .from('organizations')
+    .select('lead_magnet_slug')
+    .eq('id', guard.orgId)
+    .maybeSingle<{ lead_magnet_slug: string | null }>()
+  if (slugRow?.lead_magnet_slug) {
+    revalidatePath(`/l/${slugRow.lead_magnet_slug}`, 'page')
+  }
+
   return { status: 'ok' }
 }
