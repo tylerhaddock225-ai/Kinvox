@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
+import { getOrgContext } from '@/lib/auth-context'
 import { normalizeLeadQuestions, MAX_QUESTIONS } from '@/lib/lead-questions'
 
 type State =
@@ -9,36 +10,39 @@ type State =
   | { status: 'error';   error: string }
   | null
 
-// Zero-Inference: actions bind to the caller's OWN profile.organization_id.
-// HQ admins have their own mutation path under /hq and must use it;
-// an impersonating HQ admin will fail the owner/admin role check here.
+// Zero-Inference, impersonation-aware: actions write to getOrgContext()'s
+// effectiveOrgId — the impersonated org for HQ admins acting via the
+// impersonation cookie, otherwise the caller's own profile organization.
+// HQ admins are allowed to mutate via these actions while impersonating
+// because features + custom questions are owned by the Organization (not
+// HQ) post-Sprint-3 and have no /hq mutation path. Real tenants must be
+// owner OR have role='admin' on their effective org, same as before.
 async function requireOrgAdmin(supabase: Awaited<ReturnType<typeof createClient>>) {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { ok: false as const, error: 'Not authenticated' }
+  const ctx = await getOrgContext()
+  if (!ctx)                  return { ok: false as const, error: 'Not authenticated' }
+  if (!ctx.effectiveOrgId)   return { ok: false as const, error: 'No organization' }
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('organization_id, role')
-    .eq('id', user.id)
-    .single<{ organization_id: string | null; role: string | null }>()
-
-  if (!profile?.organization_id) return { ok: false as const, error: 'No organization' }
+  // Impersonation cookie is gated on is_admin_hq() inside resolveImpersonation,
+  // so reaching here under impersonation means HQ access is established.
+  // Skip the owner/role check; the impersonated org is the write target.
+  if (ctx.impersonation.active) {
+    return { ok: true as const, userId: ctx.user.id, orgId: ctx.effectiveOrgId }
+  }
 
   const { data: org } = await supabase
     .from('organizations')
-    .select('id, owner_id')
-    .eq('id', profile.organization_id)
-    .single<{ id: string; owner_id: string }>()
-
+    .select('owner_id')
+    .eq('id', ctx.effectiveOrgId)
+    .single<{ owner_id: string }>()
   if (!org) return { ok: false as const, error: 'Organization not found' }
 
-  const isOwner = org.owner_id === user.id
-  const isAdmin = profile.role === 'admin'
+  const isOwner = org.owner_id === ctx.user.id
+  const isAdmin = ctx.profile.role === 'admin'
   if (!isOwner && !isAdmin) {
     return { ok: false as const, error: 'You do not have permission to change these settings' }
   }
 
-  return { ok: true as const, userId: user.id, orgId: org.id }
+  return { ok: true as const, userId: ctx.user.id, orgId: ctx.effectiveOrgId }
 }
 
 export async function setEngagementMode(_prev: State, formData: FormData): Promise<State> {
@@ -247,42 +251,25 @@ type FeaturesUpdateResult =
 export async function updateLeadMagnetFeatures(
   formData: FormData,
 ): Promise<FeaturesUpdateResult> {
-  // DIAGNOSTIC: trace silent-save bug. Remove with the fix.
-  console.log('[updateLeadMagnetFeatures] invoked')
-  console.log('[updateLeadMagnetFeatures] formData entries:', Array.from(formData.entries()))
-
   const supabase = await createClient()
   const guard = await requireOrgAdmin(supabase)
-  console.log('[updateLeadMagnetFeatures] guard result:', JSON.stringify(guard))
-  if (!guard.ok) {
-    console.log('[updateLeadMagnetFeatures] guard FAILED, returning error:', guard.error)
-    return { status: 'error', error: guard.error }
-  }
+  if (!guard.ok) return { status: 'error', error: guard.error }
 
   const raw = String(formData.get('features') ?? '')
-  console.log('[updateLeadMagnetFeatures] raw features field:', JSON.stringify(raw))
-
   const parsed = raw
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean)
-  console.log('[updateLeadMagnetFeatures] parsed features array:', JSON.stringify(parsed))
 
   if (parsed.length > MAX_FEATURES) {
-    console.log('[updateLeadMagnetFeatures] OVER MAX_FEATURES, returning error')
     return { status: 'error', error: `Maximum ${MAX_FEATURES} features` }
   }
 
-  console.log('[updateLeadMagnetFeatures] calling RPC orgId:', guard.orgId, 'patch:', JSON.stringify({ features: parsed }))
   const { error: writeErr } = await supabase.rpc('merge_lead_magnet_settings', {
     p_org_id: guard.orgId,
     p_patch:  { features: parsed },
   })
-  console.log('[updateLeadMagnetFeatures] RPC result writeErr:', JSON.stringify(writeErr))
-  if (writeErr) {
-    console.log('[updateLeadMagnetFeatures] RPC errored, returning error')
-    return { status: 'error', error: writeErr.message }
-  }
+  if (writeErr) return { status: 'error', error: writeErr.message }
 
   revalidatePath('/[orgSlug]/settings/team', 'page')
 
@@ -290,17 +277,14 @@ export async function updateLeadMagnetFeatures(
   // App Router data cache can still serve a stale RSC payload to the
   // visitor's tab. Explicitly bust the public surface so the next visit
   // re-renders with the new features.
-  const { data: slugRow, error: slugErr } = await supabase
+  const { data: slugRow } = await supabase
     .from('organizations')
     .select('lead_magnet_slug')
     .eq('id', guard.orgId)
     .maybeSingle<{ lead_magnet_slug: string | null }>()
-  console.log('[updateLeadMagnetFeatures] slug lookup result:', JSON.stringify({ slugRow, slugErr }))
   if (slugRow?.lead_magnet_slug) {
     revalidatePath(`/l/${slugRow.lead_magnet_slug}`, 'page')
-    console.log('[updateLeadMagnetFeatures] revalidated /l/' + slugRow.lead_magnet_slug)
   }
 
-  console.log('[updateLeadMagnetFeatures] returning ok')
   return { status: 'ok' }
 }
