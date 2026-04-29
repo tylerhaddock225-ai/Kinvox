@@ -247,25 +247,42 @@ type FeaturesUpdateResult =
 export async function updateLeadMagnetFeatures(
   formData: FormData,
 ): Promise<FeaturesUpdateResult> {
+  // DIAGNOSTIC: trace silent-save bug. Remove with the fix.
+  console.log('[updateLeadMagnetFeatures] invoked')
+  console.log('[updateLeadMagnetFeatures] formData entries:', Array.from(formData.entries()))
+
   const supabase = await createClient()
   const guard = await requireOrgAdmin(supabase)
-  if (!guard.ok) return { status: 'error', error: guard.error }
+  console.log('[updateLeadMagnetFeatures] guard result:', JSON.stringify(guard))
+  if (!guard.ok) {
+    console.log('[updateLeadMagnetFeatures] guard FAILED, returning error:', guard.error)
+    return { status: 'error', error: guard.error }
+  }
 
   const raw = String(formData.get('features') ?? '')
+  console.log('[updateLeadMagnetFeatures] raw features field:', JSON.stringify(raw))
+
   const parsed = raw
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean)
+  console.log('[updateLeadMagnetFeatures] parsed features array:', JSON.stringify(parsed))
 
   if (parsed.length > MAX_FEATURES) {
+    console.log('[updateLeadMagnetFeatures] OVER MAX_FEATURES, returning error')
     return { status: 'error', error: `Maximum ${MAX_FEATURES} features` }
   }
 
+  console.log('[updateLeadMagnetFeatures] calling RPC orgId:', guard.orgId, 'patch:', JSON.stringify({ features: parsed }))
   const { error: writeErr } = await supabase.rpc('merge_lead_magnet_settings', {
     p_org_id: guard.orgId,
     p_patch:  { features: parsed },
   })
-  if (writeErr) return { status: 'error', error: writeErr.message }
+  console.log('[updateLeadMagnetFeatures] RPC result writeErr:', JSON.stringify(writeErr))
+  if (writeErr) {
+    console.log('[updateLeadMagnetFeatures] RPC errored, returning error')
+    return { status: 'error', error: writeErr.message }
+  }
 
   revalidatePath('/[orgSlug]/settings/team', 'page')
 
@@ -273,14 +290,17 @@ export async function updateLeadMagnetFeatures(
   // App Router data cache can still serve a stale RSC payload to the
   // visitor's tab. Explicitly bust the public surface so the next visit
   // re-renders with the new features.
-  const { data: slugRow } = await supabase
+  const { data: slugRow, error: slugErr } = await supabase
     .from('organizations')
     .select('lead_magnet_slug')
     .eq('id', guard.orgId)
     .maybeSingle<{ lead_magnet_slug: string | null }>()
+  console.log('[updateLeadMagnetFeatures] slug lookup result:', JSON.stringify({ slugRow, slugErr }))
   if (slugRow?.lead_magnet_slug) {
     revalidatePath(`/l/${slugRow.lead_magnet_slug}`, 'page')
+    console.log('[updateLeadMagnetFeatures] revalidated /l/' + slugRow.lead_magnet_slug)
   }
 
+  console.log('[updateLeadMagnetFeatures] returning ok')
   return { status: 'ok' }
 }
