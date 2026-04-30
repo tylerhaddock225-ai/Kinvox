@@ -25,6 +25,9 @@ import { ServerClient } from 'postmark'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { geocodeAddress, haversineMiles } from '@/lib/geo'
 import { isLeadCaptureLive } from '@/lib/lead-magnet'
+import { sendOrgTransactionalEmail } from '@/lib/email/send-org-email'
+import { renderLeadConfirmationEmail } from '@/lib/email/templates/lead-confirmation'
+import { normalizeLeadQuestions, type LeadQuestion } from '@/lib/lead-questions'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const UUID_RE  = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -47,6 +50,8 @@ type OrgRow = {
   verified_support_email_confirmed_at: string | null
   feature_flags:                       Record<string, unknown> | null
   subscription_status:                 string | null
+  custom_lead_questions:               unknown
+  confirmation_email_template:         { subject?: string | null; body?: string | null } | null
 }
 
 export async function captureLeadAction(
@@ -88,7 +93,7 @@ export async function captureLeadAction(
 
   const { data: org, error: orgErr } = await supabase
     .from('organizations')
-    .select('id, name, owner_id, latitude, longitude, signal_radius, lead_magnet_settings, deleted_at, verified_support_email, verified_support_email_confirmed_at, feature_flags, subscription_status')
+    .select('id, name, owner_id, latitude, longitude, signal_radius, lead_magnet_settings, deleted_at, verified_support_email, verified_support_email_confirmed_at, feature_flags, subscription_status, custom_lead_questions, confirmation_email_template')
     .ilike('lead_magnet_slug', slug)
     .is('deleted_at', null)
     .maybeSingle<OrgRow>()
@@ -227,9 +232,9 @@ export async function captureLeadAction(
     }
   }
 
-  // Notification: tells the merchant about the conversion. Sprint 3 copy:
-  // form-captured leads are confirmed conversions, not paywall teasers,
-  // so the email is celebratory + actionable, not a unlock-CTA.
+  // Notification: tells the Organization about the conversion. Sprint 3
+  // copy: form-captured leads are confirmed conversions, not paywall
+  // teasers, so the email is celebratory + actionable, not a unlock-CTA.
   await sendLeadAlertEmail({
     org,
     geofence,
@@ -239,7 +244,80 @@ export async function captureLeadAction(
     appointmentAt: appointmentBooked ? apptIso : null,
   })
 
+  // Customer-facing confirmation. Non-fatal — the lead is already
+  // captured, the Organization already has its alert; the only loss
+  // here is the prospect's acknowledgment, which can be retried/resent
+  // out-of-band. Failures are logged inside the helper.
+  const customAnswersWithLabels = labelCustomAnswers(
+    customAnswers,
+    org.custom_lead_questions,
+  )
+  const overrideTemplate = org.confirmation_email_template
+    ? {
+        subject: org.confirmation_email_template.subject ?? null,
+        body:    org.confirmation_email_template.body    ?? null,
+      }
+    : null
+  const rendered = renderLeadConfirmationEmail({
+    orgName:         org.name,
+    firstName:       firstName || 'there',
+    serviceAddress:  address,
+    phone,
+    appointmentTime: appointmentBooked ? formatAppointmentTime(apptIso) : null,
+    customAnswers:   customAnswersWithLabels,
+    override:        overrideTemplate,
+  })
+  const confirmationResult = await sendOrgTransactionalEmail({
+    org,
+    to:       email,
+    subject:  rendered.subject,
+    htmlBody: rendered.htmlBody,
+    textBody: rendered.textBody,
+    tag:      'lead-confirmation',
+  })
+  if (!confirmationResult.ok) {
+    console.error(`[lead-capture] confirmation email failed lead=${lead.id} org=${org.id}: ${confirmationResult.error}`)
+  }
+
   return { status: 'success' }
+}
+
+// Pair each captured answer with its question label by joining against
+// the Organization's saved questionnaire. If a question_id has been
+// deleted between capture and send (race against questionnaire edits),
+// fall back to the raw question_id so the email still ships.
+function labelCustomAnswers(
+  answers: Array<{ question_id: string; answer: string }>,
+  questionnaire: unknown,
+): Array<{ label: string; answer: string }> {
+  if (!answers.length) return []
+  const questions: LeadQuestion[] = normalizeLeadQuestions(questionnaire)
+  const labelById = new Map<string, string>()
+  for (const q of questions) labelById.set(q.id, q.label)
+  return answers.map((a) => ({
+    label:  labelById.get(a.question_id) ?? a.question_id,
+    answer: a.answer,
+  }))
+}
+
+// Human-readable appointment timestamp for the customer-facing email.
+// No new dependency — Intl.DateTimeFormat with sensible defaults. We
+// don't yet have per-Organization timezone configuration, so this falls
+// back to UTC; once timezone shipping lands (later sprint), thread it
+// through here.
+function formatAppointmentTime(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  return new Intl.DateTimeFormat('en-US', {
+    weekday:  'long',
+    month:    'long',
+    day:      'numeric',
+    hour:     'numeric',
+    minute:   '2-digit',
+    hour12:   true,
+    timeZone: 'UTC',
+    timeZoneName: 'short',
+  }).format(d)
 }
 
 type LeadAlertArgs = {
