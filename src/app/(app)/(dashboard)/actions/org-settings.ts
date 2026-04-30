@@ -3,13 +3,19 @@
 import { createClient } from '@/lib/supabase/server'
 import { resolveEffectiveOrgId, resolveImpersonation } from '@/lib/impersonation'
 import { revalidatePath } from 'next/cache'
-import { createSenderSignature } from '@/lib/postmark-admin'
+import { createSenderSignature, getSenderSignatureByEmail } from '@/lib/postmark-admin'
 import { generateInboundEmail } from '@/lib/org-utils'
 
 type State =
   | { status: 'success'; message?: string }
   | { status: 'error';   error: string }
   | null
+
+export type RefreshSupportEmailResult =
+  | { status: 'success';   message: string }
+  | { status: 'pending';   message: string }
+  | { status: 'not_found'; message: string }
+  | { status: 'error';     error: string }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -71,30 +77,40 @@ export async function updateSupportEmail(_prev: State, formData: FormData): Prom
     .eq('id', guard.orgId)
     .single()
 
-  // a) Persist the new email and reset the confirmation timestamp — the
-  //    customer must re-verify each address change.
-  const { error: updErr } = await supabase
-    .from('organizations')
-    .update({
-      verified_support_email:              email,
-      verified_support_email_confirmed_at: null,
-    })
-    .eq('id', guard.orgId)
-
-  if (updErr) return { status: 'error', error: updErr.message }
-
-  // b) Trigger the Postmark verification email. If Postmark rejects the
-  //    request we surface the error but leave the DB update in place so
-  //    the user can retry without re-entering the address.
+  // a) Trigger the Postmark verification email. createSenderSignature now
+  //    recovers gracefully on duplicates — if the signature already exists
+  //    on Postmark's side, it returns the existing record so we can read
+  //    its Confirmed flag and skip the verification round-trip.
+  let signature
   try {
-    await createSenderSignature(email, org?.name ?? 'Kinvox Support')
+    signature = await createSenderSignature(email, org?.name ?? 'Kinvox Support')
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Failed to request verification'
     return { status: 'error', error: msg }
   }
 
+  // b) Persist the new email. If Postmark already considers the signature
+  //    Confirmed (re-saving an address that was previously verified), set
+  //    confirmed_at = now() immediately so the user doesn't have to chase
+  //    a verification email or hit Refresh. Otherwise null and wait.
+  const confirmedAt = signature.Confirmed ? new Date().toISOString() : null
+  const { error: updErr } = await supabase
+    .from('organizations')
+    .update({
+      verified_support_email:              email,
+      verified_support_email_confirmed_at: confirmedAt,
+    })
+    .eq('id', guard.orgId)
+
+  if (updErr) return { status: 'error', error: updErr.message }
+
   revalidatePath('/[orgSlug]/settings/team', 'page')
-  return { status: 'success', message: `Verification email sent to ${email}.` }
+  return {
+    status:  'success',
+    message: signature.Confirmed
+      ? `${email} is already verified — saved.`
+      : `Verification email sent to ${email}.`,
+  }
 }
 
 export async function initializeInboundEmail(_prev: State, _formData: FormData): Promise<State> {
@@ -135,4 +151,70 @@ export async function initializeInboundEmail(_prev: State, _formData: FormData):
   }
 
   return { status: 'error', error: lastError ?? 'Failed to generate inbound address' }
+}
+
+/**
+ * Reconcile the Organization's support-email confirmation status with
+ * Postmark. There is no inbound webhook for sender-signature events
+ * today, so this is the user-driven path: the org settings page exposes
+ * a "Refresh status" button that calls this action.
+ *
+ * Looks up the signature by email via Postmark's Account API; if Postmark
+ * reports it as Confirmed, flips verified_support_email_confirmed_at to
+ * now(). Never touches verified_support_email itself — that's the user's
+ * input, not ours to overwrite.
+ *
+ * Zero-Inference: org_id comes from session/impersonation via
+ * requireSettingsAdmin. The action takes no arguments.
+ */
+export async function refreshSupportEmailStatus(): Promise<RefreshSupportEmailResult> {
+  const supabase = await createClient()
+
+  const guard = await requireSettingsAdmin(supabase)
+  if (!guard.ok) return { status: 'error', error: guard.error }
+
+  const { data: org, error: readErr } = await supabase
+    .from('organizations')
+    .select('verified_support_email')
+    .eq('id', guard.orgId)
+    .single<{ verified_support_email: string | null }>()
+
+  if (readErr) return { status: 'error', error: readErr.message }
+
+  const supportEmail = org?.verified_support_email?.trim() ?? ''
+  if (!supportEmail) {
+    return { status: 'error', error: 'No support email configured' }
+  }
+
+  let signature
+  try {
+    signature = await getSenderSignatureByEmail(supportEmail)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Failed to query Postmark'
+    return { status: 'error', error: msg }
+  }
+
+  if (!signature) {
+    return {
+      status:  'not_found',
+      message: 'No Postmark signature exists for this email — try Verify Email again',
+    }
+  }
+
+  if (!signature.Confirmed) {
+    return {
+      status:  'pending',
+      message: 'Still awaiting confirmation from Postmark',
+    }
+  }
+
+  const { error: updErr } = await supabase
+    .from('organizations')
+    .update({ verified_support_email_confirmed_at: new Date().toISOString() })
+    .eq('id', guard.orgId)
+
+  if (updErr) return { status: 'error', error: updErr.message }
+
+  revalidatePath('/[orgSlug]/settings/team', 'page')
+  return { status: 'success', message: `${supportEmail} is verified.` }
 }

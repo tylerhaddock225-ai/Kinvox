@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useActionState, useTransition } from 'react'
-import { Plus, X, UserPlus, Pencil, Trash2, ShieldCheck, CheckCircle2, Clock, Mail, Copy, Sparkles } from 'lucide-react'
+import { Plus, X, UserPlus, Pencil, Trash2, ShieldCheck, CheckCircle2, Clock, Mail, Copy, Sparkles, RotateCcw, AlertCircle } from 'lucide-react'
 import {
   inviteMember,
   updateMemberRole,
@@ -9,7 +9,12 @@ import {
   updateRole,
   deleteRole,
 } from './actions'
-import { updateSupportEmail, initializeInboundEmail } from '@/app/(app)/(dashboard)/actions/org-settings'
+import {
+  updateSupportEmail,
+  initializeInboundEmail,
+  refreshSupportEmailStatus,
+  type RefreshSupportEmailResult,
+} from '@/app/(app)/(dashboard)/actions/org-settings'
 import LeadSupportTab, { type LeadSupportState } from '@/components/settings/lead-support-tab'
 import HuntingProfileForm from './HuntingProfileForm'
 import SocialConnectionsTab, {
@@ -511,12 +516,31 @@ function SupportSettingsPanel({ settings }: { settings: OrgSettings }) {
   const [state, action, pending] = useActionState(updateSupportEmail, null)
   const [toast, setToast] = useState<string | null>(null)
 
+  // Refresh-status button: useTransition because the underlying action
+  // takes no arguments and doesn't fit useActionState's reducer shape.
+  const [refreshPending, startRefresh] = useTransition()
+  const [refreshResult, setRefreshResult] = useState<RefreshSupportEmailResult | null>(null)
+
   useEffect(() => {
     if (state?.status === 'success' && state.message) setToast(state.message)
   }, [state])
 
+  // Saving a new support email resets any previous refresh notice; the
+  // Postmark state we last reconciled against may no longer apply.
+  useEffect(() => {
+    if (state?.status === 'success') setRefreshResult(null)
+  }, [state])
+
   const isConfirmed = !!settings.verified_support_email_confirmed_at
   const hasEmail    = !!settings.verified_support_email
+
+  function handleRefresh() {
+    startRefresh(async () => {
+      const result = await refreshSupportEmailStatus()
+      setRefreshResult(result)
+      if (result.status === 'success') setToast(result.message)
+    })
+  }
 
   return (
     <div className="space-y-6">
@@ -547,18 +571,57 @@ function SupportSettingsPanel({ settings }: { settings: OrgSettings }) {
               </button>
             </div>
             {hasEmail && (
-              <div className="mt-2 flex items-center gap-2 text-xs">
-                <span className="text-gray-400">Status:</span>
-                {isConfirmed ? (
-                  <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-emerald-300">
-                    <CheckCircle2 className="w-3 h-3" />
-                    Verified
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1 rounded-full border border-yellow-500/30 bg-yellow-500/10 px-2 py-0.5 text-yellow-300">
-                    <Clock className="w-3 h-3" />
-                    Pending Verification
-                  </span>
+              <div className="mt-2 space-y-2">
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="text-gray-400">Status:</span>
+                  {isConfirmed ? (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-emerald-300">
+                      <CheckCircle2 className="w-3 h-3" />
+                      Verified
+                    </span>
+                  ) : (
+                    <>
+                      <span className="inline-flex items-center gap-1 rounded-full border border-yellow-500/30 bg-yellow-500/10 px-2 py-0.5 text-yellow-300">
+                        <Clock className="w-3 h-3" />
+                        Pending Verification
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleRefresh}
+                        disabled={refreshPending}
+                        className={BTN_SECONDARY + ' !px-2 !py-1 text-[11px]'}
+                      >
+                        <RotateCcw className={`w-3 h-3 ${refreshPending ? 'animate-spin' : ''}`} />
+                        {refreshPending ? 'Checking…' : 'Refresh status'}
+                      </button>
+                    </>
+                  )}
+                </div>
+
+                {refreshResult && (
+                  <p
+                    className={
+                      'flex items-start gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] ' +
+                      (refreshResult.status === 'success'
+                        ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+                        : refreshResult.status === 'pending'
+                        ? 'border-yellow-500/30 bg-yellow-500/10 text-yellow-200'
+                        : refreshResult.status === 'not_found'
+                        ? 'border-orange-500/30 bg-orange-500/10 text-orange-200'
+                        : 'border-red-400/30 bg-red-400/10 text-red-300')
+                    }
+                  >
+                    {refreshResult.status === 'success' ? (
+                      <CheckCircle2 className="w-3 h-3 mt-0.5 shrink-0" />
+                    ) : refreshResult.status === 'pending' ? (
+                      <Clock className="w-3 h-3 mt-0.5 shrink-0" />
+                    ) : (
+                      <AlertCircle className="w-3 h-3 mt-0.5 shrink-0" />
+                    )}
+                    <span>
+                      {refreshResult.status === 'error' ? refreshResult.error : refreshResult.message}
+                    </span>
+                  </p>
                 )}
               </div>
             )}
