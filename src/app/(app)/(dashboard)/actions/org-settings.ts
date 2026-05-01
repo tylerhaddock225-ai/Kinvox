@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { resolveEffectiveOrgId, resolveImpersonation } from '@/lib/impersonation'
 import { revalidatePath } from 'next/cache'
 import { createSenderSignature, getSenderSignatureByEmail } from '@/lib/postmark-admin'
-import { generateInboundEmail } from '@/lib/org-utils'
+import { generateInboundEmailTag } from '@/lib/org-utils'
 
 type State =
   | { status: 'success'; message?: string }
@@ -77,11 +77,17 @@ export async function updateSupportEmail(_prev: State, formData: FormData): Prom
   if (!EMAIL_RE.test(email)) return { status: 'error', error: 'Enter a valid email address' }
 
   // Pull the org name to use as the Sender Signature display name in Postmark.
+  // Also pull the lead-channel email so we can reject same-address collisions —
+  // each channel needs its own Postmark Sender Signature, so they MUST differ.
   const { data: org } = await supabase
     .from('organizations')
-    .select('name')
+    .select('name, verified_lead_email')
     .eq('id', guard.orgId)
-    .single()
+    .single<{ name: string; verified_lead_email: string | null }>()
+
+  if (org?.verified_lead_email && email.toLowerCase() === org.verified_lead_email.toLowerCase()) {
+    return { status: 'error', error: 'Support and lead notifications emails must be different — pick a separate address for each channel.' }
+  }
 
   // a) Trigger the Postmark verification email. createSenderSignature now
   //    recovers gracefully on duplicates — if the signature already exists
@@ -127,12 +133,12 @@ export async function initializeInboundEmail(_prev: State, _formData: FormData):
 
   const { data: org } = await supabase
     .from('organizations')
-    .select('name, inbound_email_address')
+    .select('name, inbound_email_tag')
     .eq('id', guard.orgId)
-    .single()
+    .single<{ name: string; inbound_email_tag: string | null }>()
 
   if (!org) return { status: 'error', error: 'Organization not found' }
-  if (org.inbound_email_address) {
+  if (org.inbound_email_tag) {
     // Already set — treat as success so the UI can refresh without an error toast.
     return { status: 'success', message: 'Inbound address already assigned.' }
   }
@@ -140,16 +146,16 @@ export async function initializeInboundEmail(_prev: State, _formData: FormData):
   // Retry a few times in case the random hash collides with the unique index.
   let lastError: string | null = null
   for (let attempt = 0; attempt < 5; attempt++) {
-    const candidate = generateInboundEmail(org.name)
+    const candidate = generateInboundEmailTag(org.name)
     const { error } = await supabase
       .from('organizations')
-      .update({ inbound_email_address: candidate })
+      .update({ inbound_email_tag: candidate })
       .eq('id', guard.orgId)
-      .is('inbound_email_address', null)   // only set if still unset (avoid clobber)
+      .is('inbound_email_tag', null)   // only set if still unset (avoid clobber)
 
     if (!error) {
       revalidatePath('/[orgSlug]/settings/team', 'page')
-      return { status: 'success', message: `Forwarding address ${candidate} is ready.` }
+      return { status: 'success', message: `Support inbound address is ready.` }
     }
     lastError = error.message
     // 23505 → unique violation; loop and try a fresh hash. Anything else: give up.
@@ -157,6 +163,48 @@ export async function initializeInboundEmail(_prev: State, _formData: FormData):
   }
 
   return { status: 'error', error: lastError ?? 'Failed to generate inbound address' }
+}
+
+/**
+ * Lead-channel parallel of `initializeInboundEmail`. Mints a tag for the
+ * `inbound_lead_email_tag` column. The full plus-addressed email is
+ * assembled at display/use time by `constructInboundEmailAddress`.
+ */
+export async function initializeLeadInboundEmail(_prev: State, _formData: FormData): Promise<State> {
+  const supabase = await createClient()
+
+  const guard = await requireSettingsAdmin(supabase)
+  if (!guard.ok) return { status: 'error', error: guard.error }
+
+  const { data: org } = await supabase
+    .from('organizations')
+    .select('name, inbound_lead_email_tag')
+    .eq('id', guard.orgId)
+    .single<{ name: string; inbound_lead_email_tag: string | null }>()
+
+  if (!org) return { status: 'error', error: 'Organization not found' }
+  if (org.inbound_lead_email_tag) {
+    return { status: 'success', message: 'Lead inbound address already assigned.' }
+  }
+
+  let lastError: string | null = null
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const candidate = generateInboundEmailTag(org.name)
+    const { error } = await supabase
+      .from('organizations')
+      .update({ inbound_lead_email_tag: candidate })
+      .eq('id', guard.orgId)
+      .is('inbound_lead_email_tag', null)
+
+    if (!error) {
+      revalidatePath('/[orgSlug]/settings/team', 'page')
+      return { status: 'success', message: `Lead inbound address is ready.` }
+    }
+    lastError = error.message
+    if (!/duplicate key|23505|already exists/i.test(error.message)) break
+  }
+
+  return { status: 'error', error: lastError ?? 'Failed to generate lead inbound address' }
 }
 
 /**
@@ -247,11 +295,17 @@ export async function updateLeadEmail(_prev: State, formData: FormData): Promise
   if (!email) return { status: 'error', error: 'Lead notifications email is required' }
   if (!EMAIL_RE.test(email)) return { status: 'error', error: 'Enter a valid email address' }
 
+  // Same channel-split rule as `updateSupportEmail`: lead and support must
+  // be different addresses (each gets its own Postmark Sender Signature).
   const { data: org } = await supabase
     .from('organizations')
-    .select('name')
+    .select('name, verified_support_email')
     .eq('id', guard.orgId)
-    .single()
+    .single<{ name: string; verified_support_email: string | null }>()
+
+  if (org?.verified_support_email && email.toLowerCase() === org.verified_support_email.toLowerCase()) {
+    return { status: 'error', error: 'Lead notifications and support emails must be different — pick a separate address for each channel.' }
+  }
 
   let signature
   try {

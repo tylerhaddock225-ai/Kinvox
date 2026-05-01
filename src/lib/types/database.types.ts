@@ -20,7 +20,8 @@ export type Database = {
           phone: string | null
           website: string | null
           logo_url: string | null
-          inbound_email_address: string | null
+          inbound_email_tag: string | null
+          inbound_lead_email_tag: string | null
           verified_support_email: string | null
           verified_support_email_confirmed_at: string | null
           ai_listening_enabled: boolean
@@ -51,7 +52,8 @@ export type Database = {
           phone?: string | null
           website?: string | null
           logo_url?: string | null
-          inbound_email_address?: string | null
+          inbound_email_tag?: string | null
+          inbound_lead_email_tag?: string | null
           verified_support_email?: string | null
           verified_support_email_confirmed_at?: string | null
           ai_listening_enabled?: boolean

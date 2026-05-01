@@ -64,11 +64,14 @@ export async function POST(request: NextRequest) {
   const supabase = createAdminClient()
 
   // 1. Resolve the org by inbound address.
-  //    Case-insensitive exact match against organizations.inbound_email_address.
+  //    Case-insensitive exact match against organizations.inbound_email_tag
+  //    (column renamed from inbound_email_address in the lead-inbound-tag
+  //    migration). This legacy webhook is unused — the active Postmark
+  //    inbound endpoint is /api/webhooks/postmark/inbound.
   const { data: org, error: orgErr } = await supabase
     .from('organizations')
-    .select('id, owner_id, inbound_email_address')
-    .ilike('inbound_email_address', escapeIlike(toAddr))
+    .select('id, owner_id, inbound_email_tag')
+    .ilike('inbound_email_tag', escapeIlike(toAddr))
     .maybeSingle()
 
   if (orgErr) {

@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation'
 import TeamTabs from './TeamTabs'
 import type { Permissions } from '@/lib/permissions'
 import { normalizeLeadQuestions } from '@/lib/lead-questions'
+import { constructInboundEmailAddress } from '@/lib/email/inbound-address'
 import type { CredentialRow } from './SocialConnectionsTab'
 
 export const dynamic = 'force-dynamic'
@@ -67,7 +68,7 @@ export default async function TeamSettingsPage({
       .order('name'),
     supabase
       .from('organizations')
-      .select('inbound_email_address, verified_support_email, verified_support_email_confirmed_at, verified_lead_email, verified_lead_email_confirmed_at, ai_listening_enabled, cancel_at_period_end, current_period_end, custom_lead_questions, signal_engagement_mode, vertical, lead_magnet_settings')
+      .select('inbound_email_tag, inbound_lead_email_tag, verified_support_email, verified_support_email_confirmed_at, verified_lead_email, verified_lead_email_confirmed_at, ai_listening_enabled, cancel_at_period_end, current_period_end, custom_lead_questions, signal_engagement_mode, vertical, lead_magnet_settings')
       .eq('id', orgId)
       .single(),
     supabase
@@ -121,8 +122,13 @@ export default async function TeamSettingsPage({
     is_system_role: r.is_system_role,
   }))
 
+  // Resolve the per-channel tags into full plus-addressed inbound emails
+  // server-side. Client components never see POSTMARK_INBOUND_ADDRESS.
+  const supportInboundAddress = constructInboundEmailAddress(orgRes.data?.inbound_email_tag      ?? null)
+  const leadInboundAddress    = constructInboundEmailAddress(orgRes.data?.inbound_lead_email_tag ?? null)
+
   const orgSettings = {
-    inbound_email_address:               orgRes.data?.inbound_email_address               ?? null,
+    inbound_email_address:               supportInboundAddress,
     verified_support_email:              orgRes.data?.verified_support_email              ?? null,
     verified_support_email_confirmed_at: orgRes.data?.verified_support_email_confirmed_at ?? null,
   }
@@ -148,6 +154,7 @@ export default async function TeamSettingsPage({
     signal_engagement_mode:           (orgRes.data?.signal_engagement_mode ?? 'ai_draft') as 'ai_draft' | 'manual',
     verified_lead_email:              orgRes.data?.verified_lead_email              ?? null,
     verified_lead_email_confirmed_at: orgRes.data?.verified_lead_email_confirmed_at ?? null,
+    inbound_lead_email_address:       leadInboundAddress,
   }
 
   const signalSettings = {

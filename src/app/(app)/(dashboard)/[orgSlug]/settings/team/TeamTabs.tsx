@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useActionState, useTransition } from 'react'
-import { Plus, X, UserPlus, Pencil, Trash2, ShieldCheck, CheckCircle2, Sparkles, Copy } from 'lucide-react'
+import { Plus, X, UserPlus, Pencil, Trash2, ShieldCheck, CheckCircle2 } from 'lucide-react'
 import {
   inviteMember,
   updateMemberRole,
@@ -15,6 +15,7 @@ import {
   refreshSupportEmailStatus,
 } from '@/app/(app)/(dashboard)/actions/org-settings'
 import EmailVerificationPanel from '@/components/settings/EmailVerificationPanel'
+import InboundAddressRow from '@/components/settings/InboundAddressRow'
 import LeadSupportTab, { type LeadSupportState } from '@/components/settings/lead-support-tab'
 import HuntingProfileForm from './HuntingProfileForm'
 import SocialConnectionsTab, {
@@ -25,6 +26,8 @@ import { PERMISSION_KEYS, DEFAULT_PERMISSIONS, type Permissions } from '@/lib/pe
 import type { MemberRow, RoleRow } from './page'
 
 export type OrgSettings = {
+  // Pre-constructed full plus-addressed email (server side via
+  // constructInboundEmailAddress); null when no tag is set or env is unset.
   inbound_email_address:               string | null
   verified_support_email:              string | null
   verified_support_email_confirmed_at: string | null
@@ -450,66 +453,6 @@ function Toast({ message, onDone }: { message: string; onDone: () => void }) {
   )
 }
 
-// ── Inbound forwarding address row ───────────────────────────────────────────
-
-function InboundAddressRow({ address }: { address: string | null }) {
-  const [state, action, pending] = useActionState(initializeInboundEmail, null)
-  const [copied, setCopied] = useState(false)
-
-  async function copy() {
-    if (!address) return
-    try {
-      await navigator.clipboard.writeText(address)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    } catch {
-      // clipboard unavailable — silently ignore
-    }
-  }
-
-  if (!address) {
-    return (
-      <div className="space-y-2">
-        <form action={action} className="flex gap-2">
-          <input
-            readOnly
-            value="— not assigned yet —"
-            className={INPUT + ' cursor-default opacity-60'}
-          />
-          <button type="submit" disabled={pending} className={BTN_PRIMARY + ' shrink-0'}>
-            <Sparkles className="w-4 h-4" />
-            {pending ? 'Generating…' : 'Generate Address'}
-          </button>
-        </form>
-        {state?.status === 'error' && (
-          <p className="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2">
-            {state.error}
-          </p>
-        )}
-      </div>
-    )
-  }
-
-  return (
-    <div className="flex gap-2 items-stretch">
-      <input
-        readOnly
-        value={address}
-        className={INPUT + ' cursor-default font-mono text-xs'}
-      />
-      <button
-        type="button"
-        onClick={copy}
-        title="Copy to clipboard"
-        className={BTN_SECONDARY + ' shrink-0 border border-pvx-border hover:bg-white/5'}
-      >
-        {copied ? <CheckCircle2 className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
-        {copied ? 'Copied' : 'Copy'}
-      </button>
-    </div>
-  )
-}
-
 // ── Support Settings panel ───────────────────────────────────────────────────
 
 function SupportSettingsPanel({ settings }: { settings: OrgSettings }) {
@@ -529,13 +472,12 @@ function SupportSettingsPanel({ settings }: { settings: OrgSettings }) {
         onSuccessToast={setToast}
       />
 
-      <div className="rounded-xl border border-pvx-border bg-pvx-surface p-5 space-y-3">
-        <label className={LABEL}>Your Kinvox Forwarding Address</label>
-        <InboundAddressRow address={settings.inbound_email_address} />
-        <p className="text-xs text-gray-500">
-          Forward inbound mail to this address; replies thread back into the matching ticket via the <code className="text-gray-400">[tk_…]</code> tag.
-        </p>
-      </div>
+      <InboundAddressRow
+        address={settings.inbound_email_address}
+        action={initializeInboundEmail}
+        tagPrefix="tk"
+        heading="Your Kinvox Forwarding Address"
+      />
 
       {toast && <Toast message={toast} onDone={() => setToast(null)} />}
     </div>

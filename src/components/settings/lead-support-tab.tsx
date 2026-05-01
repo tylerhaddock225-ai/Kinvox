@@ -24,10 +24,12 @@ import {
 import {
   updateLeadEmail,
   refreshLeadEmailStatus,
+  initializeLeadInboundEmail,
 } from '@/app/(app)/(dashboard)/actions/org-settings'
 import LeadQuestionManager from '@/components/settings/LeadQuestionManager'
 import LeadMagnetFeaturesEditor from '@/components/settings/LeadMagnetFeaturesEditor'
 import EmailVerificationPanel from '@/components/settings/EmailVerificationPanel'
+import InboundAddressRow from '@/components/settings/InboundAddressRow'
 import type { LeadQuestion } from '@/lib/lead-questions'
 
 export type LeadSupportState = {
@@ -40,6 +42,9 @@ export type LeadSupportState = {
   signal_engagement_mode:                'ai_draft' | 'manual'
   verified_lead_email:                   string | null
   verified_lead_email_confirmed_at:      string | null
+  // Pre-constructed plus-addressed inbound email for the lead channel,
+  // computed server-side from organizations.inbound_lead_email_tag.
+  inbound_lead_email_address:            string | null
 }
 
 // Local tokens — kept inline so this file is self-contained. They match
@@ -372,6 +377,17 @@ export default function LeadSupportTab({ state: initialState }: { state: LeadSup
         verifyAction={updateLeadEmail}
         refreshAction={refreshLeadEmailStatus}
         onSuccessToast={setToast}
+      />
+
+      {/* Lead-channel inbound forwarding address — parallel to the
+          Support Settings tab's Kinvox Forwarding Address. Replies threaded
+          via the [ld_<display_id>] tag will land here once Prompt 2 wires
+          Reply-To onto outbound and Prompt 3 routes via MailboxHash. */}
+      <InboundAddressRow
+        address={initialState.inbound_lead_email_address}
+        action={initializeLeadInboundEmail}
+        tagPrefix="ld"
+        heading="Your lead inbound forwarding address"
       />
 
       {/* Social Listening Status */}

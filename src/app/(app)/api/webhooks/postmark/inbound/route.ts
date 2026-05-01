@@ -93,7 +93,11 @@ export async function POST(request: NextRequest) {
   const supabase = createAdminClient()
 
   // 3. Resolve the org by trying each ToFull address against
-  //    organizations.inbound_email_address (case-insensitive).
+  //    organizations.inbound_email_tag (case-insensitive). NOTE: this
+  //    matching algorithm is stale post-rename — full-email→tag matching
+  //    will not succeed, so this loop currently always exits with no org.
+  //    That's the same effective behaviour as today (no MX → no inbound
+  //    traffic). Real routing via Postmark `MailboxHash` lands in Prompt 3.
   let orgId:   string | null = null
   let ownerId: string | null = null
   for (const r of recipients) {
@@ -102,7 +106,7 @@ export async function POST(request: NextRequest) {
     const { data: org } = await supabase
       .from('organizations')
       .select('id, owner_id')
-      .ilike('inbound_email_address', addr.replace(/[\\%_]/g, m => '\\' + m))
+      .ilike('inbound_email_tag', addr.replace(/[\\%_]/g, m => '\\' + m))
       .maybeSingle()
     if (org) {
       orgId   = org.id

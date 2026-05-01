@@ -302,7 +302,7 @@ async function dispatchOutboundEmail(args: DispatchArgs) {
 
   const { data: org } = await args.supabase
     .from('organizations')
-    .select('inbound_email_address, verified_support_email')
+    .select('inbound_email_tag, verified_support_email')
     .eq('id', args.orgId)
     .single()
 
