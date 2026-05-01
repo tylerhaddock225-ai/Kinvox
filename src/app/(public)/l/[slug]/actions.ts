@@ -191,8 +191,8 @@ export async function captureLeadAction(
       source:          'web',
       metadata,
     })
-    .select('id')
-    .single<{ id: string }>()
+    .select('id, display_id')
+    .single<{ id: string; display_id: string | null }>()
 
   if (insertErr) {
     // Unique violation on (org, email): treat as idempotent success so
@@ -267,6 +267,7 @@ export async function captureLeadAction(
     phone,
     appointmentTime: appointmentBooked ? formatAppointmentTime(apptIso) : null,
     customAnswers:   customAnswersWithLabels,
+    leadDisplayId:   lead?.display_id ?? null,
     override:        overrideTemplate,
   })
   const confirmationResult = await sendOrgTransactionalEmail({

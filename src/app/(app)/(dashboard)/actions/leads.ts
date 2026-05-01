@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { resolveEffectiveOrgId } from '@/lib/impersonation'
 import { revalidatePath } from 'next/cache'
 import type { Lead } from '@/lib/types/database.types'
+import { sendOrgTransactionalEmail, type OrgEmailContext } from '@/lib/email/send-org-email'
 
 export type CreateLeadState =
   | { status: 'success' }
@@ -221,5 +222,166 @@ export async function addLeadNote(
   if (error) return { status: 'error', error: error.message }
 
   revalidatePath(`/leads/${leadId}`)
+  return { status: 'success' }
+}
+
+
+// ── Lead conversation (lead_messages) ───────────────────────────────────
+//
+// Two surfaces: an internal note (org-only) and a public reply (sent via
+// Postmark from the Organization's verified lead-notifications email and
+// threaded back via the [ld_<display_id>] tag handled in the inbound
+// webhook). Both write to lead_messages; only public_reply does I/O.
+
+export type LeadMessageState =
+  | { status: 'success' }
+  | { status: 'error';   error: string;
+                          // Specific error for "lead-notifications email
+                          // not yet verified" — UI surfaces a settings link.
+                          needs_lead_email_verification?: boolean }
+  | null
+
+async function resolveLeadInOrg(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  leadId:   string,
+  orgId:    string,
+) {
+  const { data: lead } = await supabase
+    .from('leads')
+    .select('id, organization_id, email, display_id')
+    .eq('id', leadId)
+    .is('deleted_at', null)
+    .maybeSingle<{ id: string; organization_id: string; email: string | null; display_id: string | null }>()
+  if (!lead || lead.organization_id !== orgId) return null
+  return lead
+}
+
+export async function postLeadInternalNote(
+  leadId: string,
+  _prev:  LeadMessageState,
+  formData: FormData,
+): Promise<LeadMessageState> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { status: 'error', error: 'Not authenticated' }
+
+  const orgId = await resolveEffectiveOrgId(supabase, user.id)
+  if (!orgId) return { status: 'error', error: 'No organization' }
+
+  const body = (formData.get('body') as string | null)?.trim() ?? ''
+  if (!body) return { status: 'error', error: 'Note cannot be empty' }
+
+  const lead = await resolveLeadInOrg(supabase, leadId, orgId)
+  if (!lead) return { status: 'error', error: 'Lead not found' }
+
+  const { error } = await supabase.from('lead_messages').insert({
+    lead_id:         lead.id,
+    organization_id: orgId,
+    message_type:    'internal_note',
+    author_kind:     'org_user',
+    author_user_id:  user.id,
+    body,
+  })
+  if (error) return { status: 'error', error: error.message }
+
+  revalidatePath(`/[orgSlug]/leads/${leadId}`, 'page')
+  return { status: 'success' }
+}
+
+export async function postLeadPublicReply(
+  leadId: string,
+  _prev:  LeadMessageState,
+  formData: FormData,
+): Promise<LeadMessageState> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { status: 'error', error: 'Not authenticated' }
+
+  const orgId = await resolveEffectiveOrgId(supabase, user.id)
+  if (!orgId) return { status: 'error', error: 'No organization' }
+
+  const body = (formData.get('body') as string | null)?.trim() ?? ''
+  if (!body) return { status: 'error', error: 'Reply cannot be empty' }
+
+  const lead = await resolveLeadInOrg(supabase, leadId, orgId)
+  if (!lead) return { status: 'error', error: 'Lead not found' }
+
+  if (!lead.email) {
+    return { status: 'error', error: 'Lead has no email address' }
+  }
+
+  // Pull the org's lead-notifications channel state. This is the channel
+  // post-Sprint-3 split — verified_lead_email_*, NOT verified_support_email_*.
+  const { data: orgRow } = await supabase
+    .from('organizations')
+    .select('id, name, verified_support_email, verified_support_email_confirmed_at, verified_lead_email, verified_lead_email_confirmed_at')
+    .eq('id', orgId)
+    .single<OrgEmailContext>()
+  if (!orgRow) return { status: 'error', error: 'Organization not found' }
+
+  if (!orgRow.verified_lead_email_confirmed_at) {
+    return {
+      status: 'error',
+      error:  'Lead notifications email is not verified yet — verify it in Lead Support settings before sending replies.',
+      needs_lead_email_verification: true,
+    }
+  }
+
+  const subjectBase = `Update from ${orgRow.name}`
+  const subject     = lead.display_id
+    ? `[${lead.display_id}] ${subjectBase}`
+    : subjectBase
+
+  // Minimal but presentable HTML — paragraphs, system font stack, escape
+  // applied to the user-supplied body. Mirrors lead-confirmation's HTML
+  // shell so the visual treatment is consistent.
+  const escapeHtml = (s: string) =>
+    s.replace(/&/g, '&amp;')
+     .replace(/</g, '&lt;')
+     .replace(/>/g, '&gt;')
+     .replace(/"/g, '&quot;')
+     .replace(/'/g, '&#39;')
+  const paragraphs = body.split(/\n{2,}/)
+    .map((p) => `<p>${escapeHtml(p).replace(/\n/g, '<br>')}</p>`)
+    .join('\n')
+  const FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+  const htmlBody = `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>${escapeHtml(subject)}</title></head>
+<body style="margin:0;padding:0;background:#f6f6f6;">
+<div style="max-width:580px;margin:0 auto;padding:24px;font-family:${FONT};font-size:15px;line-height:1.55;color:#1a1a1a;">
+${paragraphs}
+</div>
+</body>
+</html>`
+
+  const sendResult = await sendOrgTransactionalEmail({
+    org:               orgRow,
+    to:                lead.email,
+    subject,
+    htmlBody,
+    textBody:          body,
+    tag:               'lead-reply',
+    fromAddressSource: 'lead',
+  })
+
+  if (!sendResult.ok) {
+    return { status: 'error', error: sendResult.error }
+  }
+
+  // Only persist after Postmark accepts — never record sends that didn't
+  // actually go out.
+  const { error: insErr } = await supabase.from('lead_messages').insert({
+    lead_id:             lead.id,
+    organization_id:     orgId,
+    message_type:        'public_reply',
+    author_kind:         'org_user',
+    author_user_id:      user.id,
+    body,
+    postmark_message_id: sendResult.messageId,
+  })
+  if (insErr) return { status: 'error', error: insErr.message }
+
+  revalidatePath(`/[orgSlug]/leads/${leadId}`, 'page')
   return { status: 'success' }
 }

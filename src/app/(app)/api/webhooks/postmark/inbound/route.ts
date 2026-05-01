@@ -10,6 +10,11 @@ const LOG = '[postmark-inbound]'
 // Matches `[tk_<id>]` (case-insensitive) anywhere in the subject line.
 const TICKET_TAG_RE = /\[(tk_[a-z0-9]+)\]/i
 
+// Lead-conversation tag — same shape as TICKET_TAG_RE, scoped to the
+// lead-magnet confirmation + lead public reply pipeline. Routed into
+// public.lead_messages instead of ticket_messages.
+const LEAD_TAG_RE   = /\[(ld_[a-z0-9]+)\]/i
+
 // Postmark inbound payload (subset we use). Full shape lives in
 // node_modules/postmark/dist/client/models/webhooks/payload/InboundWebhook.d.ts
 type InboundRecipient = { Email: string; Name: string; MailboxHash: string }
@@ -117,7 +122,53 @@ export async function POST(request: NextRequest) {
   // for follow-ups; fall back to the full text body for fresh threads.
   const messageBody = (stripped || textBody || '').trim() || '(empty)'
 
-  // 4. Threading — does the subject reference an existing ticket in this org?
+  // 4a. Lead-conversation routing — does the subject reference an existing
+  //     lead in this org via [ld_<display_id>]? Lead-magnet confirmations
+  //     and lead public replies prepend this tag exactly like Tickets does
+  //     with [tk_<display_id>]. Lead-tag check runs BEFORE the ticket-tag
+  //     check so a lead-tagged thread routes to lead_messages even if the
+  //     visitor's reply somehow also contains a tk_ token in the body.
+  const leadTagMatch = subject.match(LEAD_TAG_RE)
+  if (leadTagMatch) {
+    const leadDisplayId = leadTagMatch[1].toLowerCase()
+    const { data: lead, error: lErr } = await supabase
+      .from('leads')
+      .select('id, organization_id')
+      .eq('organization_id', orgId)
+      .eq('display_id', leadDisplayId)
+      .is('deleted_at', null)
+      .maybeSingle()
+
+    if (lErr) {
+      console.error(`${LOG} lead lookup failed display_id=${leadDisplayId} org=${orgId}:`, lErr.message)
+      return NextResponse.json({ error: lErr.message }, { status: 500 })
+    }
+
+    if (lead) {
+      const { error: insErr } = await supabase.from('lead_messages').insert({
+        lead_id:             lead.id,
+        organization_id:     orgId,
+        message_type:        'public_reply',
+        author_kind:         'lead',
+        body:                messageBody,
+        postmark_message_id: messageId,
+        inbound_email_from:  fromEmail,
+      })
+      if (insErr) {
+        console.error(`${LOG} append failed lead=${leadDisplayId}:`, insErr.message)
+        return NextResponse.json({ error: insErr.message }, { status: 500 })
+      }
+      console.log(`${LOG} routed to lead lead_id=${lead.id} org_id=${orgId} message_id=${messageId ?? '-'}`)
+      return NextResponse.json({ status: 'appended_lead', lead_id: lead.id }, { status: 200 })
+    }
+
+    // Tag was lead-shaped but didn't match a lead in this org. Mirror the
+    // ticket-tag fall-through: log + continue to the no-tag path so the
+    // message still becomes a ticket and isn't dropped silently.
+    console.warn(`${LOG} lead-tag matched no lead id=${leadDisplayId} org=${orgId} — falling through`)
+  }
+
+  // 4b. Threading — does the subject reference an existing ticket in this org?
   const tagMatch = subject.match(TICKET_TAG_RE)
   if (tagMatch) {
     const displayId = tagMatch[1].toLowerCase()

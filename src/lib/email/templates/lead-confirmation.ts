@@ -32,6 +32,10 @@ export type LeadConfirmationContext = {
   phone:           string
   appointmentTime: string | null
   customAnswers:   Array<{ label: string; answer: string }>
+  // Lead's display_id (e.g. "ld_9"). Prepended to the subject as
+  // "[ld_<displayId>] …" so inbound replies route back to this lead via
+  // the postmark-inbound webhook — same convention Tickets uses.
+  leadDisplayId:   string | null
   override?: {
     subject: string | null
     body:    string | null
@@ -196,7 +200,14 @@ export function renderLeadConfirmationEmail(
     customAnswersBlock:  buildCustomAnswersTextBlock(ctx.customAnswers),
   }
 
-  const subject  = interpolate(subjectTemplate, textValues)
+  const interpolatedSubject = interpolate(subjectTemplate, textValues)
+  // Prepend [ld_<displayId>] tag — same shape Tickets uses ([tk_<id>]) so
+  // the postmark-inbound webhook can route the lead's reply back into
+  // this lead's conversation thread. Stripped before re-interpolation
+  // wouldn't be needed here because we always start from a fresh template.
+  const subject = ctx.leadDisplayId
+    ? `[${ctx.leadDisplayId}] ${interpolatedSubject}`
+    : interpolatedSubject
   const textBody = interpolate(bodyTemplate, textValues)
 
   // HTML render path:

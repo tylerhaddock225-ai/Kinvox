@@ -2,16 +2,23 @@ import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 import { ArrowLeft, Mail, Phone, Building2, Tag, User, Calendar } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
-import type { Lead, LeadActivity } from '@/lib/types/database.types'
+import type { Lead } from '@/lib/types/database.types'
 import LeadStatusSelect from '@/components/LeadStatusSelect'
-import LeadNotesForm from '@/components/LeadNotesForm'
-import LeadActivityList, { type Activity } from '@/components/LeadActivityList'
+import LeadConversationPanel from '@/components/leads/LeadConversationPanel'
+import { type ConversationMessage } from '@/components/conversation/ConversationThread'
 import EditLeadModal from '@/components/EditLeadModal'
 import CopyId from '@/components/CopyId'
 import QuickScheduleModal from '@/components/QuickScheduleModal'
 
-type ActivityRow = LeadActivity & {
-  profiles: { full_name: string | null; avatar_url: string | null } | null
+type LeadMessageRow = {
+  id:                  string
+  message_type:        'public_reply' | 'internal_note'
+  author_kind:         'org_user' | 'lead' | 'system'
+  author_user_id:      string | null
+  body:                string
+  inbound_email_from:  string | null
+  created_at:          string
+  profiles: { full_name: string | null } | null
 }
 
 function Field({ icon: Icon, label, value }: { icon: typeof Mail; label: string; value: React.ReactNode }) {
@@ -26,8 +33,12 @@ function Field({ icon: Icon, label, value }: { icon: typeof Mail; label: string;
   )
 }
 
-export default async function LeadDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params
+export default async function LeadDetailPage({
+  params,
+}: {
+  params: Promise<{ orgSlug: string; id: string }>
+}) {
+  const { orgSlug, id } = await params
   const supabase = await createClient()
 
   const { data: { user } } = await supabase.auth.getUser()
@@ -43,13 +54,13 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
   if (!lead) notFound()
   const l = lead as Lead
 
-  const [activitiesRes, customerRes] = await Promise.all([
+  const [messagesRes, customerRes] = await Promise.all([
     supabase
-      .from('lead_activities')
-      .select('id, lead_id, user_id, content, created_at, profiles(full_name, avatar_url)')
+      .from('lead_messages')
+      .select('id, message_type, author_kind, author_user_id, body, inbound_email_from, created_at, profiles!lead_messages_author_user_id_fkey(full_name)')
       .eq('lead_id', id)
-      .order('created_at', { ascending: false })
-      .limit(100),
+      .order('created_at', { ascending: true })
+      .limit(200),
     supabase
       .from('customers')
       .select('id')
@@ -58,20 +69,41 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
       .maybeSingle(),
   ])
 
-  const rows = (activitiesRes.data ?? []) as unknown as ActivityRow[]
+  const messageRows = (messagesRes.data ?? []) as unknown as LeadMessageRow[]
   const linkedCustomerId = customerRes.data?.id ?? null
-  const feed: Activity[] = rows.map(a => ({
-    id:         a.id,
-    content:    a.content,
-    created_at: a.created_at,
-    author:     a.profiles?.full_name ?? null,
-  }))
+
+  // Normalize for the shared ConversationThread renderer. author_kind drives
+  // the badge label; message_type drives the visual variant (public vs
+  // internal coloring).
+  const conversationMessages: ConversationMessage[] = messageRows.map((m) => {
+    let authorName: string
+    let authorBadge: string | undefined
+    if (m.author_kind === 'lead') {
+      const fallback = `${l.first_name} ${l.last_name ?? ''}`.trim() || 'Lead'
+      authorName  = m.inbound_email_from ?? fallback
+      authorBadge = 'Lead'
+    } else if (m.author_kind === 'system') {
+      authorName  = 'System'
+      authorBadge = 'System'
+    } else {
+      authorName  = m.profiles?.full_name ?? 'Organization member'
+      authorBadge = m.message_type === 'internal_note' ? 'Private Note' : undefined
+    }
+    return {
+      id:         m.id,
+      variant:    m.message_type === 'internal_note' ? 'internal' : 'public',
+      authorName,
+      authorBadge,
+      body:       m.body,
+      createdAt:  m.created_at,
+    }
+  })
 
   return (
     <div className="px-8 py-8 space-y-6">
       <div>
         <Link
-          href="/leads"
+          href={`/${orgSlug}/leads`}
           className="inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-300 transition-colors"
         >
           <ArrowLeft className="w-3.5 h-3.5" />
@@ -148,22 +180,16 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
           )}
         </aside>
 
-        {/* Right column — Activity (2/3) */}
-        <section className="lg:col-span-2 space-y-6">
-
-          <div className="rounded-xl border border-pvx-border bg-pvx-surface p-5">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-4">Add Note</h2>
-            <LeadNotesForm leadId={l.id} />
-          </div>
-
-          <div className="rounded-xl border border-pvx-border bg-pvx-surface overflow-hidden">
-            <div className="px-5 py-4 border-b border-pvx-border flex items-center justify-between">
-              <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-400">Activity</h2>
-              <span className="text-xs text-gray-500">{rows.length} note{rows.length === 1 ? '' : 's'}</span>
-            </div>
-
-            <LeadActivityList activities={feed} />
-          </div>
+        {/* Right column — Conversation (2/3). Unified thread of public
+            replies + internal notes; replaces the old single-textarea
+            Add Note + Activity-feed pair. */}
+        <section className="lg:col-span-2 space-y-3">
+          <h2 className="text-sm font-semibold text-gray-300">Conversation</h2>
+          <LeadConversationPanel
+            leadId={l.id}
+            orgSlug={orgSlug}
+            messages={conversationMessages}
+          />
         </section>
       </div>
     </div>
