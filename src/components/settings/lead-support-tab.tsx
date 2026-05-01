@@ -21,18 +21,25 @@ import {
   reactivateSubscription,
   setEngagementMode,
 } from '@/app/(app)/(dashboard)/actions/lead-support'
+import {
+  updateLeadEmail,
+  refreshLeadEmailStatus,
+} from '@/app/(app)/(dashboard)/actions/org-settings'
 import LeadQuestionManager from '@/components/settings/LeadQuestionManager'
 import LeadMagnetFeaturesEditor from '@/components/settings/LeadMagnetFeaturesEditor'
+import EmailVerificationPanel from '@/components/settings/EmailVerificationPanel'
 import type { LeadQuestion } from '@/lib/lead-questions'
 
 export type LeadSupportState = {
-  ai_listening_enabled:   boolean
-  balance:                number
-  cancel_at_period_end:   boolean
-  current_period_end:     string | null
-  custom_lead_questions:  LeadQuestion[]
-  lead_magnet_features:   string[]
-  signal_engagement_mode: 'ai_draft' | 'manual'
+  ai_listening_enabled:                  boolean
+  balance:                               number
+  cancel_at_period_end:                  boolean
+  current_period_end:                    string | null
+  custom_lead_questions:                 LeadQuestion[]
+  lead_magnet_features:                  string[]
+  signal_engagement_mode:                'ai_draft' | 'manual'
+  verified_lead_email:                   string | null
+  verified_lead_email_confirmed_at:      string | null
 }
 
 // Local tokens — kept inline so this file is self-contained. They match
@@ -353,6 +360,20 @@ export default function LeadSupportTab({ state: initialState }: { state: LeadSup
 
   return (
     <div className="space-y-6">
+      {/* Lead notifications email — channel parallel to Support Settings'
+          customer-facing email, but scoped to lead-magnet flows. */}
+      <EmailVerificationPanel
+        title="Lead notifications email"
+        description="Used as the From address on lead-magnet confirmations and the recipient for new lead alerts."
+        inputName="lead_email"
+        inputId="lead-email"
+        email={initialState.verified_lead_email}
+        confirmedAt={initialState.verified_lead_email_confirmed_at}
+        verifyAction={updateLeadEmail}
+        refreshAction={refreshLeadEmailStatus}
+        onSuccessToast={setToast}
+      />
+
       {/* Social Listening Status */}
       <div className="rounded-xl border border-pvx-border bg-pvx-surface p-5 space-y-4">
         <div className="flex items-start justify-between gap-4">

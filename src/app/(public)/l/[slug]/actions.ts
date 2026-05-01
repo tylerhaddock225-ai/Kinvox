@@ -48,6 +48,8 @@ type OrgRow = {
   deleted_at:                          string | null
   verified_support_email:              string | null
   verified_support_email_confirmed_at: string | null
+  verified_lead_email:                 string | null
+  verified_lead_email_confirmed_at:    string | null
   feature_flags:                       Record<string, unknown> | null
   subscription_status:                 string | null
   custom_lead_questions:               unknown
@@ -93,7 +95,7 @@ export async function captureLeadAction(
 
   const { data: org, error: orgErr } = await supabase
     .from('organizations')
-    .select('id, name, owner_id, latitude, longitude, signal_radius, lead_magnet_settings, deleted_at, verified_support_email, verified_support_email_confirmed_at, feature_flags, subscription_status, custom_lead_questions, confirmation_email_template')
+    .select('id, name, owner_id, latitude, longitude, signal_radius, lead_magnet_settings, deleted_at, verified_support_email, verified_support_email_confirmed_at, verified_lead_email, verified_lead_email_confirmed_at, feature_flags, subscription_status, custom_lead_questions, confirmation_email_template')
     .ilike('lead_magnet_slug', slug)
     .is('deleted_at', null)
     .maybeSingle<OrgRow>()
@@ -269,11 +271,12 @@ export async function captureLeadAction(
   })
   const confirmationResult = await sendOrgTransactionalEmail({
     org,
-    to:       email,
-    subject:  rendered.subject,
-    htmlBody: rendered.htmlBody,
-    textBody: rendered.textBody,
-    tag:      'lead-confirmation',
+    to:                email,
+    subject:           rendered.subject,
+    htmlBody:          rendered.htmlBody,
+    textBody:          rendered.textBody,
+    tag:               'lead-confirmation',
+    fromAddressSource: 'lead',
   })
   if (!confirmationResult.ok) {
     console.error(`[lead-capture] confirmation email failed lead=${lead.id} org=${org.id}: ${confirmationResult.error}`)
@@ -346,12 +349,12 @@ async function sendLeadAlertEmail({
   }
 
   const recipient =
-    org.verified_support_email && org.verified_support_email_confirmed_at
-      ? org.verified_support_email
+    org.verified_lead_email && org.verified_lead_email_confirmed_at
+      ? org.verified_lead_email
       : null
 
   if (!recipient) {
-    console.warn(`${LOG} org=${org.id} has no verified support email — skipping`)
+    console.warn(`${LOG} org=${org.id} has no verified lead notifications email — skipping`)
     return
   }
 

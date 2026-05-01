@@ -17,6 +17,12 @@ export type RefreshSupportEmailResult =
   | { status: 'not_found'; message: string }
   | { status: 'error';     error: string }
 
+export type RefreshLeadEmailResult =
+  | { status: 'success';   message: string }
+  | { status: 'pending';   message: string }
+  | { status: 'not_found'; message: string }
+  | { status: 'error';     error: string }
+
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 // Org Owner OR a system 'admin' role can edit support settings — and an HQ
@@ -217,4 +223,117 @@ export async function refreshSupportEmailStatus(): Promise<RefreshSupportEmailRe
 
   revalidatePath('/[orgSlug]/settings/team', 'page')
   return { status: 'success', message: `${supportEmail} is verified.` }
+}
+
+// ── Lead-notifications email channel ────────────────────────────────────
+//
+// Parallel pair of actions to updateSupportEmail / refreshSupportEmailStatus.
+// Same shape, same Postmark plumbing — only the column targets differ:
+// these write to verified_lead_email / verified_lead_email_confirmed_at.
+//
+// If a user sets the same address on both Lead Notifications AND Support
+// Settings, createSenderSignature is called twice for the same email; the
+// idempotent ErrorCode 504 fallback added in commit 9074172 catches the
+// duplicate and returns the existing signature so we don't surface an
+// error to the user.
+
+export async function updateLeadEmail(_prev: State, formData: FormData): Promise<State> {
+  const supabase = await createClient()
+
+  const guard = await requireSettingsAdmin(supabase)
+  if (!guard.ok) return { status: 'error', error: guard.error }
+
+  const email = (formData.get('lead_email') as string | null)?.trim() ?? ''
+  if (!email) return { status: 'error', error: 'Lead notifications email is required' }
+  if (!EMAIL_RE.test(email)) return { status: 'error', error: 'Enter a valid email address' }
+
+  const { data: org } = await supabase
+    .from('organizations')
+    .select('name')
+    .eq('id', guard.orgId)
+    .single()
+
+  let signature
+  try {
+    signature = await createSenderSignature(email, org?.name ?? 'Kinvox Lead Notifications')
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Failed to request verification'
+    return { status: 'error', error: msg }
+  }
+
+  const confirmedAt = signature.Confirmed ? new Date().toISOString() : null
+  const { error: updErr } = await supabase
+    .from('organizations')
+    .update({
+      verified_lead_email:              email,
+      verified_lead_email_confirmed_at: confirmedAt,
+    })
+    .eq('id', guard.orgId)
+
+  if (updErr) return { status: 'error', error: updErr.message }
+
+  revalidatePath('/[orgSlug]/settings/team', 'page')
+  return {
+    status:  'success',
+    message: signature.Confirmed
+      ? `${email} is already verified — saved.`
+      : `Verification email sent to ${email}.`,
+  }
+}
+
+/**
+ * Reconcile the Organization's lead-notifications email confirmation
+ * status with Postmark. Mirrors refreshSupportEmailStatus but targets the
+ * verified_lead_email channel.
+ */
+export async function refreshLeadEmailStatus(): Promise<RefreshLeadEmailResult> {
+  const supabase = await createClient()
+
+  const guard = await requireSettingsAdmin(supabase)
+  if (!guard.ok) return { status: 'error', error: guard.error }
+
+  const { data: org, error: readErr } = await supabase
+    .from('organizations')
+    .select('verified_lead_email')
+    .eq('id', guard.orgId)
+    .single<{ verified_lead_email: string | null }>()
+
+  if (readErr) return { status: 'error', error: readErr.message }
+
+  const leadEmail = org?.verified_lead_email?.trim() ?? ''
+  if (!leadEmail) {
+    return { status: 'error', error: 'No lead notifications email configured' }
+  }
+
+  let signature
+  try {
+    signature = await getSenderSignatureByEmail(leadEmail)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Failed to query Postmark'
+    return { status: 'error', error: msg }
+  }
+
+  if (!signature) {
+    return {
+      status:  'not_found',
+      message: 'No Postmark signature exists for this email — try Verify Email again',
+    }
+  }
+
+  if (!signature.Confirmed) {
+    return {
+      status:  'pending',
+      message: 'Still awaiting confirmation from Postmark',
+    }
+  }
+
+  const { error: updErr } = await supabase
+    .from('organizations')
+    .update({ verified_lead_email_confirmed_at: new Date().toISOString() })
+    .eq('id', guard.orgId)
+
+  if (updErr) return { status: 'error', error: updErr.message }
+
+  revalidatePath('/[orgSlug]/settings/team', 'page')
+  return { status: 'success', message: `${leadEmail} is verified.` }
 }
