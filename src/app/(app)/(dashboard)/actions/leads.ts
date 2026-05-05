@@ -6,6 +6,7 @@ import { revalidatePath } from 'next/cache'
 import type { Lead } from '@/lib/types/database.types'
 import { sendOrgTransactionalEmail, type OrgEmailContext } from '@/lib/email/send-org-email'
 import { constructInboundEmailAddress } from '@/lib/email/inbound-address'
+import { renderConversationReply, type PriorMessage } from '@/lib/email/templates/reply'
 
 export type CreateLeadState =
   | { status: 'success' }
@@ -249,10 +250,10 @@ async function resolveLeadInOrg(
 ) {
   const { data: lead } = await supabase
     .from('leads')
-    .select('id, organization_id, email, display_id')
+    .select('id, organization_id, email, display_id, first_name')
     .eq('id', leadId)
     .is('deleted_at', null)
-    .maybeSingle<{ id: string; organization_id: string; email: string | null; display_id: string | null }>()
+    .maybeSingle<{ id: string; organization_id: string; email: string | null; display_id: string | null; first_name: string }>()
   if (!lead || lead.organization_id !== orgId) return null
   return lead
 }
@@ -333,28 +334,68 @@ export async function postLeadPublicReply(
     ? `[${lead.display_id}] ${subjectBase}`
     : subjectBase
 
-  // Minimal but presentable HTML — paragraphs, system font stack, escape
-  // applied to the user-supplied body. Mirrors lead-confirmation's HTML
-  // shell so the visual treatment is consistent.
-  const escapeHtml = (s: string) =>
-    s.replace(/&/g, '&amp;')
-     .replace(/</g, '&lt;')
-     .replace(/>/g, '&gt;')
-     .replace(/"/g, '&quot;')
-     .replace(/'/g, '&#39;')
-  const paragraphs = body.split(/\n{2,}/)
-    .map((p) => `<p>${escapeHtml(p).replace(/\n/g, '<br>')}</p>`)
-    .join('\n')
-  const FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
-  const htmlBody = `<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="utf-8"><title>${escapeHtml(subject)}</title></head>
-<body style="margin:0;padding:0;background:#f6f6f6;">
-<div style="max-width:580px;margin:0 auto;padding:24px;font-family:${FONT};font-size:15px;line-height:1.55;color:#1a1a1a;">
-${paragraphs}
-</div>
-</body>
-</html>`
+  // Replier identity: pull profiles.full_name for the authenticated user
+  // so the rendered signature reads "— <first> at <org>". Null is fine —
+  // the renderer falls back to "— <org> team".
+  const { data: replierProfile } = await supabase
+    .from('profiles')
+    .select('full_name')
+    .eq('id', user.id)
+    .maybeSingle<{ full_name: string | null }>()
+  const replierFirstName = replierProfile?.full_name?.trim().split(/\s+/)[0] ?? null
+
+  // Prior message for the quoted block: most recent public_reply on this
+  // lead. The lead-magnet confirmation is NOT recorded in lead_messages,
+  // so on the very first reply this returns null and the renderer skips
+  // the quoted block — the customer already has the confirmation in their
+  // inbox above.
+  const { data: priorRow } = await supabase
+    .from('lead_messages')
+    .select('body, created_at, author_kind, author_user_id, inbound_email_from')
+    .eq('lead_id', lead.id)
+    .eq('message_type', 'public_reply')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle<{
+      body:               string
+      created_at:         string
+      author_kind:        'org_user' | 'lead' | 'system'
+      author_user_id:     string | null
+      inbound_email_from: string | null
+    }>()
+
+  let prior: PriorMessage | null = null
+  if (priorRow) {
+    let senderName = ''
+    if (priorRow.author_kind === 'org_user' && priorRow.author_user_id) {
+      const { data: priorProfile } = await supabase
+        .from('profiles')
+        .select('full_name')
+        .eq('id', priorRow.author_user_id)
+        .maybeSingle<{ full_name: string | null }>()
+      senderName = priorProfile?.full_name?.trim() || ''
+    }
+    if (!senderName && priorRow.author_kind === 'lead') {
+      // Inbound row: prefer the lead's name, fall back to the raw From.
+      const fallbackFromEmail = priorRow.inbound_email_from?.split('<')[0]?.trim().replace(/^"|"$/g, '') || ''
+      senderName = lead.first_name?.trim() || fallbackFromEmail || priorRow.inbound_email_from || ''
+    }
+    if (!senderName) senderName = 'them'
+
+    prior = {
+      senderName,
+      sentAt: new Date(priorRow.created_at),
+      body:   priorRow.body,
+    }
+  }
+
+  const { htmlBody, textBody } = renderConversationReply({
+    leadFirstName:    lead.first_name,
+    replierFirstName,
+    orgName:          orgRow.name,
+    body,
+    prior,
+  })
 
   // Reply-To + threading: same shape as the lead-confirmation send so
   // Gmail/Outlook keep the conversation grouped, and the prospect's reply
@@ -371,7 +412,7 @@ ${paragraphs}
     to:                lead.email,
     subject,
     htmlBody,
-    textBody:          body,
+    textBody,
     tag:               'lead-reply',
     fromAddressSource: 'lead',
     replyTo:           replyTo ?? undefined,

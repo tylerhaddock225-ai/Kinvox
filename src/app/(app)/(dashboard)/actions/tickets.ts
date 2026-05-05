@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/server'
 import { resolveEffectiveOrgId } from '@/lib/impersonation'
 import { revalidatePath } from 'next/cache'
 import { constructInboundEmailAddress } from '@/lib/email/inbound-address'
+import { renderConversationReply, type PriorMessage } from '@/lib/email/templates/reply'
 
 type State = { status: 'success' } | { status: 'error'; error: string } | null
 
@@ -150,9 +151,16 @@ export async function updateTicketStatus(formData: FormData): Promise<void> {
   }
 
   if (status === 'closed' && prior && prior.status !== 'closed') {
+    const { data: closerProfile } = await supabase
+      .from('profiles')
+      .select('full_name')
+      .eq('id', user.id)
+      .maybeSingle<{ full_name: string | null }>()
+
     await dispatchClosureEmail({
       supabase,
       orgId:           prior.organization_id,
+      closerName:      closerProfile?.full_name ?? null,
       ticketId:        ticket_id,
       ticketLeadId:    prior.lead_id,
       ticketSubject:   prior.subject,
@@ -256,6 +264,23 @@ export async function sendTicketMessage(_prev: State, formData: FormData): Promi
 
   const trimmed = body.trim()
 
+  // Resolve the prior public message BEFORE inserting this one so the
+  // quoted block can never accidentally include the in-flight message.
+  // Falls through to ticket.description on first reply (handled in
+  // dispatchOutboundEmail).
+  let priorPublic: { body: string; created_at: string; sender_id: string | null } | null = null
+  if (type === 'public') {
+    const { data } = await supabase
+      .from('ticket_messages')
+      .select('body, created_at, sender_id')
+      .eq('ticket_id', ticket_id)
+      .eq('type', 'public')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle<{ body: string; created_at: string; sender_id: string | null }>()
+    priorPublic = data ?? null
+  }
+
   const { error } = await supabase.from('ticket_messages').insert({
     ticket_id,
     org_id:    orgId,
@@ -278,6 +303,7 @@ export async function sendTicketMessage(_prev: State, formData: FormData): Promi
       ticketSubject: ticket.subject,
       ticketDisplayId: ticket.display_id,
       body:          trimmed,
+      priorPublic,
     })
   }
 
@@ -294,6 +320,7 @@ type DispatchArgs = {
   ticketSubject:   string
   ticketDisplayId: string | null
   body:            string
+  priorPublic:     { body: string; created_at: string; sender_id: string | null } | null
 }
 
 async function dispatchOutboundEmail(args: DispatchArgs) {
@@ -305,7 +332,7 @@ async function dispatchOutboundEmail(args: DispatchArgs) {
 
   const { data: org } = await args.supabase
     .from('organizations')
-    .select('inbound_email_tag, verified_support_email')
+    .select('name, inbound_email_tag, verified_support_email')
     .eq('id', args.orgId)
     .single()
 
@@ -354,6 +381,60 @@ async function dispatchOutboundEmail(args: DispatchArgs) {
     console.warn(`[outbound] inbound tag missing for org=${args.orgId} channel=support — reply-to omitted, customer replies will land in org's verified mailbox and bypass conversation panel`)
   }
 
+  // Resolve the quoted block input. If a prior public ticket_messages row
+  // exists (passed in from sendTicketMessage so we never quote ourselves),
+  // resolve its sender display name. Otherwise fall back to the ticket
+  // description that opened it; if that's also empty, skip the quoted
+  // block entirely.
+  let prior: PriorMessage | null = null
+  if (args.priorPublic) {
+    let priorSenderName = ''
+    if (args.priorPublic.sender_id) {
+      const { data: priorProfile } = await args.supabase
+        .from('profiles')
+        .select('full_name')
+        .eq('id', args.priorPublic.sender_id)
+        .maybeSingle<{ full_name: string | null }>()
+      priorSenderName = priorProfile?.full_name?.trim() || ''
+    }
+    if (!priorSenderName) {
+      // Inbound rows have null sender_id; the lead is the most reasonable
+      // attribution. Fall back to "them" when even that's missing.
+      const leadFull = [lead.first_name, lead.last_name].filter(Boolean).join(' ').trim()
+      priorSenderName = leadFull || 'them'
+    }
+    prior = {
+      senderName: priorSenderName,
+      sentAt:     new Date(args.priorPublic.created_at),
+      body:       args.priorPublic.body,
+    }
+  } else {
+    const { data: ticketBody } = await args.supabase
+      .from('tickets')
+      .select('description, created_at')
+      .eq('id', args.ticketId)
+      .maybeSingle<{ description: string | null; created_at: string }>()
+    if (ticketBody?.description?.trim()) {
+      const leadFull = [lead.first_name, lead.last_name].filter(Boolean).join(' ').trim()
+      prior = {
+        senderName: leadFull || 'them',
+        sentAt:     new Date(ticketBody.created_at),
+        body:       ticketBody.description,
+      }
+    }
+  }
+
+  const replierFirstName = args.senderName?.trim().split(/\s+/)[0] ?? null
+  const orgName          = org?.name ?? 'Support'
+
+  const { htmlBody, textBody } = renderConversationReply({
+    leadFirstName:    lead.first_name,
+    replierFirstName,
+    orgName,
+    body:             args.body,
+    prior,
+  })
+
   const client = new ServerClient(token)
 
   try {
@@ -361,7 +442,8 @@ async function dispatchOutboundEmail(args: DispatchArgs) {
       From:    fromAddress,
       To:      lead.email,
       Subject: subject,
-      TextBody: args.body,
+      HtmlBody: htmlBody,
+      TextBody: textBody,
       ReplyTo: replyTo ?? undefined,
       Headers: [
         { Name: 'References',  Value: threadingId },
@@ -378,6 +460,7 @@ async function dispatchOutboundEmail(args: DispatchArgs) {
 type ClosureArgs = {
   supabase:        Awaited<ReturnType<typeof createClient>>
   orgId:           string
+  closerName:      string | null
   ticketId:        string
   ticketLeadId:    string | null
   ticketSubject:   string
@@ -398,7 +481,7 @@ async function dispatchClosureEmail(args: ClosureArgs) {
 
   const { data: lead } = await args.supabase
     .from('leads')
-    .select('email')
+    .select('email, first_name')
     .eq('id', args.ticketLeadId)
     .single()
 
@@ -409,7 +492,7 @@ async function dispatchClosureEmail(args: ClosureArgs) {
 
   const { data: org } = await args.supabase
     .from('organizations')
-    .select('inbound_email_tag')
+    .select('name, inbound_email_tag')
     .eq('id', args.orgId)
     .single()
 
@@ -423,7 +506,21 @@ async function dispatchClosureEmail(args: ClosureArgs) {
     console.warn(`[outbound] inbound tag missing for org=${args.orgId} channel=support — reply-to omitted, customer replies will land in org's verified mailbox and bypass conversation panel`)
   }
 
-  const text = `Your ticket (${displayId}) has been marked as resolved. If you have further questions, simply reply to this email to reopen it.`
+  // Closure body: canned text describing the status change. Threaded
+  // through renderConversationReply so the closure notification reads
+  // with the same greeting + sign-off treatment as a public reply.
+  // Closure does NOT quote prior history (the resolution moment is the
+  // notification — quoting one prior message would feel arbitrary).
+  const cannedBody = `Your ticket (${displayId}) has been marked as resolved. If you have further questions, simply reply to this email to reopen it.`
+  const replierFirstName = args.closerName?.trim().split(/\s+/)[0] ?? null
+  const orgName = org?.name ?? 'Support'
+  const { htmlBody, textBody } = renderConversationReply({
+    leadFirstName:    lead.first_name,
+    replierFirstName,
+    orgName,
+    body:             cannedBody,
+    prior:            null,
+  })
 
   const client = new ServerClient(token)
   try {
@@ -431,7 +528,8 @@ async function dispatchClosureEmail(args: ClosureArgs) {
       From:    'Kinvox Support <support@kinvoxtech.com>',
       To:      lead.email,
       Subject: subject,
-      TextBody: text,
+      HtmlBody: htmlBody,
+      TextBody: textBody,
       ReplyTo: replyTo ?? undefined,
       Headers: [
         { Name: 'References',  Value: threadingId },
