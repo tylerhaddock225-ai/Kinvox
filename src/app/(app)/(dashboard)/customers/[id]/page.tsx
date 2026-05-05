@@ -57,19 +57,10 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('organization_id')
-    .eq('id', user.id)
-    .single()
-
-  if (!profile?.organization_id) redirect('/onboarding')
-
   const { data: customerData } = await supabase
     .from('customers')
     .select('*')
     .eq('id', id)
-    .eq('organization_id', profile.organization_id)
     .is('deleted_at', null)
     .maybeSingle()
 
