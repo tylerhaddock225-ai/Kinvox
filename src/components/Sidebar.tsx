@@ -22,7 +22,7 @@ interface SidebarProps {
 
 // Top-level paths that are NOT org slugs — don't treat them as "current slug".
 const RESERVED_TOP = new Set([
-  "leads", "signals", "tickets", "customers", "appointments", "settings", "support",
+  "leads", "signals", "settings", "support",
   "login", "signup", "forgot-password", "reset-password",
   "onboarding", "admin", "hq", "api",
 ]);
@@ -46,19 +46,20 @@ export default function Sidebar({
   const dashboardHref = dashboardSlug ? `/${dashboardSlug}` : "/";
   const hqSupportHref = dashboardSlug ? `/${dashboardSlug}/hq-support` : "/support";
   const settingsHref  = dashboardSlug ? `/${dashboardSlug}/settings/team` : "/settings/team";
-  const leadsHref     = dashboardSlug ? `/${dashboardSlug}/leads`   : "/leads";
-  const signalsHref   = dashboardSlug ? `/${dashboardSlug}/signals` : "/signals";
+  const leadsHref        = dashboardSlug ? `/${dashboardSlug}/leads`        : "/leads";
+  const signalsHref      = dashboardSlug ? `/${dashboardSlug}/signals`      : "/signals";
+  const customersHref    = dashboardSlug ? `/${dashboardSlug}/customers`    : "/customers";
+  const appointmentsHref = dashboardSlug ? `/${dashboardSlug}/appointments` : "/appointments";
+  const ticketsHref      = dashboardSlug ? `/${dashboardSlug}/tickets`      : "/tickets";
   const onHqSupport = dashboardSlug
     ? pathname === hqSupportHref || pathname.startsWith(`${hqSupportHref}/`)
     : pathname.startsWith("/support");
 
-  // Customers / Appointments / Tickets still live at the top level —
-  // only Leads, Signals, and Settings moved under [orgSlug] in this sprint.
   const staticNav = [
-    { href: dashboardHref,   label: "Dashboard",    icon: LayoutDashboard },
-    { href: "/customers",    label: "Customers",    icon: UserCircle },
-    { href: "/appointments", label: "Appointments", icon: CalendarCheck },
-    { href: "/tickets",      label: "Tickets",      icon: Ticket },
+    { href: dashboardHref,    label: "Dashboard",    icon: LayoutDashboard },
+    { href: customersHref,    label: "Customers",    icon: UserCircle },
+    { href: appointmentsHref, label: "Appointments", icon: CalendarCheck },
+    { href: ticketsHref,      label: "Tickets",      icon: Ticket },
   ];
 
   // Signals slots immediately under Leads. When the viewer can't see

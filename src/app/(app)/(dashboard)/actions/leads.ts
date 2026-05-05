@@ -1,7 +1,7 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
-import { resolveEffectiveOrgId } from '@/lib/impersonation'
+import { resolveEffectiveOrgId, revalidateOrgPath } from '@/lib/impersonation'
 import { revalidatePath } from 'next/cache'
 import type { Lead } from '@/lib/types/database.types'
 import { sendOrgTransactionalEmail, type OrgEmailContext } from '@/lib/email/send-org-email'
@@ -125,6 +125,8 @@ export async function updateLead(
   const rawSource = (formData.get('source') as string) || ''
   const source    = (LEAD_SOURCES as string[]).includes(rawSource) ? (rawSource as Lead['source']) : null
 
+  const orgId = await resolveEffectiveOrgId(supabase, user.id)
+
   const { error } = await supabase.from('leads').update({
     first_name: firstName,
     last_name:  ((formData.get('last_name') as string) ?? '').trim() || null,
@@ -136,7 +138,9 @@ export async function updateLead(
 
   if (error) return { status: 'error', error: error.message }
 
-  revalidatePath(`/leads/${leadId}`)
+  if (orgId) {
+    await revalidateOrgPath(supabase, orgId, `/leads/${leadId}`)
+  }
   revalidatePath('/[orgSlug]/leads', 'page')
   return { status: 'success' }
 }
@@ -149,6 +153,8 @@ export async function updateLeadStatus(leadId: string, status: string): Promise<
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return
+
+  const orgId = await resolveEffectiveOrgId(supabase, user.id)
 
   const { error: updErr } = await supabase
     .from('leads')
@@ -188,12 +194,14 @@ export async function updateLeadStatus(leadId: string, status: string): Promise<
           email:          lead.email,
           company:        lead.company,
         })
-        revalidatePath('/customers')
+        await revalidateOrgPath(supabase, lead.organization_id, '/customers')
       }
     }
   }
 
-  revalidatePath(`/leads/${leadId}`)
+  if (orgId) {
+    await revalidateOrgPath(supabase, orgId, `/leads/${leadId}`)
+  }
   revalidatePath('/[orgSlug]/leads', 'page')
   revalidatePath('/')
 }
@@ -215,6 +223,8 @@ export async function addLeadNote(
   const content = (formData.get('content') as string | null)?.trim()
   if (!content) return { status: 'error', error: 'Note cannot be empty' }
 
+  const orgId = await resolveEffectiveOrgId(supabase, user.id)
+
   const { error } = await supabase.from('lead_activities').insert({
     lead_id: leadId,
     user_id: user.id,
@@ -223,7 +233,9 @@ export async function addLeadNote(
 
   if (error) return { status: 'error', error: error.message }
 
-  revalidatePath(`/leads/${leadId}`)
+  if (orgId) {
+    await revalidateOrgPath(supabase, orgId, `/leads/${leadId}`)
+  }
   return { status: 'success' }
 }
 

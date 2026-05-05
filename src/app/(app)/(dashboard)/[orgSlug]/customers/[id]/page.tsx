@@ -50,8 +50,8 @@ function Field({ icon: Icon, label, value }: { icon: typeof Mail; label: string;
   )
 }
 
-export default async function CustomerDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params
+export default async function CustomerDetailPage({ params }: { params: Promise<{ orgSlug: string; id: string }> }) {
+  const { orgSlug, id } = await params
   const supabase = await createClient()
 
   const { data: { user } } = await supabase.auth.getUser()
@@ -111,7 +111,7 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
     <div className="px-8 py-8 space-y-6">
       <div>
         <Link
-          href="/customers"
+          href={`/${orgSlug}/customers`}
           className="inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-300 transition-colors"
         >
           <ArrowLeft className="w-3.5 h-3.5" />
@@ -144,7 +144,7 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
         {c.lead_id && (
           <div className="mt-1">
             <Link
-              href={`/leads/${c.lead_id}`}
+              href={`/${orgSlug}/leads/${c.lead_id}`}
               className="text-violet-400 hover:text-violet-300 text-xs font-medium transition-colors"
             >
               View Lead Profile →
@@ -192,7 +192,7 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
                   <ul className="space-y-1">
                     {tickets.slice(0, 5).map(t => (
                       <li key={t.id} className="flex items-center justify-between gap-2 text-xs">
-                        <Link href={`/tickets/${t.id}`} className="text-gray-200 hover:text-violet-300 truncate">
+                        <Link href={`/${orgSlug}/tickets/${t.id}`} className="text-gray-200 hover:text-violet-300 truncate">
                           {t.subject}
                         </Link>
                         <span className={`shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium border capitalize ${TICKET_STATUS_COLORS[t.status]}`}>
@@ -213,7 +213,7 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
                   <ul className="space-y-1">
                     {appts.slice(0, 5).map(a => (
                       <li key={a.id} className="flex items-center justify-between gap-2 text-xs">
-                        <Link href={`/appointments?open=${a.id}`} className="text-gray-200 hover:text-violet-300 truncate">
+                        <Link href={`/${orgSlug}/appointments?open=${a.id}`} className="text-gray-200 hover:text-violet-300 truncate">
                           {a.title}
                         </Link>
                         <span className={`shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium border capitalize ${APPT_STATUS_COLORS[a.status]}`}>

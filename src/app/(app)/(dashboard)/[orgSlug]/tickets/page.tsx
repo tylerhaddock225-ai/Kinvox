@@ -38,12 +38,14 @@ function QueueTab({
   count,
   params,
   label,
+  orgSlug,
 }: {
   queue:   'active' | 'closed'
   current: 'active' | 'closed'
   count:   number
   params:  Record<string, string | undefined>
   label:   string
+  orgSlug: string
 }) {
   // Preserve sort/order/priority/assigned across tab switches; drop a stale
   // `status` filter (it'd usually conflict with the new queue).
@@ -55,7 +57,7 @@ function QueueTab({
   }
   if (queue !== 'active') next.set('queue', queue)
 
-  const href = `/tickets${next.toString() ? `?${next.toString()}` : ''}`
+  const href = `/${orgSlug}/tickets${next.toString() ? `?${next.toString()}` : ''}`
   const isActive = current === queue
 
   return (
@@ -91,8 +93,10 @@ type Queue = 'active' | 'closed'
 const ACTIVE_STATUSES: Ticket['status'][] = ['open', 'pending']
 
 export default async function TicketsPage({
+  params: routeParams,
   searchParams,
 }: {
+  params: Promise<{ orgSlug: string }>
   searchParams: Promise<{
     status?:   string
     priority?: string
@@ -102,6 +106,7 @@ export default async function TicketsPage({
     queue?:    string
   }>
 }) {
+  const { orgSlug } = await routeParams
   const supabase = await createClient()
 
   const { data: { user } } = await supabase.auth.getUser()
@@ -123,15 +128,6 @@ export default async function TicketsPage({
 
   const orgId   = effectiveOrgId
 
-  // Slug for the settings/team link further down. Tickets still lives at
-  // the non-scoped /tickets path, so we can't pull orgSlug from route params.
-  const { data: orgRow } = await supabase
-    .from('organizations')
-    .select('slug')
-    .eq('id', orgId)
-    .maybeSingle<{ slug: string | null }>()
-  const orgSlug = orgRow?.slug ?? null
-
   const params  = await searchParams
   const requestedQueue: Queue = params.queue === 'closed' ? 'closed' : 'active'
 
@@ -150,7 +146,7 @@ export default async function TicketsPage({
       next.set(k, v)
     }
     if (correctQueue !== 'active') next.set('queue', correctQueue)
-    redirect(`/tickets${next.toString() ? `?${next.toString()}` : ''}`)
+    redirect(`/${orgSlug}/tickets${next.toString() ? `?${next.toString()}` : ''}`)
   }
 
   const queue: Queue = requestedQueue
@@ -259,7 +255,7 @@ export default async function TicketsPage({
           <p>
             Emails are currently sending from Kinvox.{' '}
             <Link
-              href={orgSlug ? `/${orgSlug}/settings/team` : '/pending-invite'}
+              href={`/${orgSlug}/settings/team`}
               className="underline decoration-dotted underline-offset-4 hover:text-yellow-100"
             >
               Verify your custom domain email in Settings
@@ -270,8 +266,8 @@ export default async function TicketsPage({
       )}
 
       <div className="flex items-center gap-1 border-b border-pvx-border">
-        <QueueTab queue="active" current={queue} count={activeCount} params={params} label="Active" />
-        <QueueTab queue="closed" current={queue} count={closedCount} params={params} label="Closed" />
+        <QueueTab queue="active" current={queue} count={activeCount} params={params} label="Active" orgSlug={orgSlug} />
+        <QueueTab queue="closed" current={queue} count={closedCount} params={params} label="Closed" orgSlug={orgSlug} />
       </div>
 
       <TicketsFilterBar members={members} queue={queue} />
@@ -310,12 +306,12 @@ export default async function TicketsPage({
             </thead>
             <tbody className="divide-y divide-pvx-border">
               {rows.map(t => (
-                <TicketRow key={t.id} href={`/tickets/${t.id}`}>
+                <TicketRow key={t.id} href={`/${orgSlug}/tickets/${t.id}`}>
                   <td className="pl-6 pr-3 py-3 text-xs">
                     <CopyId id={t.display_id} />
                   </td>
                   <td className="px-3 py-3 text-gray-200 font-medium">
-                    <Link href={`/tickets/${t.id}`} className="hover:text-violet-400 transition-colors">
+                    <Link href={`/${orgSlug}/tickets/${t.id}`} className="hover:text-violet-400 transition-colors">
                       {t.subject}
                     </Link>
                   </td>

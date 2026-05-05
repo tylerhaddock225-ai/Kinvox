@@ -2,7 +2,7 @@
 
 import { ServerClient } from 'postmark'
 import { createClient } from '@/lib/supabase/server'
-import { resolveEffectiveOrgId } from '@/lib/impersonation'
+import { resolveEffectiveOrgId, revalidateOrgPath } from '@/lib/impersonation'
 import { revalidatePath } from 'next/cache'
 import { constructInboundEmailAddress } from '@/lib/email/inbound-address'
 import { renderConversationReply, type PriorMessage } from '@/lib/email/templates/reply'
@@ -47,7 +47,7 @@ export async function createTicket(_prev: State, formData: FormData): Promise<St
 
   if (error) return { status: 'error', error: error.message }
 
-  revalidatePath('/tickets')
+  await revalidateOrgPath(supabase, orgId, '/tickets')
   return { status: 'success' }
 }
 
@@ -168,8 +168,10 @@ export async function updateTicketStatus(formData: FormData): Promise<void> {
     })
   }
 
-  revalidatePath('/tickets')
-  revalidatePath(`/tickets/${ticket_id}`)
+  if (prior?.organization_id) {
+    await revalidateOrgPath(supabase, prior.organization_id, '/tickets')
+    await revalidateOrgPath(supabase, prior.organization_id, `/tickets/${ticket_id}`)
+  }
   // Mirror the revalidations for the HQ views so inline edits from
   // /hq/tickets refresh the grid counts + detail immediately.
   revalidatePath('/hq/tickets')
@@ -189,13 +191,17 @@ export async function updateTicketPriority(formData: FormData): Promise<void> {
   if (!ticket_id) return
   if (!PRIORITY_VALUES.includes(priority as TicketPriority)) return
 
+  const orgId = await resolveEffectiveOrgId(supabase, user.id)
+
   await supabase
     .from('tickets')
     .update({ priority: priority as TicketPriority })
     .eq('id', ticket_id)
 
-  revalidatePath('/tickets')
-  revalidatePath(`/tickets/${ticket_id}`)
+  if (orgId) {
+    await revalidateOrgPath(supabase, orgId, '/tickets')
+    await revalidateOrgPath(supabase, orgId, `/tickets/${ticket_id}`)
+  }
   revalidatePath('/hq/tickets')
   revalidatePath(`/hq/tickets/${ticket_id}`)
   revalidatePath('/[orgSlug]/hq-support', 'page')
@@ -220,7 +226,10 @@ export async function updateTicketSubject(_prev: State, formData: FormData): Pro
 
   if (error) return { status: 'error', error: error.message }
 
-  revalidatePath(`/tickets/${ticket_id}`)
+  const subjectOrgId = await resolveEffectiveOrgId(supabase, user.id)
+  if (subjectOrgId) {
+    await revalidateOrgPath(supabase, subjectOrgId, `/tickets/${ticket_id}`)
+  }
   revalidatePath('/[orgSlug]/hq-support/[id]', 'page')
   return { status: 'success' }
 }
@@ -307,7 +316,7 @@ export async function sendTicketMessage(_prev: State, formData: FormData): Promi
     })
   }
 
-  revalidatePath(`/tickets/${ticket_id}`)
+  await revalidateOrgPath(supabase, orgId, `/tickets/${ticket_id}`)
   return { status: 'success' }
 }
 

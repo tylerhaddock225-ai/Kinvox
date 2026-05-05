@@ -1,6 +1,6 @@
 'use client'
 
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 import { useTransition } from 'react'
 import { ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react'
 
@@ -19,6 +19,7 @@ export default function SortableHeader({
 }) {
   const router       = useRouter()
   const searchParams = useSearchParams()
+  const pathname     = usePathname()
   const [pending, startTransition] = useTransition()
 
   const activeSort  = searchParams.get('sort')
@@ -36,7 +37,7 @@ export default function SortableHeader({
       next.set('order', defaultOrder)
     }
     startTransition(() => {
-      router.replace(`/tickets?${next.toString()}`, { scroll: false })
+      router.replace(`${pathname}?${next.toString()}`, { scroll: false })
     })
   }
 

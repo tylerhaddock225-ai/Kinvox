@@ -4,12 +4,14 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Search } from 'lucide-react'
 import { globalSearch } from '@/app/(app)/actions/search'
+import { useOrgSlug } from '@/lib/hooks/useOrgSlug'
 
 export default function GlobalSearch() {
   const [q, setQ] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [pending, startTrans] = useTransition()
   const router = useRouter()
+  const orgSlug = useOrgSlug()
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -24,12 +26,12 @@ export default function GlobalSearch() {
         return
       }
       if (hit.type === 'lead') {
-        router.push(`/leads/${hit.id}`)
+        router.push(orgSlug ? `/${orgSlug}/leads/${hit.id}` : `/leads/${hit.id}`)
       } else if (hit.type === 'ticket') {
-        router.push(`/tickets/${hit.id}`)
+        router.push(orgSlug ? `/${orgSlug}/tickets/${hit.id}` : `/tickets/${hit.id}`)
       } else {
         const params = new URLSearchParams({ open: hit.id, d: hit.start_at })
-        router.push(`/appointments?${params.toString()}`)
+        router.push(orgSlug ? `/${orgSlug}/appointments?${params.toString()}` : `/appointments?${params.toString()}`)
       }
       setQ('')
     })

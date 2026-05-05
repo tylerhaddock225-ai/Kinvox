@@ -6,7 +6,7 @@ import { Search, X } from 'lucide-react'
 
 // Mirrors LeadsFilters styling + debounce exactly so the two search bars
 // feel identical. No status/source selects — customers don\u2019t carry those.
-export default function CustomersFilters() {
+export default function CustomersFilters({ orgSlug }: { orgSlug: string }) {
   const router       = useRouter()
   const searchParams = useSearchParams()
   const [, startTrans] = useTransition()
@@ -18,7 +18,7 @@ export default function CustomersFilters() {
   function push(next: URLSearchParams) {
     const qs = next.toString()
     startTrans(() => {
-      router.replace(qs ? `/customers?${qs}` : '/customers')
+      router.replace(qs ? `/${orgSlug}/customers?${qs}` : `/${orgSlug}/customers`)
     })
   }
 

@@ -3,7 +3,7 @@
 import { ServerClient } from 'postmark'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { revalidatePath } from 'next/cache'
+import { revalidateOrgPath } from '@/lib/impersonation'
 import { buildIcs } from '@/lib/ics'
 
 export type State = { status: 'success' } | { status: 'error'; error: string } | null
@@ -69,7 +69,7 @@ export async function createAppointment(_prev: State, formData: FormData): Promi
     organizationId: profile.organization_id,
   })
 
-  revalidatePath('/appointments')
+  await revalidateOrgPath(supabase, profile.organization_id, '/appointments')
   return { status: 'success' }
 }
 
@@ -78,9 +78,19 @@ export async function deleteAppointment(appointmentId: string): Promise<void> {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return
 
+  // Resolve the appointment's org BEFORE the delete so we can revalidate
+  // the scoped path afterward (the row is gone post-delete; can't look up).
+  const { data: existing } = await supabase
+    .from('appointments')
+    .select('organization_id')
+    .eq('id', appointmentId)
+    .maybeSingle<{ organization_id: string }>()
+
   await supabase.from('appointments').delete().eq('id', appointmentId)
 
-  revalidatePath('/appointments')
+  if (existing?.organization_id) {
+    await revalidateOrgPath(supabase, existing.organization_id, '/appointments')
+  }
 }
 
 export async function updateAppointment(
@@ -127,7 +137,7 @@ export async function updateAppointment(
 
   if (error) return { status: 'error', error: error.message }
 
-  revalidatePath('/appointments')
+  await revalidateOrgPath(supabase, existing.organization_id, '/appointments')
   return { status: 'success' }
 }
 

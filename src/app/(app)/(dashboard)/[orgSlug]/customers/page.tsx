@@ -17,7 +17,14 @@ type CustomerRow = Pick<
 
 type SearchParams = Promise<{ q?: string; show?: string }>
 
-export default async function CustomersPage({ searchParams }: { searchParams: SearchParams }) {
+export default async function CustomersPage({
+  params: routeParams,
+  searchParams,
+}: {
+  params:       Promise<{ orgSlug: string }>
+  searchParams: SearchParams
+}) {
+  const { orgSlug } = await routeParams
   const params   = await searchParams
   const supabase = await createClient()
 
@@ -86,13 +93,13 @@ export default async function CustomersPage({ searchParams }: { searchParams: Se
       </div>
 
       <Suspense fallback={<div className="h-10" />}>
-        <CustomersFilters />
+        <CustomersFilters orgSlug={orgSlug} />
       </Suspense>
 
       {archived > 0 && (
         <div className="text-xs">
           <Link
-            href={showArchived ? '/customers' : '/customers?show=all'}
+            href={showArchived ? `/${orgSlug}/customers` : `/${orgSlug}/customers?show=all`}
             className="inline-flex items-center gap-1.5 font-medium text-violet-300 hover:text-violet-200 transition-colors"
           >
             <Archive className="w-3 h-3" />
@@ -126,7 +133,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Se
               {rows.map(c => {
                 const archivedRow = !!c.archived_at
                 return (
-                  <CustomerRow key={c.id} id={c.id}>
+                  <CustomerRow key={c.id} id={c.id} orgSlug={orgSlug}>
                     <td className={`pl-6 pr-3 py-3 text-xs ${archivedRow ? 'opacity-60' : ''}`}>
                       <CopyId id={c.display_id} />
                     </td>

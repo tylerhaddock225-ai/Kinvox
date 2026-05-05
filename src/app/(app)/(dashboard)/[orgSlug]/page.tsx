@@ -328,7 +328,7 @@ export default async function DashboardPage({
         <div className="rounded-xl border border-pvx-border bg-gray-900 overflow-hidden">
           <div className="px-6 py-4 border-b border-pvx-border flex items-center justify-between">
             <h2 className="text-sm font-semibold text-white">Upcoming Appointments</h2>
-            <Link href="/appointments" className="text-xs text-violet-300 hover:text-violet-200 transition-colors">
+            <Link href={`/${orgSlug}/appointments`} className="text-xs text-violet-300 hover:text-violet-200 transition-colors">
               View all \u2192
             </Link>
           </div>
@@ -343,7 +343,7 @@ export default async function DashboardPage({
                 const when = new Date(a.start_at)
                 return (
                   <li key={a.id} className="px-6 py-3 hover:bg-violet-400/[0.05] transition-colors">
-                    <Link href={`/appointments?open=${a.id}`} className="flex items-center justify-between gap-4">
+                    <Link href={`/${orgSlug}/appointments?open=${a.id}`} className="flex items-center justify-between gap-4">
                       <div className="min-w-0">
                         <p className="text-sm text-gray-200 font-medium truncate">{a.title}</p>
                         {a.location && <p className="text-xs text-gray-500 truncate">{a.location}</p>}

@@ -128,7 +128,7 @@ export default async function LeadDetailPage({
         {linkedCustomerId && (
           <div className="mt-1">
             <Link
-              href={`/customers/${linkedCustomerId}`}
+              href={`/${orgSlug}/customers/${linkedCustomerId}`}
               className="text-violet-400 hover:text-violet-300 text-xs font-medium transition-colors"
             >
               View Customer Profile →

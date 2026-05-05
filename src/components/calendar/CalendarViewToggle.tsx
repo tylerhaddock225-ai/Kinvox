@@ -3,6 +3,7 @@
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useTransition } from 'react'
 import { User, Users, Globe } from 'lucide-react'
+import { useOrgSlug } from '@/lib/hooks/useOrgSlug'
 
 type Member = { id: string; full_name: string | null }
 type View   = 'mine' | 'agent' | 'global'
@@ -16,6 +17,7 @@ export default function CalendarViewToggle({
 }) {
   const router       = useRouter()
   const searchParams = useSearchParams()
+  const orgSlug      = useOrgSlug()
   const [pending, startTransition] = useTransition()
 
   const view: View = (() => {
@@ -41,7 +43,8 @@ export default function CalendarViewToggle({
       else       params.delete('agent')
     }
     const qs = params.toString()
-    startTransition(() => router.replace(`/appointments${qs ? `?${qs}` : ''}`, { scroll: false }))
+    const base = orgSlug ? `/${orgSlug}/appointments` : '/appointments'
+    startTransition(() => router.replace(`${base}${qs ? `?${qs}` : ''}`, { scroll: false }))
   }
 
   return (

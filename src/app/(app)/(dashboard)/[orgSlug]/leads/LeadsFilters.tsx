@@ -3,10 +3,12 @@
 import { useEffect, useRef, useState, useTransition } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Search, X } from 'lucide-react'
+import { useOrgSlug } from '@/lib/hooks/useOrgSlug'
 
 export default function LeadsFilters() {
   const router       = useRouter()
   const searchParams = useSearchParams()
+  const orgSlug      = useOrgSlug()
   const [, startTrans] = useTransition()
 
   const [q, setQ] = useState(searchParams.get('q') ?? '')
@@ -17,8 +19,9 @@ export default function LeadsFilters() {
 
   function push(next: URLSearchParams) {
     const qs = next.toString()
+    const base = orgSlug ? `/${orgSlug}/leads` : '/leads'
     startTrans(() => {
-      router.replace(qs ? `/leads?${qs}` : '/leads')
+      router.replace(qs ? `${base}?${qs}` : base)
     })
   }
 

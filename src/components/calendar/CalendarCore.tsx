@@ -13,6 +13,7 @@ import DayOverviewModal, {
   type DayOverviewModalHandle,
 } from './DayOverviewModal'
 import { tintForAgent } from '@/lib/agent-colors'
+import { useOrgSlug } from '@/lib/hooks/useOrgSlug'
 
 export type CalAppt = {
   id:          string
@@ -98,6 +99,7 @@ const VIEWS: { key: View; label: string }[] = [
 export default function CalendarCore({ appointments, members, customers, colorByAgent = false }: Props) {
   const router       = useRouter()
   const searchParams = useSearchParams()
+  const orgSlug      = useOrgSlug()
 
   // Read URL params ONCE at mount so the first render is already on the right
   // day/view — no flash from month→day after an effect fires.
@@ -151,8 +153,9 @@ export default function CalendarCore({ appointments, members, customers, colorBy
     next.delete('open')
     next.delete('d')
     const qs = next.toString()
-    router.replace(qs ? `/appointments?${qs}` : '/appointments', { scroll: false })
-  }, [searchParams, appointments, router])
+    const base = orgSlug ? `/${orgSlug}/appointments` : '/appointments'
+    router.replace(qs ? `${base}?${qs}` : base, { scroll: false })
+  }, [searchParams, appointments, router, orgSlug])
 
   const today = startOfDay(now)
 

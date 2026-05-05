@@ -16,7 +16,7 @@ function initials(name: string | null | undefined) {
   return name.trim().split(/\s+/).slice(0, 2).map(p => p[0]?.toUpperCase()).join('') || '??'
 }
 
-export default async function TicketDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function TicketDetailPage({ params }: { params: Promise<{ orgSlug: string; id: string }> }) {
   const { id } = await params
   const supabase = await createClient()
 

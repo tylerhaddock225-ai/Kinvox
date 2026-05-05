@@ -1,9 +1,8 @@
 'use server'
 
-import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { resolveEffectiveOrgId } from '@/lib/impersonation'
+import { resolveEffectiveOrgId, resolveOrgSlug, revalidateOrgPath } from '@/lib/impersonation'
 
 // ── Types (shared with client components) ───────────────────────────────────
 
@@ -54,8 +53,17 @@ export async function createNewCustomer(
 
   if (error) return { status: 'error', error: error.message }
 
-  revalidatePath('/customers')
-  redirect(`/customers/${inserted.id}`)
+  // Resolve slug once for both the revalidate and the post-insert redirect.
+  // If slug lookup fails (org row vanished between insert and redirect, which
+  // would be very unusual), bounce to /onboarding — the user's org context
+  // is broken and the current detail URL won't resolve anyway.
+  const slug = await resolveOrgSlug(supabase, orgId)
+  if (!slug) {
+    console.warn(`[revalidate] could not resolve slug for org=${orgId} suffix=/customers`)
+    redirect('/onboarding')
+  }
+  revalidateOrgPath(supabase, orgId, '/customers')
+  redirect(`/${slug}/customers/${inserted.id}`)
 }
 
 
@@ -73,6 +81,8 @@ export async function updateCustomer(
   const firstName = ((formData.get('first_name') as string) ?? '').trim()
   if (!firstName) return { status: 'error', error: 'First name is required' }
 
+  const orgId = await resolveEffectiveOrgId(supabase, user.id)
+
   const { error } = await supabase.from('customers').update({
     first_name: firstName,
     last_name:  ((formData.get('last_name') as string) ?? '').trim() || null,
@@ -83,8 +93,10 @@ export async function updateCustomer(
 
   if (error) return { status: 'error', error: error.message }
 
-  revalidatePath(`/customers/${customerId}`)
-  revalidatePath('/customers')
+  if (orgId) {
+    await revalidateOrgPath(supabase, orgId, `/customers/${customerId}`)
+    await revalidateOrgPath(supabase, orgId, '/customers')
+  }
   return { status: 'success' }
 }
 
@@ -98,13 +110,17 @@ export async function updateCustomerStatus(customerId: string, status: string): 
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return
 
+  const orgId = await resolveEffectiveOrgId(supabase, user.id)
+
   await supabase
     .from('customers')
     .update({ status })
     .eq('id', customerId)
 
-  revalidatePath(`/customers/${customerId}`)
-  revalidatePath('/customers')
+  if (orgId) {
+    await revalidateOrgPath(supabase, orgId, `/customers/${customerId}`)
+    await revalidateOrgPath(supabase, orgId, '/customers')
+  }
 }
 
 
@@ -135,8 +151,8 @@ export async function archiveCustomer(formData: FormData): Promise<void> {
     .eq('id', customerId)
     .eq('organization_id', orgId)
 
-  revalidatePath('/customers')
-  revalidatePath(`/customers/${customerId}`)
+  await revalidateOrgPath(supabase, orgId, '/customers')
+  await revalidateOrgPath(supabase, orgId, `/customers/${customerId}`)
 }
 
 export async function restoreCustomer(formData: FormData): Promise<void> {
@@ -156,8 +172,8 @@ export async function restoreCustomer(formData: FormData): Promise<void> {
     .eq('id', customerId)
     .eq('organization_id', orgId)
 
-  revalidatePath('/customers')
-  revalidatePath(`/customers/${customerId}`)
+  await revalidateOrgPath(supabase, orgId, '/customers')
+  await revalidateOrgPath(supabase, orgId, `/customers/${customerId}`)
 }
 
 
@@ -175,12 +191,16 @@ export async function addCustomerNote(
   const content = (formData.get('content') as string | null)?.trim()
   if (!content) return { status: 'error', error: 'Note cannot be empty' }
 
+  const orgId = await resolveEffectiveOrgId(supabase, user.id)
+
   const { error } = await supabase
     .from('customer_activities')
     .insert({ customer_id: customerId, user_id: user.id, content })
 
   if (error) return { status: 'error', error: error.message }
 
-  revalidatePath(`/customers/${customerId}`)
+  if (orgId) {
+    await revalidateOrgPath(supabase, orgId, `/customers/${customerId}`)
+  }
   return { status: 'success' }
 }

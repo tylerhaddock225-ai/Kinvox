@@ -3,6 +3,7 @@
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useTransition } from 'react'
 import { X } from 'lucide-react'
+import { useOrgSlug } from '@/lib/hooks/useOrgSlug'
 
 type Member = { id: string; full_name: string | null }
 type Queue  = 'active' | 'closed'
@@ -19,6 +20,7 @@ export default function TicketsFilterBar({
 }) {
   const router       = useRouter()
   const searchParams = useSearchParams()
+  const orgSlug      = useOrgSlug()
   const [pending, startTransition] = useTransition()
 
   const status   = searchParams.get('status')   ?? ''
@@ -29,8 +31,9 @@ export default function TicketsFilterBar({
     const next = new URLSearchParams(searchParams.toString())
     if (value) next.set(key, value)
     else       next.delete(key)
+    const base = orgSlug ? `/${orgSlug}/tickets` : '/tickets'
     startTransition(() => {
-      router.replace(`/tickets${next.toString() ? `?${next.toString()}` : ''}`, { scroll: false })
+      router.replace(`${base}${next.toString() ? `?${next.toString()}` : ''}`, { scroll: false })
     })
   }
 
@@ -93,7 +96,8 @@ export default function TicketsFilterBar({
             if (sort)  next.set('sort', sort)
             if (order) next.set('order', order)
             const qs = next.toString()
-            startTransition(() => router.replace(`/tickets${qs ? `?${qs}` : ''}`, { scroll: false }))
+            const base = orgSlug ? `/${orgSlug}/tickets` : '/tickets'
+            startTransition(() => router.replace(`${base}${qs ? `?${qs}` : ''}`, { scroll: false }))
           }}
           className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
           disabled={pending}

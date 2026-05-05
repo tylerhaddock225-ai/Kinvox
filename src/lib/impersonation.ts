@@ -1,4 +1,5 @@
 import { cookies } from 'next/headers'
+import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>
@@ -79,6 +80,47 @@ export async function resolveEffectiveOrgId(
  * Mirrors the inline pattern that previously appeared in saveHuntingProfile
  * and disconnectSocialPlatform — same predicate, deduplicated.
  */
+/**
+ * Resolves the URL slug for a tenant org. Used to scope revalidatePath /
+ * server-side redirects under the [orgSlug] segment after the routing
+ * migration. Returns null on missing row or query error — callers decide
+ * whether silence is acceptable (revalidate misses are best-effort; a
+ * post-insert redirect probably wants a stricter fallback).
+ */
+export async function resolveOrgSlug(
+  supabase: SupabaseServerClient,
+  orgId:    string,
+): Promise<string | null> {
+  const { data } = await supabase
+    .from('organizations')
+    .select('slug')
+    .eq('id', orgId)
+    .maybeSingle<{ slug: string | null }>()
+  return data?.slug ?? null
+}
+
+/**
+ * Best-effort scoped revalidation. Resolves the org slug then revalidates
+ * `/<slug><suffix>`; if the slug can't be resolved, logs a one-line warn
+ * and skips. The caller's data write already succeeded — cache invalidation
+ * being slightly stale is acceptable. Crashing the action just to refresh
+ * a list is not.
+ *
+ * `suffix` should start with `/` (e.g. `/tickets`, `/tickets/${id}`).
+ */
+export async function revalidateOrgPath(
+  supabase: SupabaseServerClient,
+  orgId:    string,
+  suffix:   string,
+): Promise<void> {
+  const slug = await resolveOrgSlug(supabase, orgId)
+  if (!slug) {
+    console.warn(`[revalidate] could not resolve slug for org=${orgId} suffix=${suffix}`)
+    return
+  }
+  revalidatePath(`/${slug}${suffix}`)
+}
+
 export async function requireTenantAdmin(
   supabase: SupabaseServerClient,
   userId: string,
