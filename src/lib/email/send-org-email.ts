@@ -42,6 +42,10 @@ export type SendOrgEmailParams = {
   replyTo?:            string
   tag?:                string
   fromAddressSource?:  FromAddressSource
+  // Arbitrary RFC-5322 headers forwarded to Postmark verbatim. Used by
+  // outbound callers to wire In-Reply-To / References for client-side
+  // threading. Omit when not threading.
+  headers?:            Array<{ Name: string; Value: string }>
 }
 
 export type SendOrgEmailResult =
@@ -71,7 +75,7 @@ function resolveFromAddress(org: OrgEmailContext, source: FromAddressSource): st
 export async function sendOrgTransactionalEmail(
   params: SendOrgEmailParams,
 ): Promise<SendOrgEmailResult> {
-  const { org, to, subject, htmlBody, textBody, replyTo, tag, fromAddressSource } = params
+  const { org, to, subject, htmlBody, textBody, replyTo, tag, fromAddressSource, headers } = params
   const source = fromAddressSource ?? 'support'
   const LOG = '[send-org-email]'
 
@@ -91,6 +95,7 @@ export async function sendOrgTransactionalEmail(
       TextBody: textBody,
       ReplyTo:  replyTo,
       Tag:      tag,
+      Headers:  headers,
     })
     console.log(`${LOG} ok org=${org.id} tag=${tag ?? '-'} source=${source} postmark_id=${result.MessageID}`)
     return { ok: true, messageId: result.MessageID }

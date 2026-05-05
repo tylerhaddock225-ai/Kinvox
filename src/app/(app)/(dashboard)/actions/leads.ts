@@ -5,6 +5,7 @@ import { resolveEffectiveOrgId } from '@/lib/impersonation'
 import { revalidatePath } from 'next/cache'
 import type { Lead } from '@/lib/types/database.types'
 import { sendOrgTransactionalEmail, type OrgEmailContext } from '@/lib/email/send-org-email'
+import { constructInboundEmailAddress } from '@/lib/email/inbound-address'
 
 export type CreateLeadState =
   | { status: 'success' }
@@ -314,9 +315,9 @@ export async function postLeadPublicReply(
   // post-Sprint-3 split — verified_lead_email_*, NOT verified_support_email_*.
   const { data: orgRow } = await supabase
     .from('organizations')
-    .select('id, name, verified_support_email, verified_support_email_confirmed_at, verified_lead_email, verified_lead_email_confirmed_at')
+    .select('id, name, verified_support_email, verified_support_email_confirmed_at, verified_lead_email, verified_lead_email_confirmed_at, inbound_lead_email_tag')
     .eq('id', orgId)
-    .single<OrgEmailContext>()
+    .single<OrgEmailContext & { inbound_lead_email_tag: string | null }>()
   if (!orgRow) return { status: 'error', error: 'Organization not found' }
 
   if (!orgRow.verified_lead_email_confirmed_at) {
@@ -355,6 +356,16 @@ ${paragraphs}
 </body>
 </html>`
 
+  // Reply-To + threading: same shape as the lead-confirmation send so
+  // Gmail/Outlook keep the conversation grouped, and the prospect's reply
+  // routes through the plus-addressed inbound mailbox into the lead
+  // conversation panel via the postmark/inbound webhook.
+  const replyTo     = constructInboundEmailAddress(orgRow.inbound_lead_email_tag)
+  const threadingId = `<${lead.display_id ?? `ld_${lead.id}`}@kinvox.com>`
+  if (!replyTo) {
+    console.warn(`[outbound] inbound tag missing for org=${orgRow.id} channel=lead — reply-to omitted, customer replies will land in org's verified mailbox and bypass conversation panel`)
+  }
+
   const sendResult = await sendOrgTransactionalEmail({
     org:               orgRow,
     to:                lead.email,
@@ -363,6 +374,11 @@ ${paragraphs}
     textBody:          body,
     tag:               'lead-reply',
     fromAddressSource: 'lead',
+    replyTo:           replyTo ?? undefined,
+    headers: [
+      { Name: 'References',  Value: threadingId },
+      { Name: 'In-Reply-To', Value: threadingId },
+    ],
   })
 
   if (!sendResult.ok) {

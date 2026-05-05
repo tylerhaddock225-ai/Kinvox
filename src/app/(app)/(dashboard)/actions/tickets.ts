@@ -4,6 +4,7 @@ import { ServerClient } from 'postmark'
 import { createClient } from '@/lib/supabase/server'
 import { resolveEffectiveOrgId } from '@/lib/impersonation'
 import { revalidatePath } from 'next/cache'
+import { constructInboundEmailAddress } from '@/lib/email/inbound-address'
 
 type State = { status: 'success' } | { status: 'error'; error: string } | null
 
@@ -129,10 +130,11 @@ export async function updateTicketStatus(formData: FormData): Promise<void> {
   if (!STATUS_VALUES.includes(status as TicketStatus)) return
 
   // Pull the prior state so we can detect open→closed transitions for the
-  // closure-notification email below.
+  // closure-notification email below. organization_id is needed downstream
+  // to resolve the support inbound tag for the closure email's Reply-To.
   const { data: prior } = await supabase
     .from('tickets')
-    .select('status, display_id, subject, lead_id')
+    .select('status, display_id, subject, lead_id, organization_id')
     .eq('id', ticket_id)
     .single()
 
@@ -150,6 +152,7 @@ export async function updateTicketStatus(formData: FormData): Promise<void> {
   if (status === 'closed' && prior && prior.status !== 'closed') {
     await dispatchClosureEmail({
       supabase,
+      orgId:           prior.organization_id,
       ticketId:        ticket_id,
       ticketLeadId:    prior.lead_id,
       ticketSubject:   prior.subject,
@@ -342,6 +345,15 @@ async function dispatchOutboundEmail(args: DispatchArgs) {
 
   const threadingId = `<${displayId}@kinvox.com>`
 
+  // Plus-addressed Reply-To routes the customer's reply through Postmark's
+  // inbound mailbox into the support webhook. Without this, the support
+  // tag selected above was dead code and replies vanished into the org's
+  // verified support mailbox with no conversation-panel ingest.
+  const replyTo = constructInboundEmailAddress(org?.inbound_email_tag ?? null)
+  if (!replyTo) {
+    console.warn(`[outbound] inbound tag missing for org=${args.orgId} channel=support — reply-to omitted, customer replies will land in org's verified mailbox and bypass conversation panel`)
+  }
+
   const client = new ServerClient(token)
 
   try {
@@ -350,6 +362,7 @@ async function dispatchOutboundEmail(args: DispatchArgs) {
       To:      lead.email,
       Subject: subject,
       TextBody: args.body,
+      ReplyTo: replyTo ?? undefined,
       Headers: [
         { Name: 'References',  Value: threadingId },
         { Name: 'In-Reply-To', Value: threadingId },
@@ -364,6 +377,7 @@ async function dispatchOutboundEmail(args: DispatchArgs) {
 
 type ClosureArgs = {
   supabase:        Awaited<ReturnType<typeof createClient>>
+  orgId:           string
   ticketId:        string
   ticketLeadId:    string | null
   ticketSubject:   string
@@ -393,10 +407,21 @@ async function dispatchClosureEmail(args: ClosureArgs) {
     return
   }
 
+  const { data: org } = await args.supabase
+    .from('organizations')
+    .select('inbound_email_tag')
+    .eq('id', args.orgId)
+    .single()
+
   const displayId   = args.ticketDisplayId ?? args.ticketId
   const baseSubject = args.ticketSubject.replace(/\[tk_[a-z0-9]+\]\s*/gi, '').trim()
   const subject     = `[${displayId}] ${baseSubject || '(no subject)'}`
   const threadingId = `<${displayId}@kinvox.com>`
+
+  const replyTo = constructInboundEmailAddress(org?.inbound_email_tag ?? null)
+  if (!replyTo) {
+    console.warn(`[outbound] inbound tag missing for org=${args.orgId} channel=support — reply-to omitted, customer replies will land in org's verified mailbox and bypass conversation panel`)
+  }
 
   const text = `Your ticket (${displayId}) has been marked as resolved. If you have further questions, simply reply to this email to reopen it.`
 
@@ -407,6 +432,7 @@ async function dispatchClosureEmail(args: ClosureArgs) {
       To:      lead.email,
       Subject: subject,
       TextBody: text,
+      ReplyTo: replyTo ?? undefined,
       Headers: [
         { Name: 'References',  Value: threadingId },
         { Name: 'In-Reply-To', Value: threadingId },
