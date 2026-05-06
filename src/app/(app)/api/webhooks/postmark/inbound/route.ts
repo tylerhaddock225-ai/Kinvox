@@ -25,6 +25,7 @@ type InboundPayload = {
   ToFull?:            InboundRecipient[]
   Subject?:           string
   MessageID?:         string
+  MailboxHash?:       string
   TextBody?:          string
   StrippedTextReply?: string
   Attachments?:       unknown[]
@@ -92,32 +93,30 @@ export async function POST(request: NextRequest) {
 
   const supabase = createAdminClient()
 
-  // 3. Resolve the org by trying each ToFull address against
-  //    organizations.inbound_email_tag (case-insensitive). NOTE: this
-  //    matching algorithm is stale post-rename — full-email→tag matching
-  //    will not succeed, so this loop currently always exits with no org.
-  //    That's the same effective behaviour as today (no MX → no inbound
-  //    traffic). Real routing via Postmark `MailboxHash` lands in Prompt 3.
-  let orgId:   string | null = null
-  let ownerId: string | null = null
-  for (const r of recipients) {
-    const addr = r.Email?.toLowerCase()
-    if (!addr) continue
-    const { data: org } = await supabase
-      .from('organizations')
-      .select('id, owner_id')
-      .ilike('inbound_email_tag', addr.replace(/[\\%_]/g, m => '\\' + m))
-      .maybeSingle()
-    if (org) {
-      orgId   = org.id
-      ownerId = org.owner_id
-      break
-    }
+  // 3. Resolve the org by Postmark MailboxHash — the bare per-tenant tag
+  //    after the `+` in plus-addressing. Match either channel-tag column
+  //    (support or lead); downstream subject-tag dispatch handles routing
+  //    to the right surface once the org is known.
+  const mailboxHash = (payload.MailboxHash ?? '').trim().toLowerCase()
+  // Tags are minted from a strict alphabet (slug + base32-ish hash). Reject
+  // anything outside it before letting the value touch a PostgREST .or() filter.
+  if (!mailboxHash || !/^[a-z0-9-]+$/.test(mailboxHash)) {
+    console.warn(`${LOG} unknown recipient — missing or malformed mailboxHash="${mailboxHash}"`)
+    return NextResponse.json({ ignored: 'unknown recipient', mailboxHash: mailboxHash || null }, { status: 200 })
   }
 
+  const { data: org } = await supabase
+    .from('organizations')
+    .select('id, owner_id')
+    .or(`inbound_email_tag.eq.${mailboxHash},inbound_lead_email_tag.eq.${mailboxHash}`)
+    .maybeSingle()
+
+  const orgId   = org?.id ?? null
+  const ownerId = org?.owner_id ?? null
+
   if (!orgId || !ownerId) {
-    console.warn(`${LOG} unknown recipient(s) — dropping. tried=${recipients.map(r => r.Email).join(',')}`)
-    return NextResponse.json({ ignored: 'unknown recipient' }, { status: 200 })
+    console.warn(`${LOG} unknown recipient — no resolvable org for mailboxHash=${mailboxHash}`)
+    return NextResponse.json({ ignored: 'unknown recipient', mailboxHash }, { status: 200 })
   }
 
   console.log(`${LOG} resolved org=${orgId}`)
