@@ -24,19 +24,28 @@ function shortHash(length = 4): string {
 }
 
 /**
- * Build a per-tenant tag for Postmark plus-addressing, e.g.
- *   "Anchor Support" -> "anchor-support-8f2j".
+ * Build a per-tenant tag for the inbound forwarding address. Stored on
+ * organizations.inbound_email_tag (support) or .inbound_lead_email_tag
+ * (lead); assembled into the full plus-addressed email at display time
+ * by constructInboundEmailAddress.
  *
- * The trailing 4-char hash makes collisions vanishingly unlikely while
- * keeping the tag short enough for users to read at a glance. Callers
- * should still rely on the unique index on
- * organizations.inbound_email_tag (and ..._lead_email_tag) and retry on
- * conflict.
+ * Format: `<channel>-<orgSlug>` (e.g. "support-niko-s-storm-protection").
+ * Uniqueness inherits from organizations_slug_key UNIQUE (slug); the
+ * partial unique indexes on the two tag columns remain as defense-in-depth.
  *
- * The full inbound address is assembled by constructInboundEmailAddress
- * in lib/email/inbound-address.ts from this tag plus the
- * POSTMARK_INBOUND_ADDRESS env var.
+ * Stickiness invariant: once minted, the tag must NEVER be overwritten,
+ * even if the org renames or its slug changes. Customers may have
+ * configured forwarding rules pointing at the original address, and the
+ * inbound webhook routes by exact MailboxHash equality with the stored
+ * tag. organizations.slug is RPC-only at creation today so drift is
+ * theoretical, but the invariant is documented for the day slug edits
+ * become a thing.
  */
+export function buildInboundEmailTag(channel: 'support' | 'lead', orgSlug: string): string {
+  return `${channel}-${orgSlug}`
+}
+
+// DEPRECATED: replaced by buildInboundEmailTag. Kept temporarily for reference.
 export function generateInboundEmailTag(orgName: string): string {
   return `${slugifyOrgName(orgName)}-${shortHash()}`
 }

@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { resolveEffectiveOrgId, resolveImpersonation } from '@/lib/impersonation'
 import { revalidatePath } from 'next/cache'
 import { createSenderSignature, getSenderSignatureByEmail } from '@/lib/postmark-admin'
-import { generateInboundEmailTag } from '@/lib/org-utils'
+import { buildInboundEmailTag } from '@/lib/org-utils'
 
 type State =
   | { status: 'success'; message?: string }
@@ -66,6 +66,57 @@ async function requireSettingsAdmin(supabase: Awaited<ReturnType<typeof createCl
   return { ok: true as const, userId: user.id, orgId }
 }
 
+// Auto-mint the per-tenant inbound forwarding tag on the moment an org's
+// support or lead email is freshly verified. Stickiness: once minted the
+// tag is never overwritten, so re-verifying or changing the verified
+// email leaves the tag alone. Concurrent calls converge on the same
+// candidate (deterministic from slug) and the loser becomes a no-op via
+// the .is(column, null) predicate. Errors are logged, never thrown — the
+// outer verify flow shouldn't fail because tag-mint hit a transient
+// hiccup.
+async function mintInboundTagIfMissing(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgId: string,
+  channel: 'support' | 'lead',
+): Promise<void> {
+  const column = channel === 'support' ? 'inbound_email_tag' : 'inbound_lead_email_tag'
+
+  const { data: org, error: readErr } = await supabase
+    .from('organizations')
+    .select(`slug, ${column}`)
+    .eq('id', orgId)
+    .single()
+
+  if (readErr || !org) {
+    console.warn(`[mint-inbound-tag] org=${orgId} channel=${channel} read failed: ${readErr?.message ?? 'not found'}`)
+    return
+  }
+
+  const row = org as Record<string, string | null>
+  if (row[column]) return
+
+  const slug = row.slug
+  if (!slug) {
+    console.warn(`[mint-inbound-tag] org=${orgId} has no slug — cannot mint ${channel} tag`)
+    return
+  }
+
+  const newTag = buildInboundEmailTag(channel, slug)
+
+  const { error: updErr } = await supabase
+    .from('organizations')
+    .update({ [column]: newTag })
+    .eq('id', orgId)
+    .is(column, null)
+
+  if (updErr) {
+    console.warn(`[mint-inbound-tag] org=${orgId} channel=${channel} update failed: ${updErr.message}`)
+    return
+  }
+
+  console.log(`[mint-inbound-tag] org=${orgId} channel=${channel} tag=${newTag}`)
+}
+
 export async function updateSupportEmail(_prev: State, formData: FormData): Promise<State> {
   const supabase = await createClient()
 
@@ -116,6 +167,10 @@ export async function updateSupportEmail(_prev: State, formData: FormData): Prom
 
   if (updErr) return { status: 'error', error: updErr.message }
 
+  if (signature.Confirmed) {
+    await mintInboundTagIfMissing(supabase, guard.orgId, 'support')
+  }
+
   revalidatePath('/[orgSlug]/settings/team', 'page')
   return {
     status:  'success',
@@ -125,86 +180,35 @@ export async function updateSupportEmail(_prev: State, formData: FormData): Prom
   }
 }
 
+// Legacy fallback: pre-Phase-A1 this drove a "Generate Address" button in
+// Support Settings. Auto-mint on email verification has replaced that flow.
+// Kept as a private safety net — the row-hide logic in InboundAddressRow
+// no longer renders the button, so this is only reachable if a future UI
+// change reintroduces a manual trigger. Stickiness is enforced inside
+// mintInboundTagIfMissing.
 export async function initializeInboundEmail(_prev: State, _formData: FormData): Promise<State> {
   const supabase = await createClient()
 
   const guard = await requireSettingsAdmin(supabase)
   if (!guard.ok) return { status: 'error', error: guard.error }
 
-  const { data: org } = await supabase
-    .from('organizations')
-    .select('name, inbound_email_tag')
-    .eq('id', guard.orgId)
-    .single<{ name: string; inbound_email_tag: string | null }>()
+  await mintInboundTagIfMissing(supabase, guard.orgId, 'support')
 
-  if (!org) return { status: 'error', error: 'Organization not found' }
-  if (org.inbound_email_tag) {
-    // Already set — treat as success so the UI can refresh without an error toast.
-    return { status: 'success', message: 'Inbound address already assigned.' }
-  }
-
-  // Retry a few times in case the random hash collides with the unique index.
-  let lastError: string | null = null
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const candidate = generateInboundEmailTag(org.name)
-    const { error } = await supabase
-      .from('organizations')
-      .update({ inbound_email_tag: candidate })
-      .eq('id', guard.orgId)
-      .is('inbound_email_tag', null)   // only set if still unset (avoid clobber)
-
-    if (!error) {
-      revalidatePath('/[orgSlug]/settings/team', 'page')
-      return { status: 'success', message: `Support inbound address is ready.` }
-    }
-    lastError = error.message
-    // 23505 → unique violation; loop and try a fresh hash. Anything else: give up.
-    if (!/duplicate key|23505|already exists/i.test(error.message)) break
-  }
-
-  return { status: 'error', error: lastError ?? 'Failed to generate inbound address' }
+  revalidatePath('/[orgSlug]/settings/team', 'page')
+  return { status: 'success', message: 'Support inbound address is ready.' }
 }
 
-/**
- * Lead-channel parallel of `initializeInboundEmail`. Mints a tag for the
- * `inbound_lead_email_tag` column. The full plus-addressed email is
- * assembled at display/use time by `constructInboundEmailAddress`.
- */
+// Lead-channel parallel of initializeInboundEmail.
 export async function initializeLeadInboundEmail(_prev: State, _formData: FormData): Promise<State> {
   const supabase = await createClient()
 
   const guard = await requireSettingsAdmin(supabase)
   if (!guard.ok) return { status: 'error', error: guard.error }
 
-  const { data: org } = await supabase
-    .from('organizations')
-    .select('name, inbound_lead_email_tag')
-    .eq('id', guard.orgId)
-    .single<{ name: string; inbound_lead_email_tag: string | null }>()
+  await mintInboundTagIfMissing(supabase, guard.orgId, 'lead')
 
-  if (!org) return { status: 'error', error: 'Organization not found' }
-  if (org.inbound_lead_email_tag) {
-    return { status: 'success', message: 'Lead inbound address already assigned.' }
-  }
-
-  let lastError: string | null = null
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const candidate = generateInboundEmailTag(org.name)
-    const { error } = await supabase
-      .from('organizations')
-      .update({ inbound_lead_email_tag: candidate })
-      .eq('id', guard.orgId)
-      .is('inbound_lead_email_tag', null)
-
-    if (!error) {
-      revalidatePath('/[orgSlug]/settings/team', 'page')
-      return { status: 'success', message: `Lead inbound address is ready.` }
-    }
-    lastError = error.message
-    if (!/duplicate key|23505|already exists/i.test(error.message)) break
-  }
-
-  return { status: 'error', error: lastError ?? 'Failed to generate lead inbound address' }
+  revalidatePath('/[orgSlug]/settings/team', 'page')
+  return { status: 'success', message: 'Lead inbound address is ready.' }
 }
 
 /**
@@ -269,6 +273,8 @@ export async function refreshSupportEmailStatus(): Promise<RefreshSupportEmailRe
 
   if (updErr) return { status: 'error', error: updErr.message }
 
+  await mintInboundTagIfMissing(supabase, guard.orgId, 'support')
+
   revalidatePath('/[orgSlug]/settings/team', 'page')
   return { status: 'success', message: `${supportEmail} is verified.` }
 }
@@ -325,6 +331,10 @@ export async function updateLeadEmail(_prev: State, formData: FormData): Promise
     .eq('id', guard.orgId)
 
   if (updErr) return { status: 'error', error: updErr.message }
+
+  if (signature.Confirmed) {
+    await mintInboundTagIfMissing(supabase, guard.orgId, 'lead')
+  }
 
   revalidatePath('/[orgSlug]/settings/team', 'page')
   return {
@@ -387,6 +397,8 @@ export async function refreshLeadEmailStatus(): Promise<RefreshLeadEmailResult> 
     .eq('id', guard.orgId)
 
   if (updErr) return { status: 'error', error: updErr.message }
+
+  await mintInboundTagIfMissing(supabase, guard.orgId, 'lead')
 
   revalidatePath('/[orgSlug]/settings/team', 'page')
   return { status: 'success', message: `${leadEmail} is verified.` }
