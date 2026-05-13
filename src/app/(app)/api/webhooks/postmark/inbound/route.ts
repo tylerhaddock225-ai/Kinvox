@@ -23,12 +23,40 @@ type InboundPayload = {
   FromName?:          string
   FromFull?:          InboundRecipient
   ToFull?:            InboundRecipient[]
+  OriginalRecipient?: string
   Subject?:           string
   MessageID?:         string
   MailboxHash?:       string
   TextBody?:          string
   StrippedTextReply?: string
   Attachments?:       unknown[]
+}
+
+// Inbound Domain Forwarding (custom MX → Postmark) does NOT populate
+// MailboxHash — Postmark only fills it for plus-addressed mail on the
+// default `*@inbound.postmarkapp.com` mailbox. For custom-domain inbound
+// the full To address shows up in OriginalRecipient (and the same value
+// in ToFull[0].Email), and the routing tag is the localpart of that
+// address. resolveInboundTag tries MailboxHash first (legacy plus-
+// addressed path), then OriginalRecipient, then ToFull[0].Email.
+type TagSource = 'mailbox_hash' | 'original_recipient' | 'to_full'
+function resolveInboundTag(payload: InboundPayload): { tag: string; source: TagSource } | null {
+  const fromHash = (payload.MailboxHash ?? '').trim()
+  if (fromHash) return { tag: fromHash.toLowerCase(), source: 'mailbox_hash' }
+
+  const fromOriginal = (payload.OriginalRecipient ?? '').trim()
+  if (fromOriginal) {
+    const local = fromOriginal.split('@')[0]?.trim() ?? ''
+    if (local) return { tag: local.toLowerCase(), source: 'original_recipient' }
+  }
+
+  const fromToFull = (payload.ToFull?.[0]?.Email ?? '').trim()
+  if (fromToFull) {
+    const local = fromToFull.split('@')[0]?.trim() ?? ''
+    if (local) return { tag: local.toLowerCase(), source: 'to_full' }
+  }
+
+  return null
 }
 
 function safeEqual(a: string, b: string): boolean {
@@ -93,30 +121,35 @@ export async function POST(request: NextRequest) {
 
   const supabase = createAdminClient()
 
-  // 3. Resolve the org by Postmark MailboxHash — the bare per-tenant tag
-  //    after the `+` in plus-addressing. Match either channel-tag column
-  //    (support or lead); downstream subject-tag dispatch handles routing
-  //    to the right surface once the org is known.
-  const mailboxHash = (payload.MailboxHash ?? '').trim().toLowerCase()
+  // 3. Resolve the org by per-tenant tag. Prefer Postmark's MailboxHash
+  //    field (legacy plus-addressed mailbox), fall back to the localpart
+  //    of OriginalRecipient / ToFull[0].Email for custom-domain inbound
+  //    (Postmark leaves MailboxHash empty under Inbound Domain
+  //    Forwarding). Match either channel-tag column (support or lead);
+  //    downstream subject-tag dispatch handles routing to the right
+  //    surface once the org is known.
+  const resolved = resolveInboundTag(payload)
   // Tags are minted from a strict alphabet (slug + base32-ish hash). Reject
   // anything outside it before letting the value touch a PostgREST .or() filter.
-  if (!mailboxHash || !/^[a-z0-9-]+$/.test(mailboxHash)) {
-    console.warn(`${LOG} unknown recipient — missing or malformed mailboxHash="${mailboxHash}"`)
-    return NextResponse.json({ ignored: 'unknown recipient', mailboxHash: mailboxHash || null }, { status: 200 })
+  if (!resolved || !/^[a-z0-9-]+$/.test(resolved.tag)) {
+    console.warn(`${LOG} unknown recipient — could not resolve tag from payload (MailboxHash, OriginalRecipient, ToFull all empty/malformed)`)
+    return NextResponse.json({ ignored: 'unknown recipient', tag: resolved?.tag ?? null }, { status: 200 })
   }
+  const tag = resolved.tag
+  console.log(`${LOG} tag=${tag} source=${resolved.source}`)
 
   const { data: org } = await supabase
     .from('organizations')
     .select('id, owner_id')
-    .or(`inbound_email_tag.eq.${mailboxHash},inbound_lead_email_tag.eq.${mailboxHash}`)
+    .or(`inbound_email_tag.eq.${tag},inbound_lead_email_tag.eq.${tag}`)
     .maybeSingle()
 
   const orgId   = org?.id ?? null
   const ownerId = org?.owner_id ?? null
 
   if (!orgId || !ownerId) {
-    console.warn(`${LOG} unknown recipient — no resolvable org for mailboxHash=${mailboxHash}`)
-    return NextResponse.json({ ignored: 'unknown recipient', mailboxHash }, { status: 200 })
+    console.warn(`${LOG} unknown recipient — no resolvable org for tag=${tag} source=${resolved.source}`)
+    return NextResponse.json({ ignored: 'unknown recipient', tag }, { status: 200 })
   }
 
   console.log(`${LOG} resolved org=${orgId}`)
