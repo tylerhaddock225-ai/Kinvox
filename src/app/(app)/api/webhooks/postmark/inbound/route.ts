@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { timingSafeEqual } from 'node:crypto'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { sendOrgTransactionalEmail } from '@/lib/email/send-org-email'
+import { renderLeadChannelBounce } from '@/lib/email/templates/lead-channel-bounce'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -140,23 +142,123 @@ export async function POST(request: NextRequest) {
 
   const { data: org } = await supabase
     .from('organizations')
-    .select('id, owner_id')
+    .select(`
+      id, owner_id, name,
+      inbound_email_tag, inbound_lead_email_tag,
+      verified_support_email, verified_support_email_confirmed_at,
+      verified_lead_email, verified_lead_email_confirmed_at
+    `)
     .or(`inbound_email_tag.eq.${tag},inbound_lead_email_tag.eq.${tag}`)
     .maybeSingle()
 
   const orgId   = org?.id ?? null
   const ownerId = org?.owner_id ?? null
 
-  if (!orgId || !ownerId) {
+  if (!org || !orgId || !ownerId) {
     console.warn(`${LOG} unknown recipient — no resolvable org for tag=${tag} source=${resolved.source}`)
     return NextResponse.json({ ignored: 'unknown recipient', tag }, { status: 200 })
   }
 
-  console.log(`${LOG} resolved org=${orgId}`)
+  // Channel detection: which tag column matched? Drives the lead-vs-support
+  // routing split below — lead-channel inbound is private infrastructure
+  // (only ever exposed as Reply-To on lead-magnet confirmation mails) and
+  // must NOT fall through to the "open a new ticket" support fallback.
+  const channel: 'lead' | 'support' =
+    org.inbound_lead_email_tag === tag ? 'lead' : 'support'
+  console.log(`${LOG} resolved org=${orgId} channel=${channel}`)
 
   // Postmark already strips the quoted reply trail when it can. Prefer that
   // for follow-ups; fall back to the full text body for fresh threads.
   const messageBody = (stripped || textBody || '').trim() || '(empty)'
+
+  // ── Lead channel ───────────────────────────────────────────────────────
+  // Match by [ld_<displayId>] subject tag FIRST (deterministic, survives
+  // Gmail plus-alias collapsing), fall back to sender-email exact match.
+  // On miss OR on a converted lead, bounce the sender to the org's verified
+  // support email — but only if support is itself verified, otherwise drop
+  // silently to avoid steering customers at a dead end. Lead-channel
+  // inbound NEVER falls through to the new-lead + new-ticket support path.
+  if (channel === 'lead') {
+    let matchedLead: { id: string; status: string } | null = null
+
+    const leadTagMatch = subject.match(LEAD_TAG_RE)
+    if (leadTagMatch) {
+      const displayId = leadTagMatch[1].toLowerCase()
+      const { data } = await supabase
+        .from('leads')
+        .select('id, status')
+        .eq('organization_id', orgId)
+        .eq('display_id', displayId)
+        .is('deleted_at', null)
+        .maybeSingle<{ id: string; status: string }>()
+      if (data) matchedLead = data
+    }
+
+    if (!matchedLead) {
+      const { data } = await supabase
+        .from('leads')
+        .select('id, status')
+        .eq('organization_id', orgId)
+        .ilike('email', fromEmail.replace(/[\\%_]/g, m => '\\' + m))
+        .is('deleted_at', null)
+        .maybeSingle<{ id: string; status: string }>()
+      if (data) matchedLead = data
+    }
+
+    if (matchedLead && matchedLead.status !== 'converted') {
+      const { error: insErr } = await supabase.from('lead_messages').insert({
+        lead_id:             matchedLead.id,
+        organization_id:     orgId,
+        message_type:        'public_reply',
+        author_kind:         'lead',
+        author_user_id:      null,
+        body:                messageBody,
+        postmark_message_id: messageId,
+        inbound_email_from:  fromEmail,
+      })
+      if (insErr) {
+        console.error(`${LOG} lead-channel append failed lead=${matchedLead.id}:`, insErr.message)
+        return NextResponse.json({ error: insErr.message }, { status: 500 })
+      }
+      console.log(`${LOG} appended to lead_messages lead_id=${matchedLead.id} status=${matchedLead.status} from=${fromEmail}`)
+      return NextResponse.json({ status: 'appended_lead', lead_id: matchedLead.id }, { status: 200 })
+    }
+
+    // Loop guard: never auto-reply to our own verified lead-notifications
+    // mailbox — if a misconfigured forwarding chain points it back at us
+    // we'd ping-pong indefinitely otherwise.
+    if (org.verified_lead_email && fromEmail === org.verified_lead_email.toLowerCase()) {
+      console.warn(`${LOG} lead-channel inbound from own verified_lead_email — dropping (loop guard) org=${orgId}`)
+      return NextResponse.json({ ignored: 'loop_guard' }, { status: 200 })
+    }
+
+    // No verified support email → silent drop. This is the business-model
+    // affordance: an org that's bought lead-magnet but not support gets the
+    // inbound rejected silently rather than steered at an address that
+    // doesn't exist on their side.
+    if (!org.verified_support_email || !org.verified_support_email_confirmed_at) {
+      console.warn(`${LOG} lead-channel inbound dropped — no verified support email org=${orgId} from=${fromEmail}`)
+      return NextResponse.json({ ignored: 'no_support_email' }, { status: 200 })
+    }
+
+    const reason = matchedLead ? 'converted_lead' : 'unknown_sender'
+    const tpl = renderLeadChannelBounce({
+      orgName:      org.name,
+      supportEmail: org.verified_support_email,
+    })
+    const result = await sendOrgTransactionalEmail({
+      org,
+      to:                fromEmail,
+      subject:           tpl.subject,
+      htmlBody:          tpl.htmlBody,
+      textBody:          tpl.textBody,
+      fromAddressSource: 'lead',
+      tag:               'lead-channel-bounce',
+    })
+    console.log(`${LOG} lead-channel bounce sent reason=${reason} org=${orgId} to=${fromEmail} ok=${result.ok}`)
+    return NextResponse.json({ ignored: 'bounced_to_support', reason }, { status: 200 })
+  }
+  // ── End lead channel ───────────────────────────────────────────────────
 
   // 4a. Lead-conversation routing — does the subject reference an existing
   //     lead in this org via [ld_<display_id>]? Lead-magnet confirmations

@@ -262,10 +262,10 @@ async function resolveLeadInOrg(
 ) {
   const { data: lead } = await supabase
     .from('leads')
-    .select('id, organization_id, email, display_id, first_name')
+    .select('id, organization_id, email, display_id, first_name, status')
     .eq('id', leadId)
     .is('deleted_at', null)
-    .maybeSingle<{ id: string; organization_id: string; email: string | null; display_id: string | null; first_name: string }>()
+    .maybeSingle<{ id: string; organization_id: string; email: string | null; display_id: string | null; first_name: string; status: string }>()
   if (!lead || lead.organization_id !== orgId) return null
   return lead
 }
@@ -319,6 +319,13 @@ export async function postLeadPublicReply(
 
   const lead = await resolveLeadInOrg(supabase, leadId, orgId)
   if (!lead) return { status: 'error', error: 'Lead not found' }
+
+  // Backstop for the LeadConversationPanel UI gate: refuse public replies
+  // on terminal leads even if the client somehow bypasses the disabled
+  // composer. Internal notes are unaffected.
+  if (lead.status === 'converted') {
+    return { status: 'error', error: 'Lead is converted — public replies disabled.' }
+  }
 
   if (!lead.email) {
     return { status: 'error', error: 'Lead has no email address' }

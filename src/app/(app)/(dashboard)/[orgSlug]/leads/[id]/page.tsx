@@ -189,6 +189,7 @@ export default async function LeadDetailPage({
             leadId={l.id}
             orgSlug={orgSlug}
             messages={conversationMessages}
+            leadStatus={l.status}
           />
         </section>
       </div>
