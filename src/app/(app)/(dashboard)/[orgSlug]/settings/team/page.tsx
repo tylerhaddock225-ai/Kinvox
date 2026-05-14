@@ -8,6 +8,12 @@ import { normalizeLeadQuestions } from '@/lib/lead-questions'
 import { constructInboundEmailAddress } from '@/lib/email/inbound-address'
 import type { CredentialRow } from './SocialConnectionsTab'
 
+// Base URL the lead-magnet URL row should render. Matches the HQ admin
+// org page convention (NEXT_PUBLIC_APP_URL, prod-host fallback so a
+// missing env var doesn't silently leak sandbox URLs).
+const LANDING_BASE =
+  (process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.kinvoxtech.com').replace(/\/$/, '')
+
 export const dynamic = 'force-dynamic'
 
 type SearchParams = {
@@ -68,7 +74,7 @@ export default async function TeamSettingsPage({
       .order('name'),
     supabase
       .from('organizations')
-      .select('inbound_email_tag, inbound_lead_email_tag, verified_support_email, verified_support_email_confirmed_at, verified_lead_email, verified_lead_email_confirmed_at, ai_listening_enabled, cancel_at_period_end, current_period_end, custom_lead_questions, signal_engagement_mode, vertical, lead_magnet_settings')
+      .select('inbound_email_tag, inbound_lead_email_tag, verified_support_email, verified_support_email_confirmed_at, verified_lead_email, verified_lead_email_confirmed_at, ai_listening_enabled, cancel_at_period_end, current_period_end, custom_lead_questions, signal_engagement_mode, vertical, lead_magnet_settings, lead_magnet_slug')
       .eq('id', orgId)
       .single(),
     supabase
@@ -155,6 +161,8 @@ export default async function TeamSettingsPage({
     verified_lead_email:              orgRes.data?.verified_lead_email              ?? null,
     verified_lead_email_confirmed_at: orgRes.data?.verified_lead_email_confirmed_at ?? null,
     inbound_lead_email_address:       leadInboundAddress,
+    lead_magnet_slug:                 orgRes.data?.lead_magnet_slug                 ?? null,
+    landing_base:                     LANDING_BASE,
   }
 
   const signalSettings = {
