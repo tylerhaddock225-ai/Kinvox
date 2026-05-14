@@ -335,6 +335,7 @@ export type Database = {
           body: string
           type: 'public' | 'internal'
           external_message_id: string | null
+          inbound_email_from: string | null
           created_at: string
         }
         Insert: {
@@ -345,6 +346,7 @@ export type Database = {
           body: string
           type?: 'public' | 'internal'
           external_message_id?: string | null
+          inbound_email_from?: string | null
           created_at?: string
         }
         Update: Partial<Database['public']['Tables']['ticket_messages']['Insert']>

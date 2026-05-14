@@ -135,7 +135,7 @@ export async function updateTicketStatus(formData: FormData): Promise<void> {
   // to resolve the support inbound tag for the closure email's Reply-To.
   const { data: prior } = await supabase
     .from('tickets')
-    .select('status, display_id, subject, lead_id, organization_id')
+    .select('status, display_id, subject, lead_id, customer_id, organization_id')
     .eq('id', ticket_id)
     .single()
 
@@ -159,12 +159,13 @@ export async function updateTicketStatus(formData: FormData): Promise<void> {
 
     await dispatchClosureEmail({
       supabase,
-      orgId:           prior.organization_id,
-      closerName:      closerProfile?.full_name ?? null,
-      ticketId:        ticket_id,
-      ticketLeadId:    prior.lead_id,
-      ticketSubject:   prior.subject,
-      ticketDisplayId: prior.display_id,
+      orgId:            prior.organization_id,
+      closerName:       closerProfile?.full_name ?? null,
+      ticketId:         ticket_id,
+      ticketLeadId:     prior.lead_id,
+      ticketCustomerId: prior.customer_id,
+      ticketSubject:    prior.subject,
+      ticketDisplayId:  prior.display_id,
     })
   }
 
@@ -263,7 +264,7 @@ export async function sendTicketMessage(_prev: State, formData: FormData): Promi
   // fast gives a friendlier error than a constraint violation.
   const { data: ticket } = await supabase
     .from('tickets')
-    .select('id, organization_id, display_id, subject, lead_id')
+    .select('id, organization_id, display_id, subject, lead_id, customer_id')
     .eq('id', ticket_id)
     .single()
 
@@ -306,12 +307,13 @@ export async function sendTicketMessage(_prev: State, formData: FormData): Promi
     await dispatchOutboundEmail({
       supabase,
       orgId,
-      senderName:    senderProfile?.full_name ?? null,
-      ticketId:      ticket.id,
-      ticketLeadId:  ticket.lead_id,
-      ticketSubject: ticket.subject,
-      ticketDisplayId: ticket.display_id,
-      body:          trimmed,
+      senderName:       senderProfile?.full_name ?? null,
+      ticketId:         ticket.id,
+      ticketLeadId:     ticket.lead_id,
+      ticketCustomerId: ticket.customer_id,
+      ticketSubject:    ticket.subject,
+      ticketDisplayId:  ticket.display_id,
+      body:             trimmed,
       priorPublic,
     })
   }
@@ -321,15 +323,16 @@ export async function sendTicketMessage(_prev: State, formData: FormData): Promi
 }
 
 type DispatchArgs = {
-  supabase:        Awaited<ReturnType<typeof createClient>>
-  orgId:           string
-  senderName:      string | null
-  ticketId:        string
-  ticketLeadId:    string | null
-  ticketSubject:   string
-  ticketDisplayId: string | null
-  body:            string
-  priorPublic:     { body: string; created_at: string; sender_id: string | null } | null
+  supabase:         Awaited<ReturnType<typeof createClient>>
+  orgId:            string
+  senderName:       string | null
+  ticketId:         string
+  ticketLeadId:     string | null
+  ticketCustomerId: string | null
+  ticketSubject:    string
+  ticketDisplayId:  string | null
+  body:             string
+  priorPublic:      { body: string; created_at: string; sender_id: string | null } | null
 }
 
 async function dispatchOutboundEmail(args: DispatchArgs) {
@@ -345,20 +348,43 @@ async function dispatchOutboundEmail(args: DispatchArgs) {
     .eq('id', args.orgId)
     .single()
 
-  // Recipient comes from the linked lead. No lead → no public destination.
-  if (!args.ticketLeadId) {
-    console.error(`[ticket-email] ticket ${args.ticketId} has no lead — cannot send public reply`)
-    return
+  // Recipient resolution. Tier 1: linked customer's email. Tier 2: the
+  // most-recent inbound_email_from on this ticket — covers customerless
+  // tickets opened from an inbound whose sender matched no customer row.
+  // leads are NEVER consulted on the support rail (Master Manifest Part 5
+  // separates leads/customers; the support inbound webhook stores the
+  // sender on ticket_messages.inbound_email_from for this exact purpose).
+  let recipientEmail:     string | null = null
+  let recipientFirstName: string | null = null
+
+  if (args.ticketCustomerId) {
+    const { data: customer } = await args.supabase
+      .from('customers')
+      .select('email, first_name')
+      .eq('id', args.ticketCustomerId)
+      .is('deleted_at', null)
+      .maybeSingle<{ email: string | null; first_name: string | null }>()
+    if (customer?.email) {
+      recipientEmail     = customer.email
+      recipientFirstName = customer.first_name ?? null
+    }
   }
 
-  const { data: lead } = await args.supabase
-    .from('leads')
-    .select('email, first_name, last_name')
-    .eq('id', args.ticketLeadId)
-    .single()
+  if (!recipientEmail) {
+    const { data: lastInbound } = await args.supabase
+      .from('ticket_messages')
+      .select('inbound_email_from')
+      .eq('ticket_id', args.ticketId)
+      .not('inbound_email_from', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle<{ inbound_email_from: string | null }>()
+    recipientEmail = lastInbound?.inbound_email_from ?? null
+    // No name available from inbound fallback — greeting collapses to "Hi there".
+  }
 
-  if (!lead?.email) {
-    console.error(`[ticket-email] lead ${args.ticketLeadId} has no email — skipping outbound email`)
+  if (!recipientEmail) {
+    console.error(`[ticket-email] no recipient resolvable for ticket ${args.ticketId} — skipping outbound email`)
     return
   }
 
@@ -381,20 +407,20 @@ async function dispatchOutboundEmail(args: DispatchArgs) {
 
   const threadingId = `<${displayId}@kinvox.com>`
 
-  // Plus-addressed Reply-To routes the customer's reply through Postmark's
+  // Plus-addressed Reply-To routes the recipient's reply through Postmark's
   // inbound mailbox into the support webhook. Without this, the support
   // tag selected above was dead code and replies vanished into the org's
   // verified support mailbox with no conversation-panel ingest.
   const replyTo = constructInboundEmailAddress(org?.inbound_email_tag ?? null)
   if (!replyTo) {
-    console.warn(`[outbound] inbound tag missing for org=${args.orgId} channel=support — reply-to omitted, customer replies will land in org's verified mailbox and bypass conversation panel`)
+    console.warn(`[outbound] inbound tag missing for org=${args.orgId} channel=support — reply-to omitted, recipient replies will land in org's verified mailbox and bypass conversation panel`)
   }
 
-  // Resolve the quoted block input. If a prior public ticket_messages row
-  // exists (passed in from sendTicketMessage so we never quote ourselves),
-  // resolve its sender display name. Otherwise fall back to the ticket
-  // description that opened it; if that's also empty, skip the quoted
-  // block entirely.
+  // Resolve the quoted block. Prior public ticket_messages row → use its
+  // sender's display name (profiles.full_name for org users; recipient
+  // first name for inbound rows whose sender_id is null). Fall back to
+  // ticket.description on first reply; skip the quoted block entirely if
+  // that's also empty.
   let prior: PriorMessage | null = null
   if (args.priorPublic) {
     let priorSenderName = ''
@@ -407,10 +433,7 @@ async function dispatchOutboundEmail(args: DispatchArgs) {
       priorSenderName = priorProfile?.full_name?.trim() || ''
     }
     if (!priorSenderName) {
-      // Inbound rows have null sender_id; the lead is the most reasonable
-      // attribution. Fall back to "them" when even that's missing.
-      const leadFull = [lead.first_name, lead.last_name].filter(Boolean).join(' ').trim()
-      priorSenderName = leadFull || 'them'
+      priorSenderName = recipientFirstName?.trim() || 'them'
     }
     prior = {
       senderName: priorSenderName,
@@ -424,9 +447,8 @@ async function dispatchOutboundEmail(args: DispatchArgs) {
       .eq('id', args.ticketId)
       .maybeSingle<{ description: string | null; created_at: string }>()
     if (ticketBody?.description?.trim()) {
-      const leadFull = [lead.first_name, lead.last_name].filter(Boolean).join(' ').trim()
       prior = {
-        senderName: leadFull || 'them',
+        senderName: recipientFirstName?.trim() || 'them',
         sentAt:     new Date(ticketBody.created_at),
         body:       ticketBody.description,
       }
@@ -437,7 +459,7 @@ async function dispatchOutboundEmail(args: DispatchArgs) {
   const orgName          = org?.name ?? 'Support'
 
   const { htmlBody, textBody } = renderConversationReply({
-    leadFirstName:    lead.first_name,
+    leadFirstName:    recipientFirstName,
     replierFirstName,
     orgName,
     body:             args.body,
@@ -449,7 +471,7 @@ async function dispatchOutboundEmail(args: DispatchArgs) {
   try {
     const result = await client.sendEmail({
       From:    fromAddress,
-      To:      lead.email,
+      To:      recipientEmail,
       Subject: subject,
       HtmlBody: htmlBody,
       TextBody: textBody,
@@ -459,21 +481,22 @@ async function dispatchOutboundEmail(args: DispatchArgs) {
         { Name: 'In-Reply-To', Value: threadingId },
       ],
     })
-    console.log(`[ticket-email] dispatched ticket=${displayId} from="${fromAddress}" to=${lead.email} subject="${subject}" postmark_id=${result.MessageID}`)
+    console.log(`[ticket-email] dispatched ticket=${displayId} from="${fromAddress}" to=${recipientEmail} subject="${subject}" postmark_id=${result.MessageID}`)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    console.error(`[ticket-email] FAILED ticket=${displayId} to=${lead.email}: ${msg}`)
+    console.error(`[ticket-email] FAILED ticket=${displayId} to=${recipientEmail}: ${msg}`)
   }
 }
 
 type ClosureArgs = {
-  supabase:        Awaited<ReturnType<typeof createClient>>
-  orgId:           string
-  closerName:      string | null
-  ticketId:        string
-  ticketLeadId:    string | null
-  ticketSubject:   string
-  ticketDisplayId: string | null
+  supabase:         Awaited<ReturnType<typeof createClient>>
+  orgId:            string
+  closerName:       string | null
+  ticketId:         string
+  ticketLeadId:     string | null
+  ticketCustomerId: string | null
+  ticketSubject:    string
+  ticketDisplayId:  string | null
 }
 
 async function dispatchClosureEmail(args: ClosureArgs) {
@@ -483,19 +506,38 @@ async function dispatchClosureEmail(args: ClosureArgs) {
     return
   }
 
-  if (!args.ticketLeadId) {
-    console.warn(`[ticket-email] ticket ${args.ticketId} has no lead — skipping closure notification`)
-    return
+  // Same Tier-1 customer / Tier-2 inbound_email_from chain as
+  // dispatchOutboundEmail. leads are not consulted on the support rail.
+  let recipientEmail:     string | null = null
+  let recipientFirstName: string | null = null
+
+  if (args.ticketCustomerId) {
+    const { data: customer } = await args.supabase
+      .from('customers')
+      .select('email, first_name')
+      .eq('id', args.ticketCustomerId)
+      .is('deleted_at', null)
+      .maybeSingle<{ email: string | null; first_name: string | null }>()
+    if (customer?.email) {
+      recipientEmail     = customer.email
+      recipientFirstName = customer.first_name ?? null
+    }
   }
 
-  const { data: lead } = await args.supabase
-    .from('leads')
-    .select('email, first_name')
-    .eq('id', args.ticketLeadId)
-    .single()
+  if (!recipientEmail) {
+    const { data: lastInbound } = await args.supabase
+      .from('ticket_messages')
+      .select('inbound_email_from')
+      .eq('ticket_id', args.ticketId)
+      .not('inbound_email_from', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle<{ inbound_email_from: string | null }>()
+    recipientEmail = lastInbound?.inbound_email_from ?? null
+  }
 
-  if (!lead?.email) {
-    console.warn(`[ticket-email] lead ${args.ticketLeadId} has no email — skipping closure notification`)
+  if (!recipientEmail) {
+    console.warn(`[ticket-email] no recipient resolvable for ticket ${args.ticketId} — skipping closure notification`)
     return
   }
 
@@ -512,7 +554,7 @@ async function dispatchClosureEmail(args: ClosureArgs) {
 
   const replyTo = constructInboundEmailAddress(org?.inbound_email_tag ?? null)
   if (!replyTo) {
-    console.warn(`[outbound] inbound tag missing for org=${args.orgId} channel=support — reply-to omitted, customer replies will land in org's verified mailbox and bypass conversation panel`)
+    console.warn(`[outbound] inbound tag missing for org=${args.orgId} channel=support — reply-to omitted, recipient replies will land in org's verified mailbox and bypass conversation panel`)
   }
 
   // Closure body: canned text describing the status change. Threaded
@@ -524,7 +566,7 @@ async function dispatchClosureEmail(args: ClosureArgs) {
   const replierFirstName = args.closerName?.trim().split(/\s+/)[0] ?? null
   const orgName = org?.name ?? 'Support'
   const { htmlBody, textBody } = renderConversationReply({
-    leadFirstName:    lead.first_name,
+    leadFirstName:    recipientFirstName,
     replierFirstName,
     orgName,
     body:             cannedBody,
@@ -535,7 +577,7 @@ async function dispatchClosureEmail(args: ClosureArgs) {
   try {
     const result = await client.sendEmail({
       From:    'Kinvox Support <support@kinvoxtech.com>',
-      To:      lead.email,
+      To:      recipientEmail,
       Subject: subject,
       HtmlBody: htmlBody,
       TextBody: textBody,
@@ -545,10 +587,10 @@ async function dispatchClosureEmail(args: ClosureArgs) {
         { Name: 'In-Reply-To', Value: threadingId },
       ],
     })
-    console.log(`[ticket-email] closure notice dispatched ticket=${displayId} to=${lead.email} postmark_id=${result.MessageID}`)
+    console.log(`[ticket-email] closure notice dispatched ticket=${displayId} to=${recipientEmail} postmark_id=${result.MessageID}`)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    console.error(`[ticket-email] closure notice FAILED ticket=${displayId} to=${lead.email}: ${msg}`)
+    console.error(`[ticket-email] closure notice FAILED ticket=${displayId} to=${recipientEmail}: ${msg}`)
   }
 }
 

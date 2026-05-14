@@ -68,17 +68,6 @@ function safeEqual(a: string, b: string): boolean {
   return timingSafeEqual(ab, bb)
 }
 
-function nameFromEmail(email: string): string {
-  return email.split('@')[0]?.replace(/[._+-]+/g, ' ').trim() || 'Unknown'
-}
-
-function splitName(full: string): { first: string; last: string | null } {
-  const parts = full.trim().split(/\s+/).filter(Boolean)
-  if (parts.length === 0) return { first: 'Unknown', last: null }
-  if (parts.length === 1) return { first: parts[0], last: null }
-  return { first: parts[0], last: parts.slice(1).join(' ') }
-}
-
 export async function POST(request: NextRequest) {
   // 1. Shared-secret query-param guard. Postmark appends `?token=...` to the
   //    inbound webhook URL; we compare it against POSTMARK_INBOUND_SECRET.
@@ -104,7 +93,6 @@ export async function POST(request: NextRequest) {
 
   const subject     = payload.Subject ?? ''
   const fromEmail   = payload.FromFull?.Email?.toLowerCase() ?? payload.From?.toLowerCase() ?? null
-  const fromName    = payload.FromFull?.Name || payload.FromName || (fromEmail ? nameFromEmail(fromEmail) : 'Unknown')
   const messageId   = payload.MessageID ?? null
   const textBody    = payload.TextBody ?? ''
   const stripped    = payload.StrippedTextReply ?? ''
@@ -260,6 +248,23 @@ export async function POST(request: NextRequest) {
   }
   // ── End lead channel ───────────────────────────────────────────────────
 
+  // Support-channel loop guard — drop if the sender is one of our own
+  // verified mailboxes (support OR lead). Symmetric / cross-channel
+  // defensive: a misconfigured forwarding chain that pings our own
+  // support-channel inbound back at us would otherwise loop indefinitely,
+  // and a stray reply from the lead-notifications mailbox should never
+  // turn into a ticket. Covers paths 4a, B, and C — the lead-channel
+  // block above has its own narrower lead-side guard.
+  const verifiedSupportEmail = org.verified_support_email?.toLowerCase() ?? null
+  const verifiedLeadEmail    = org.verified_lead_email?.toLowerCase() ?? null
+  if (
+    fromEmail === verifiedSupportEmail ||
+    fromEmail === verifiedLeadEmail
+  ) {
+    console.warn(`${LOG} support-channel loop guard tripped — dropping from=${fromEmail} org=${orgId}`)
+    return NextResponse.json({ ignored: 'loop_guard' }, { status: 200 })
+  }
+
   // 4a. Lead-conversation routing — does the subject reference an existing
   //     lead in this org via [ld_<display_id>]? Lead-magnet confirmations
   //     and lead public replies prepend this tag exactly like Tickets does
@@ -330,6 +335,7 @@ export async function POST(request: NextRequest) {
         body:                messageBody,
         type:                'public',
         external_message_id: messageId,
+        inbound_email_from:  fromEmail,
       })
       if (insErr) {
         console.error(`${LOG} append failed ticket=${displayId}:`, insErr.message)
@@ -364,41 +370,27 @@ export async function POST(request: NextRequest) {
     console.warn(`${LOG} subject tag ${displayId} not in org ${orgId} — falling through to new ticket`)
   }
 
-  // 5. No tag (or tag missed) → new lead-or-update + new ticket.
-  //    Find an existing lead by email within this org, or create one from FromFull.
-  const { data: existingLead } = await supabase
-    .from('leads')
+  // 5. No tag (or tag missed) → new customerless-or-customer-linked ticket.
+  //    Match the sender against customers.email for this org; on hit, link
+  //    the ticket to the customer. On miss, the ticket is opened with
+  //    customer_id NULL — outbound replies still work via the
+  //    ticket_messages.inbound_email_from fallback. lead_id is ALWAYS
+  //    NULL on the support rail; leads and customers are separate rails
+  //    (see Master Manifest Part 5) and a support-channel inbound never
+  //    creates or touches a lead.
+  const { data: customer } = await supabase
+    .from('customers')
     .select('id')
     .eq('organization_id', orgId)
     .ilike('email', fromEmail.replace(/[\\%_]/g, m => '\\' + m))
     .is('deleted_at', null)
     .maybeSingle()
 
-  let leadId: string
-  if (existingLead) {
-    leadId = existingLead.id
-    console.log(`${LOG} matched existing lead ${leadId} for ${fromEmail}`)
+  const customerId = customer?.id ?? null
+  if (customerId) {
+    console.log(`${LOG} matched customer ${customerId} for ${fromEmail}`)
   } else {
-    const { first, last } = splitName(fromName)
-    const { data: newLead, error: leadErr } = await supabase
-      .from('leads')
-      .insert({
-        organization_id: orgId,
-        first_name:      first,
-        last_name:       last,
-        email:           fromEmail,
-        source:          'other',
-        status:          'new',
-      })
-      .select('id')
-      .single()
-
-    if (leadErr || !newLead) {
-      console.error(`${LOG} lead create failed for ${fromEmail}:`, leadErr?.message ?? 'unknown')
-      return NextResponse.json({ error: leadErr?.message ?? 'Failed to create lead' }, { status: 500 })
-    }
-    leadId = newLead.id
-    console.log(`${LOG} created lead ${leadId} for ${fromEmail}`)
+    console.log(`${LOG} no customer match for ${fromEmail} — opening customerless ticket`)
   }
 
   // Create the ticket. Description holds the full original body; the
@@ -408,7 +400,8 @@ export async function POST(request: NextRequest) {
     .from('tickets')
     .insert({
       organization_id: orgId,
-      lead_id:         leadId,
+      customer_id:     customerId,
+      lead_id:         null,
       created_by:      ownerId,
       subject:         newSubject,
       description:     (textBody || stripped || '').trim() || '(empty)',
@@ -431,6 +424,7 @@ export async function POST(request: NextRequest) {
     body:                messageBody,
     type:                'public',
     external_message_id: messageId,
+    inbound_email_from:  fromEmail,
   })
   if (msgErr) {
     console.error(`${LOG} initial message insert failed ticket=${newTicket.id}:`, msgErr.message)
@@ -440,6 +434,6 @@ export async function POST(request: NextRequest) {
 
   // TODO: persist payload.Attachments to Supabase Storage (see above).
 
-  console.log(`${LOG} created ticket ${newTicket.display_id ?? newTicket.id} from ${fromEmail} lead=${leadId}`)
-  return NextResponse.json({ status: 'created', ticket_id: newTicket.id, lead_id: leadId }, { status: 201 })
+  console.log(`${LOG} created ticket ${newTicket.display_id ?? newTicket.id} from ${fromEmail} customer=${customerId ?? 'none'}`)
+  return NextResponse.json({ status: 'created', ticket_id: newTicket.id, customer_id: customerId }, { status: 201 })
 }
