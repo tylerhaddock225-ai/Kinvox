@@ -3,6 +3,7 @@ import { timingSafeEqual } from 'node:crypto'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { sendOrgTransactionalEmail } from '@/lib/email/send-org-email'
 import { renderLeadChannelBounce } from '@/lib/email/templates/lead-channel-bounce'
+import { constructInboundEmailAddress } from '@/lib/email/inbound-address'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -178,6 +179,7 @@ export async function POST(request: NextRequest) {
         .eq('organization_id', orgId)
         .eq('display_id', displayId)
         .is('deleted_at', null)
+        .is('archived_at', null)
         .maybeSingle<{ id: string; status: string }>()
       if (data) matchedLead = data
     }
@@ -189,6 +191,7 @@ export async function POST(request: NextRequest) {
         .eq('organization_id', orgId)
         .ilike('email', fromEmail.replace(/[\\%_]/g, m => '\\' + m))
         .is('deleted_at', null)
+        .is('archived_at', null)
         .maybeSingle<{ id: string; status: string }>()
       if (data) matchedLead = data
     }
@@ -230,9 +233,15 @@ export async function POST(request: NextRequest) {
     }
 
     const reason = matchedLead ? 'converted_lead' : 'unknown_sender'
+    // Prefer the constructed inbound forwarding address (support-<tag>@<inboundDomain>)
+    // so visitor replies route into the conversation panel via the same webhook path
+    // as the support channel. Falls back to the raw verified mailbox only when
+    // construction returns null (missing tag or unset POSTMARK_INBOUND_DOMAIN).
+    const bounceSupportAddress =
+      constructInboundEmailAddress(org.inbound_email_tag) ?? org.verified_support_email
     const tpl = renderLeadChannelBounce({
       orgName:      org.name,
-      supportEmail: org.verified_support_email,
+      supportEmail: bounceSupportAddress,
     })
     const result = await sendOrgTransactionalEmail({
       org,
@@ -280,6 +289,7 @@ export async function POST(request: NextRequest) {
       .eq('organization_id', orgId)
       .eq('display_id', leadDisplayId)
       .is('deleted_at', null)
+      .is('archived_at', null)
       .maybeSingle()
 
     if (lErr) {

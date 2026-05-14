@@ -134,6 +134,7 @@ export type Database = {
           metadata: Json | null
           converted_at: string | null
           deleted_at: string | null
+          archived_at: string | null
           unlocked_at: string | null
           unlocked_by: string | null
           created_at: string
@@ -156,6 +157,7 @@ export type Database = {
           metadata?: Json | null
           converted_at?: string | null
           deleted_at?: string | null
+          archived_at?: string | null
           unlocked_at?: string | null
           unlocked_by?: string | null
           created_at?: string

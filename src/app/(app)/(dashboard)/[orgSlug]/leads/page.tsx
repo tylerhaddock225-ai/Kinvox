@@ -1,4 +1,5 @@
 import { Suspense } from 'react'
+import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { resolveImpersonation } from '@/lib/impersonation'
@@ -25,7 +26,48 @@ type SearchParams = Promise<{
   q?:      string
   status?: string
   source?: string
+  view?:   string
 }>
+
+type LeadView = 'active' | 'archived'
+
+function pickView(v: string | undefined): LeadView {
+  return v === 'archived' ? 'archived' : 'active'
+}
+
+// Tab affordance for Active | Archived. Preserves q/status/source across
+// switches; drops the `view` key so the default (active) URL stays clean.
+function ViewTab({
+  view, current, label, orgSlug, params,
+}: {
+  view:    LeadView
+  current: LeadView
+  label:   string
+  orgSlug: string
+  params:  Record<string, string | undefined>
+}) {
+  const next = new URLSearchParams()
+  for (const [k, v] of Object.entries(params)) {
+    if (!v) continue
+    if (k === 'view') continue
+    next.set(k, v)
+  }
+  if (view !== 'active') next.set('view', view)
+  const href = `/${orgSlug}/leads${next.toString() ? `?${next.toString()}` : ''}`
+  const isActive = current === view
+  return (
+    <Link
+      href={href}
+      className={`px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px ${
+        isActive
+          ? 'border-violet-500 text-white'
+          : 'border-transparent text-gray-400 hover:text-gray-200'
+      }`}
+    >
+      {label}
+    </Link>
+  )
+}
 
 type RouteParams = Promise<{ orgSlug: string }>
 
@@ -75,14 +117,20 @@ export default async function LeadsPage({
   const q      = sp.q?.trim() ?? ''
   const status = pickStatus(sp.status)
   const source = pickSource(sp.source)
+  const view   = pickView(sp.view)
 
   let query = supabase
     .from('leads')
-    .select('id, display_id, first_name, last_name, email, company, status, source, created_at')
+    .select('id, display_id, first_name, last_name, email, company, status, source, created_at, archived_at')
     .eq('organization_id', effectiveOrgId)
     .is('deleted_at', null)
-    .order('created_at', { ascending: false })
     .limit(200)
+
+  if (view === 'archived') {
+    query = query.not('archived_at', 'is', null).order('archived_at', { ascending: false })
+  } else {
+    query = query.is('archived_at', null).order('created_at', { ascending: false })
+  }
 
   if (status) query = query.eq('status', status)
   if (source) query = query.eq('source', source)
@@ -94,7 +142,7 @@ export default async function LeadsPage({
   }
 
   const { data: leads } = await query
-  const rows = (leads ?? []) as Pick<Lead, 'id' | 'display_id' | 'first_name' | 'last_name' | 'email' | 'company' | 'status' | 'source' | 'created_at'>[]
+  const rows = (leads ?? []) as Pick<Lead, 'id' | 'display_id' | 'first_name' | 'last_name' | 'email' | 'company' | 'status' | 'source' | 'created_at' | 'archived_at'>[]
 
   return (
     <div className="px-8 py-8 space-y-6">
@@ -106,6 +154,11 @@ export default async function LeadsPage({
         <CreateLeadModal />
       </div>
 
+      <div className="flex items-center gap-1 border-b border-pvx-border">
+        <ViewTab view="active"   current={view} label="Active"   orgSlug={orgSlug} params={sp} />
+        <ViewTab view="archived" current={view} label="Archived" orgSlug={orgSlug} params={sp} />
+      </div>
+
       <Suspense fallback={<div className="h-10" />}>
         <LeadsFilters />
       </Suspense>
@@ -115,7 +168,9 @@ export default async function LeadsPage({
           <div className="px-6 py-16 text-center text-gray-500 text-sm">
             {q || status || source
               ? 'No leads match your filters.'
-              : 'No leads yet. Add your first lead to get started.'}
+              : view === 'archived'
+                ? 'No archived leads.'
+                : 'No leads yet. Add your first lead to get started.'}
           </div>
         ) : (
           <table className="w-full text-sm">

@@ -206,6 +206,59 @@ export async function updateLeadStatus(leadId: string, status: string): Promise<
   revalidatePath('/')
 }
 
+// ── archiveLead / restoreLead ───────────────────────────────────────────────
+//
+// Archive sets archived_at to the current timestamp. Archived leads are
+// hidden from the active leads list but preserved in the database; the
+// magnet capture-action restores the row automatically when the same email
+// resubmits the form (see src/app/(public)/l/[slug]/actions.ts). RLS is
+// already org-scoped on leads, but the explicit organization_id filter on
+// the update guards against an HQ admin accidentally archiving a row
+// outside the impersonation scope.
+
+export async function archiveLead(formData: FormData): Promise<void> {
+  const leadId = String(formData.get('lead_id') ?? '').trim()
+  if (!leadId) return
+
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return
+
+  const orgId = await resolveEffectiveOrgId(supabase, user.id)
+  if (!orgId) return
+
+  await supabase
+    .from('leads')
+    .update({ archived_at: new Date().toISOString() })
+    .eq('id', leadId)
+    .eq('organization_id', orgId)
+
+  await revalidateOrgPath(supabase, orgId, '/leads')
+  await revalidateOrgPath(supabase, orgId, `/leads/${leadId}`)
+}
+
+export async function restoreLead(formData: FormData): Promise<void> {
+  const leadId = String(formData.get('lead_id') ?? '').trim()
+  if (!leadId) return
+
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return
+
+  const orgId = await resolveEffectiveOrgId(supabase, user.id)
+  if (!orgId) return
+
+  await supabase
+    .from('leads')
+    .update({ archived_at: null })
+    .eq('id', leadId)
+    .eq('organization_id', orgId)
+
+  await revalidateOrgPath(supabase, orgId, '/leads')
+  await revalidateOrgPath(supabase, orgId, `/leads/${leadId}`)
+}
+
+
 export type AddNoteState =
   | { status: 'success' }
   | { status: 'error'; error: string }

@@ -128,6 +128,7 @@ export default async function DashboardPage({
           .select('id, first_name, last_name, company, status, source, created_at')
           .eq('organization_id', orgId)
           .is('deleted_at', null)
+          .is('archived_at', null)
           .order('created_at', { ascending: false })
           .limit(5)
       : Promise.resolve({ data: [], error: null }),
@@ -138,6 +139,7 @@ export default async function DashboardPage({
           .select('id', { count: 'exact', head: true })
           .eq('organization_id', orgId)
           .is('deleted_at', null)
+          .is('archived_at', null)
       : Promise.resolve({ count: 0, error: null }),
 
     canViewLeads

@@ -9,6 +9,8 @@ import { type ConversationMessage } from '@/components/conversation/Conversation
 import EditLeadModal from '@/components/EditLeadModal'
 import CopyId from '@/components/CopyId'
 import QuickScheduleModal from '@/components/QuickScheduleModal'
+import ConfirmButton from '@/components/admin/ConfirmButton'
+import { archiveLead, restoreLead } from '@/app/(app)/(dashboard)/actions/leads'
 
 type LeadMessageRow = {
   id:                  string
@@ -116,8 +118,29 @@ export default async function LeadDetailPage({
               <span className="ml-3 text-xl font-normal text-gray-400">{l.company}</span>
             )}
           </h1>
-          <div className="shrink-0">
+          <div className="shrink-0 flex items-center gap-2">
             <QuickScheduleModal leadId={l.id} />
+            {l.archived_at ? (
+              <form action={restoreLead}>
+                <input type="hidden" name="lead_id" value={l.id} />
+                <ConfirmButton
+                  message="Restore this lead to the active list?"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-700/60 bg-indigo-600/20 px-3 py-1.5 text-sm font-medium text-indigo-200 hover:bg-indigo-600/30 transition-colors"
+                >
+                  Restore
+                </ConfirmButton>
+              </form>
+            ) : (
+              <form action={archiveLead}>
+                <input type="hidden" name="lead_id" value={l.id} />
+                <ConfirmButton
+                  message="Archive this lead? The email will be freed for resubmission and the lead will be hidden from the active leads list. You can restore it from the Archived tab."
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-rose-700/60 bg-rose-900/30 px-3 py-1.5 text-sm font-medium text-rose-100 hover:bg-rose-900/50 transition-colors"
+                >
+                  Archive
+                </ConfirmButton>
+              </form>
+            )}
           </div>
         </div>
         {l.display_id && (
