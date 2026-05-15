@@ -1,6 +1,9 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { timingSafeEqual } from 'node:crypto'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { sendOrgTransactionalEmail } from '@/lib/email/send-org-email'
+import { renderLeadChannelBounce } from '@/lib/email/templates/lead-channel-bounce'
+import { constructInboundEmailAddress } from '@/lib/email/inbound-address'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -66,17 +69,6 @@ function safeEqual(a: string, b: string): boolean {
   return timingSafeEqual(ab, bb)
 }
 
-function nameFromEmail(email: string): string {
-  return email.split('@')[0]?.replace(/[._+-]+/g, ' ').trim() || 'Unknown'
-}
-
-function splitName(full: string): { first: string; last: string | null } {
-  const parts = full.trim().split(/\s+/).filter(Boolean)
-  if (parts.length === 0) return { first: 'Unknown', last: null }
-  if (parts.length === 1) return { first: parts[0], last: null }
-  return { first: parts[0], last: parts.slice(1).join(' ') }
-}
-
 export async function POST(request: NextRequest) {
   // 1. Shared-secret query-param guard. Postmark appends `?token=...` to the
   //    inbound webhook URL; we compare it against POSTMARK_INBOUND_SECRET.
@@ -102,7 +94,6 @@ export async function POST(request: NextRequest) {
 
   const subject     = payload.Subject ?? ''
   const fromEmail   = payload.FromFull?.Email?.toLowerCase() ?? payload.From?.toLowerCase() ?? null
-  const fromName    = payload.FromFull?.Name || payload.FromName || (fromEmail ? nameFromEmail(fromEmail) : 'Unknown')
   const messageId   = payload.MessageID ?? null
   const textBody    = payload.TextBody ?? ''
   const stripped    = payload.StrippedTextReply ?? ''
@@ -140,23 +131,148 @@ export async function POST(request: NextRequest) {
 
   const { data: org } = await supabase
     .from('organizations')
-    .select('id, owner_id')
+    .select(`
+      id, owner_id, name,
+      inbound_email_tag, inbound_lead_email_tag,
+      verified_support_email, verified_support_email_confirmed_at,
+      verified_lead_email, verified_lead_email_confirmed_at
+    `)
     .or(`inbound_email_tag.eq.${tag},inbound_lead_email_tag.eq.${tag}`)
     .maybeSingle()
 
   const orgId   = org?.id ?? null
   const ownerId = org?.owner_id ?? null
 
-  if (!orgId || !ownerId) {
+  if (!org || !orgId || !ownerId) {
     console.warn(`${LOG} unknown recipient — no resolvable org for tag=${tag} source=${resolved.source}`)
     return NextResponse.json({ ignored: 'unknown recipient', tag }, { status: 200 })
   }
 
-  console.log(`${LOG} resolved org=${orgId}`)
+  // Channel detection: which tag column matched? Drives the lead-vs-support
+  // routing split below — lead-channel inbound is private infrastructure
+  // (only ever exposed as Reply-To on lead-magnet confirmation mails) and
+  // must NOT fall through to the "open a new ticket" support fallback.
+  const channel: 'lead' | 'support' =
+    org.inbound_lead_email_tag === tag ? 'lead' : 'support'
+  console.log(`${LOG} resolved org=${orgId} channel=${channel}`)
 
   // Postmark already strips the quoted reply trail when it can. Prefer that
   // for follow-ups; fall back to the full text body for fresh threads.
   const messageBody = (stripped || textBody || '').trim() || '(empty)'
+
+  // ── Lead channel ───────────────────────────────────────────────────────
+  // Match by [ld_<displayId>] subject tag FIRST (deterministic, survives
+  // Gmail plus-alias collapsing), fall back to sender-email exact match.
+  // On miss OR on a converted lead, bounce the sender to the org's verified
+  // support email — but only if support is itself verified, otherwise drop
+  // silently to avoid steering customers at a dead end. Lead-channel
+  // inbound NEVER falls through to the new-lead + new-ticket support path.
+  if (channel === 'lead') {
+    let matchedLead: { id: string; status: string } | null = null
+
+    const leadTagMatch = subject.match(LEAD_TAG_RE)
+    if (leadTagMatch) {
+      const displayId = leadTagMatch[1].toLowerCase()
+      const { data } = await supabase
+        .from('leads')
+        .select('id, status')
+        .eq('organization_id', orgId)
+        .eq('display_id', displayId)
+        .is('deleted_at', null)
+        .is('archived_at', null)
+        .maybeSingle<{ id: string; status: string }>()
+      if (data) matchedLead = data
+    }
+
+    if (!matchedLead) {
+      const { data } = await supabase
+        .from('leads')
+        .select('id, status')
+        .eq('organization_id', orgId)
+        .ilike('email', fromEmail.replace(/[\\%_]/g, m => '\\' + m))
+        .is('deleted_at', null)
+        .is('archived_at', null)
+        .maybeSingle<{ id: string; status: string }>()
+      if (data) matchedLead = data
+    }
+
+    if (matchedLead && matchedLead.status !== 'converted') {
+      const { error: insErr } = await supabase.from('lead_messages').insert({
+        lead_id:             matchedLead.id,
+        organization_id:     orgId,
+        message_type:        'public_reply',
+        author_kind:         'lead',
+        author_user_id:      null,
+        body:                messageBody,
+        postmark_message_id: messageId,
+        inbound_email_from:  fromEmail,
+      })
+      if (insErr) {
+        console.error(`${LOG} lead-channel append failed lead=${matchedLead.id}:`, insErr.message)
+        return NextResponse.json({ error: insErr.message }, { status: 500 })
+      }
+      console.log(`${LOG} appended to lead_messages lead_id=${matchedLead.id} status=${matchedLead.status} from=${fromEmail}`)
+      return NextResponse.json({ status: 'appended_lead', lead_id: matchedLead.id }, { status: 200 })
+    }
+
+    // Loop guard: never auto-reply to our own verified lead-notifications
+    // mailbox — if a misconfigured forwarding chain points it back at us
+    // we'd ping-pong indefinitely otherwise.
+    if (org.verified_lead_email && fromEmail === org.verified_lead_email.toLowerCase()) {
+      console.warn(`${LOG} lead-channel inbound from own verified_lead_email — dropping (loop guard) org=${orgId}`)
+      return NextResponse.json({ ignored: 'loop_guard' }, { status: 200 })
+    }
+
+    // No verified support email → silent drop. This is the business-model
+    // affordance: an org that's bought lead-magnet but not support gets the
+    // inbound rejected silently rather than steered at an address that
+    // doesn't exist on their side.
+    if (!org.verified_support_email || !org.verified_support_email_confirmed_at) {
+      console.warn(`${LOG} lead-channel inbound dropped — no verified support email org=${orgId} from=${fromEmail}`)
+      return NextResponse.json({ ignored: 'no_support_email' }, { status: 200 })
+    }
+
+    const reason = matchedLead ? 'converted_lead' : 'unknown_sender'
+    // Prefer the constructed inbound forwarding address (support-<tag>@<inboundDomain>)
+    // so visitor replies route into the conversation panel via the same webhook path
+    // as the support channel. Falls back to the raw verified mailbox only when
+    // construction returns null (missing tag or unset POSTMARK_INBOUND_DOMAIN).
+    const bounceSupportAddress =
+      constructInboundEmailAddress(org.inbound_email_tag) ?? org.verified_support_email
+    const tpl = renderLeadChannelBounce({
+      orgName:      org.name,
+      supportEmail: bounceSupportAddress,
+    })
+    const result = await sendOrgTransactionalEmail({
+      org,
+      to:                fromEmail,
+      subject:           tpl.subject,
+      htmlBody:          tpl.htmlBody,
+      textBody:          tpl.textBody,
+      fromAddressSource: 'lead',
+      tag:               'lead-channel-bounce',
+    })
+    console.log(`${LOG} lead-channel bounce sent reason=${reason} org=${orgId} to=${fromEmail} ok=${result.ok}`)
+    return NextResponse.json({ ignored: 'bounced_to_support', reason }, { status: 200 })
+  }
+  // ── End lead channel ───────────────────────────────────────────────────
+
+  // Support-channel loop guard — drop if the sender is one of our own
+  // verified mailboxes (support OR lead). Symmetric / cross-channel
+  // defensive: a misconfigured forwarding chain that pings our own
+  // support-channel inbound back at us would otherwise loop indefinitely,
+  // and a stray reply from the lead-notifications mailbox should never
+  // turn into a ticket. Covers paths 4a, B, and C — the lead-channel
+  // block above has its own narrower lead-side guard.
+  const verifiedSupportEmail = org.verified_support_email?.toLowerCase() ?? null
+  const verifiedLeadEmail    = org.verified_lead_email?.toLowerCase() ?? null
+  if (
+    fromEmail === verifiedSupportEmail ||
+    fromEmail === verifiedLeadEmail
+  ) {
+    console.warn(`${LOG} support-channel loop guard tripped — dropping from=${fromEmail} org=${orgId}`)
+    return NextResponse.json({ ignored: 'loop_guard' }, { status: 200 })
+  }
 
   // 4a. Lead-conversation routing — does the subject reference an existing
   //     lead in this org via [ld_<display_id>]? Lead-magnet confirmations
@@ -173,6 +289,7 @@ export async function POST(request: NextRequest) {
       .eq('organization_id', orgId)
       .eq('display_id', leadDisplayId)
       .is('deleted_at', null)
+      .is('archived_at', null)
       .maybeSingle()
 
     if (lErr) {
@@ -228,6 +345,7 @@ export async function POST(request: NextRequest) {
         body:                messageBody,
         type:                'public',
         external_message_id: messageId,
+        inbound_email_from:  fromEmail,
       })
       if (insErr) {
         console.error(`${LOG} append failed ticket=${displayId}:`, insErr.message)
@@ -262,41 +380,27 @@ export async function POST(request: NextRequest) {
     console.warn(`${LOG} subject tag ${displayId} not in org ${orgId} — falling through to new ticket`)
   }
 
-  // 5. No tag (or tag missed) → new lead-or-update + new ticket.
-  //    Find an existing lead by email within this org, or create one from FromFull.
-  const { data: existingLead } = await supabase
-    .from('leads')
+  // 5. No tag (or tag missed) → new customerless-or-customer-linked ticket.
+  //    Match the sender against customers.email for this org; on hit, link
+  //    the ticket to the customer. On miss, the ticket is opened with
+  //    customer_id NULL — outbound replies still work via the
+  //    ticket_messages.inbound_email_from fallback. lead_id is ALWAYS
+  //    NULL on the support rail; leads and customers are separate rails
+  //    (see Master Manifest Part 5) and a support-channel inbound never
+  //    creates or touches a lead.
+  const { data: customer } = await supabase
+    .from('customers')
     .select('id')
     .eq('organization_id', orgId)
     .ilike('email', fromEmail.replace(/[\\%_]/g, m => '\\' + m))
     .is('deleted_at', null)
     .maybeSingle()
 
-  let leadId: string
-  if (existingLead) {
-    leadId = existingLead.id
-    console.log(`${LOG} matched existing lead ${leadId} for ${fromEmail}`)
+  const customerId = customer?.id ?? null
+  if (customerId) {
+    console.log(`${LOG} matched customer ${customerId} for ${fromEmail}`)
   } else {
-    const { first, last } = splitName(fromName)
-    const { data: newLead, error: leadErr } = await supabase
-      .from('leads')
-      .insert({
-        organization_id: orgId,
-        first_name:      first,
-        last_name:       last,
-        email:           fromEmail,
-        source:          'other',
-        status:          'new',
-      })
-      .select('id')
-      .single()
-
-    if (leadErr || !newLead) {
-      console.error(`${LOG} lead create failed for ${fromEmail}:`, leadErr?.message ?? 'unknown')
-      return NextResponse.json({ error: leadErr?.message ?? 'Failed to create lead' }, { status: 500 })
-    }
-    leadId = newLead.id
-    console.log(`${LOG} created lead ${leadId} for ${fromEmail}`)
+    console.log(`${LOG} no customer match for ${fromEmail} — opening customerless ticket`)
   }
 
   // Create the ticket. Description holds the full original body; the
@@ -306,7 +410,8 @@ export async function POST(request: NextRequest) {
     .from('tickets')
     .insert({
       organization_id: orgId,
-      lead_id:         leadId,
+      customer_id:     customerId,
+      lead_id:         null,
       created_by:      ownerId,
       subject:         newSubject,
       description:     (textBody || stripped || '').trim() || '(empty)',
@@ -329,6 +434,7 @@ export async function POST(request: NextRequest) {
     body:                messageBody,
     type:                'public',
     external_message_id: messageId,
+    inbound_email_from:  fromEmail,
   })
   if (msgErr) {
     console.error(`${LOG} initial message insert failed ticket=${newTicket.id}:`, msgErr.message)
@@ -338,6 +444,6 @@ export async function POST(request: NextRequest) {
 
   // TODO: persist payload.Attachments to Supabase Storage (see above).
 
-  console.log(`${LOG} created ticket ${newTicket.display_id ?? newTicket.id} from ${fromEmail} lead=${leadId}`)
-  return NextResponse.json({ status: 'created', ticket_id: newTicket.id, lead_id: leadId }, { status: 201 })
+  console.log(`${LOG} created ticket ${newTicket.display_id ?? newTicket.id} from ${fromEmail} customer=${customerId ?? 'none'}`)
+  return NextResponse.json({ status: 'created', ticket_id: newTicket.id, customer_id: customerId }, { status: 201 })
 }

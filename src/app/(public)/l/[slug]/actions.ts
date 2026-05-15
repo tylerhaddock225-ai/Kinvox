@@ -165,6 +165,7 @@ export async function captureLeadAction(
 
   const homesteadRaw = formData.get('homestead_exemption')
   const homestead    = homesteadRaw === 'on' || homesteadRaw === 'true'
+  const homesteadProvided = homesteadRaw !== null
 
   const metadata: Record<string, unknown> = {
     captured_via: 'lead_magnet',
@@ -180,6 +181,107 @@ export async function captureLeadAction(
   // Attribution trail: links the lead row back to the originating signal so
   // the merchant (and HQ) can trace social-post → unlock → form submission.
   if (attributedSignalId)      metadata.signal_id           = attributedSignalId
+
+  // Label custom answers for both branches (new lead confirmation + resubmission
+  // system message). Cheap join against the org's saved questionnaire.
+  const customAnswersWithLabels = labelCustomAnswers(customAnswers, org.custom_lead_questions)
+
+  // ── Resubmission branch ──────────────────────────────────────────────────
+  // Pre-insert existence check. The leads_org_email_unique partial index
+  // (organization_id, email) WHERE deleted_at IS NULL would 23505 on a
+  // duplicate insert; checking here lets us record the resubmission as a
+  // system message instead of silently swallowing it. INCLUDES archived
+  // leads so a resubmit auto-restores the previously archived row.
+  const { data: existingLead } = await supabase
+    .from('leads')
+    .select('id, status, archived_at, display_id')
+    .eq('organization_id', org.id)
+    .eq('email', email)
+    .maybeSingle<{
+      id:           string
+      status:       string
+      archived_at:  string | null
+      display_id:   string | null
+    }>()
+
+  if (existingLead) {
+    const isArchived = existingLead.archived_at !== null
+    const isDisposed = existingLead.status === 'converted' || existingLead.status === 'lost'
+    const willReopen = isArchived || isDisposed
+
+    const updates: Record<string, unknown> = {
+      // Explicit updated_at touch — guarantees the row UPDATE fires the
+      // set_leads_updated_at trigger even on the active branch where no
+      // other fields change. Trigger overwrites with NOW() server-side.
+      updated_at: new Date().toISOString(),
+    }
+    if (isArchived) updates.archived_at = null
+    if (willReopen) updates.status      = 'new'
+
+    const { error: updErr } = await supabase
+      .from('leads')
+      .update(updates)
+      .eq('id', existingLead.id)
+    if (updErr) {
+      console.error(`[lead-capture] resubmission update failed lead=${existingLead.id}: ${updErr.message}`)
+    }
+
+    const sysBody = composeResubmissionMessageBody({
+      isArchived,
+      isDisposed,
+      priorStatus:    existingLead.status,
+      trimmedName,
+      phone,
+      address,
+      apptIso,
+      customAnswersWithLabels,
+      homestead:      homesteadProvided ? homestead : null,
+      geofence,
+      distanceMiles,
+    })
+    const { error: msgErr } = await supabase.from('lead_messages').insert({
+      lead_id:         existingLead.id,
+      organization_id: org.id,
+      author_kind:     'system',
+      message_type:    'internal_note',
+      author_user_id:  null,
+      body:            sysBody,
+    })
+    if (msgErr) {
+      console.error(`[lead-capture] resubmission system message insert failed lead=${existingLead.id}: ${msgErr.message}`)
+    }
+
+    // Re-fire the merchant alert with a [Resubmission] subject prefix so the
+    // merchant can distinguish in their inbox. Appointment is NEVER recreated
+    // on resubmission for Phase 6a — Phase 6d will rebuild appointment flow.
+    await sendLeadAlertEmail({
+      org,
+      geofence,
+      distanceMiles,
+      fullName:      trimmedName,
+      phone,
+      appointmentAt: null,
+      subjectPrefix: '[Resubmission] ',
+    })
+
+    // Re-send confirmation to the prospect. appointmentTime is null
+    // (no new appointment booked) — confirmation copy collapses to the
+    // no-appointment variant.
+    await dispatchLeadConfirmation({
+      org,
+      email,
+      firstName,
+      address,
+      phone,
+      customAnswersWithLabels,
+      appointmentTime: null,
+      leadDisplayId:   existingLead.display_id,
+      leadId:          existingLead.id,
+    })
+
+    return { status: 'success' }
+  }
+  // ── End resubmission branch ──────────────────────────────────────────────
 
   const { data: lead, error: insertErr } = await supabase
     .from('leads')
@@ -197,11 +299,17 @@ export async function captureLeadAction(
     .single<{ id: string; display_id: string | null }>()
 
   if (insertErr) {
-    // Unique violation on (org, email): treat as idempotent success so
-    // double-submits / bots don't surface a scary error to the visitor.
+    // Race-condition guard: if a concurrent submission landed between our
+    // existence check and the insert, the unique index trips 23505 here.
+    // Treat as idempotent success — the other submission's resubmission
+    // path already handled the activity bookkeeping.
     if (insertErr.code === '23505') return { status: 'success' }
     return { status: 'error', error: 'Submission failed — please try again.' }
   }
+  // .single() guarantees `lead` is non-null when error is null; the narrowing
+  // is for TypeScript's benefit (and a defensive fallback if Supabase ever
+  // changes the contract).
+  if (!lead) return { status: 'error', error: 'Submission failed — please try again.' }
 
   // Appointment booking: only for in-area visitors. The created_by FK
   // requires a real auth user — we use the org's owner since the booking
@@ -252,53 +360,17 @@ export async function captureLeadAction(
   // captured, the Organization already has its alert; the only loss
   // here is the prospect's acknowledgment, which can be retried/resent
   // out-of-band. Failures are logged inside the helper.
-  const customAnswersWithLabels = labelCustomAnswers(
-    customAnswers,
-    org.custom_lead_questions,
-  )
-  const overrideTemplate = org.confirmation_email_template
-    ? {
-        subject: org.confirmation_email_template.subject ?? null,
-        body:    org.confirmation_email_template.body    ?? null,
-      }
-    : null
-  const rendered = renderLeadConfirmationEmail({
-    orgName:         org.name,
-    firstName:       firstName || 'there',
-    serviceAddress:  address,
-    phone,
-    appointmentTime: appointmentBooked ? formatAppointmentTime(apptIso) : null,
-    customAnswers:   customAnswersWithLabels,
-    leadDisplayId:   lead?.display_id ?? null,
-    override:        overrideTemplate,
-  })
-  // Reply-To routes the prospect's reply through Postmark's plus-addressed
-  // inbound mailbox so it lands in the lead conversation panel via the
-  // postmark/inbound webhook. Threading anchor mirrors the ticket pattern
-  // (<displayId@kinvox.com>) — synthetic, used as both References and
-  // In-Reply-To on every send so Gmail/Outlook keep the thread together.
-  const replyTo     = constructInboundEmailAddress(org.inbound_lead_email_tag)
-  const threadingId = `<${lead?.display_id ?? `ld_${lead?.id}`}@kinvox.com>`
-  if (!replyTo) {
-    console.warn(`[outbound] inbound tag missing for org=${org.id} channel=lead — reply-to omitted, customer replies will land in org's verified mailbox and bypass conversation panel`)
-  }
-  const confirmationResult = await sendOrgTransactionalEmail({
+  await dispatchLeadConfirmation({
     org,
-    to:                email,
-    subject:           rendered.subject,
-    htmlBody:          rendered.htmlBody,
-    textBody:          rendered.textBody,
-    tag:               'lead-confirmation',
-    fromAddressSource: 'lead',
-    replyTo:           replyTo ?? undefined,
-    headers: [
-      { Name: 'References',  Value: threadingId },
-      { Name: 'In-Reply-To', Value: threadingId },
-    ],
+    email,
+    firstName,
+    address,
+    phone,
+    customAnswersWithLabels,
+    appointmentTime: appointmentBooked ? formatAppointmentTime(apptIso) : null,
+    leadDisplayId:   lead?.display_id ?? null,
+    leadId:          lead.id,
   })
-  if (!confirmationResult.ok) {
-    console.error(`[lead-capture] confirmation email failed lead=${lead.id} org=${org.id}: ${confirmationResult.error}`)
-  }
 
   return { status: 'success' }
 }
@@ -348,6 +420,9 @@ type LeadAlertArgs = {
   fullName:      string
   phone:         string
   appointmentAt: string | null
+  // Optional inbox-side marker, e.g. "[Resubmission] " — prepended verbatim
+  // to the auto-generated subject so the merchant can filter / triage.
+  subjectPrefix?: string
 }
 
 async function sendLeadAlertEmail({
@@ -357,6 +432,7 @@ async function sendLeadAlertEmail({
   fullName,
   phone,
   appointmentAt,
+  subjectPrefix,
 }: LeadAlertArgs): Promise<void> {
   const LOG = '[lead-alert]'
 
@@ -384,9 +460,10 @@ async function sendLeadAlertEmail({
   // Form-captured leads = paid signals that converted. PII is OK to
   // include here because the merchant already paid for the signal that
   // produced this lead.
-  const subject = geofence === 'inside'
+  const baseSubject = geofence === 'inside'
     ? `Lead converted — ${fullName}`
     : `Lead captured (outside service area) — ${fullName}`
+  const subject = subjectPrefix ? `${subjectPrefix}${baseSubject}` : baseSubject
 
   const headline = geofence === 'inside'
     ? appointmentAt
@@ -424,4 +501,114 @@ async function sendLeadAlertEmail({
     const msg = err instanceof Error ? err.message : String(err)
     console.error(`${LOG} FAILED org=${org.id} to=${recipient}: ${msg}`)
   }
+}
+
+// Confirmation-email dispatch. Used by both the new-lead path and the
+// resubmission path. Resubmissions pass appointmentTime=null because
+// Phase 6a does not recreate appointments on resubmit (Phase 6d will).
+type LeadConfirmationArgs = {
+  org:                     OrgRow
+  email:                   string
+  firstName:               string
+  address:                 string
+  phone:                   string
+  customAnswersWithLabels: Array<{ label: string; answer: string }>
+  appointmentTime:         string | null
+  leadDisplayId:           string | null
+  leadId:                  string
+}
+
+async function dispatchLeadConfirmation(args: LeadConfirmationArgs): Promise<void> {
+  const overrideTemplate = args.org.confirmation_email_template
+    ? {
+        subject: args.org.confirmation_email_template.subject ?? null,
+        body:    args.org.confirmation_email_template.body    ?? null,
+      }
+    : null
+  const rendered = renderLeadConfirmationEmail({
+    orgName:         args.org.name,
+    firstName:       args.firstName || 'there',
+    serviceAddress:  args.address,
+    phone:           args.phone,
+    appointmentTime: args.appointmentTime,
+    customAnswers:   args.customAnswersWithLabels,
+    leadDisplayId:   args.leadDisplayId,
+    override:        overrideTemplate,
+  })
+  // Reply-To routes the prospect's reply through Postmark's plus-addressed
+  // inbound mailbox so it lands in the lead conversation panel via the
+  // postmark/inbound webhook. Threading anchor mirrors the ticket pattern
+  // (<displayId@kinvox.com>) — synthetic, used as both References and
+  // In-Reply-To on every send so Gmail/Outlook keep the thread together.
+  const replyTo     = constructInboundEmailAddress(args.org.inbound_lead_email_tag)
+  const threadingId = `<${args.leadDisplayId ?? `ld_${args.leadId}`}@kinvox.com>`
+  if (!replyTo) {
+    console.warn(`[outbound] inbound tag missing for org=${args.org.id} channel=lead — reply-to omitted, customer replies will land in org's verified mailbox and bypass conversation panel`)
+  }
+  const result = await sendOrgTransactionalEmail({
+    org:               args.org,
+    to:                args.email,
+    subject:           rendered.subject,
+    htmlBody:          rendered.htmlBody,
+    textBody:          rendered.textBody,
+    tag:               'lead-confirmation',
+    fromAddressSource: 'lead',
+    replyTo:           replyTo ?? undefined,
+    headers: [
+      { Name: 'References',  Value: threadingId },
+      { Name: 'In-Reply-To', Value: threadingId },
+    ],
+  })
+  if (!result.ok) {
+    console.error(`[lead-capture] confirmation email failed lead=${args.leadId} org=${args.org.id}: ${result.error}`)
+  }
+}
+
+// Human-readable system message body appended to lead_messages on resubmission.
+// Renders the submitted form fields so the merchant can see exactly what the
+// prospect typed this time around. Rendered as a markdown-ish bullet list;
+// the conversation panel displays it as plain text inside the "System" badge.
+type ResubmissionBodyArgs = {
+  isArchived:              boolean
+  isDisposed:              boolean
+  priorStatus:             string
+  trimmedName:             string
+  phone:                   string
+  address:                 string
+  apptIso:                 string
+  customAnswersWithLabels: Array<{ label: string; answer: string }>
+  homestead:               boolean | null
+  geofence:                'inside' | 'outside'
+  distanceMiles:           number | null
+}
+
+function composeResubmissionMessageBody(args: ResubmissionBodyArgs): string {
+  const headlineParts: string[] = ['Lead resubmitted the magnet form.']
+  if (args.isArchived) {
+    headlineParts.push('Auto-restored from Archived.')
+  } else if (args.isDisposed) {
+    headlineParts.push(`Auto-reopened from status='${args.priorStatus}' to 'new'.`)
+  } else {
+    headlineParts.push(`Prior status: '${args.priorStatus}'.`)
+  }
+
+  const lines: string[] = [headlineParts.join(' '), '', 'Submitted info:']
+  lines.push(`• Name: ${args.trimmedName}`)
+  lines.push(`• Phone: ${args.phone}`)
+  lines.push(`• Address: ${args.address}`)
+  lines.push(`• Requested appointment: ${new Date(args.apptIso).toLocaleString()}`)
+  lines.push(`• Geofence: ${args.geofence}${args.distanceMiles !== null ? ` (${args.distanceMiles.toFixed(2)} mi)` : ''}`)
+  if (args.homestead !== null) {
+    lines.push(`• Homestead exemption: ${args.homestead ? 'yes' : 'no'}`)
+  }
+  if (args.customAnswersWithLabels.length > 0) {
+    lines.push('• Custom answers:')
+    for (const a of args.customAnswersWithLabels) {
+      lines.push(`    – ${a.label}: ${a.answer}`)
+    }
+  }
+  lines.push('')
+  lines.push('No new appointment was created (Phase 6a defers appointment rebooking).')
+
+  return lines.join('\n')
 }

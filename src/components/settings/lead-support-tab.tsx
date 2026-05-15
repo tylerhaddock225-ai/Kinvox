@@ -13,6 +13,7 @@ import {
   RotateCcw,
   Sparkles,
   Send,
+  ExternalLink,
 } from 'lucide-react'
 import {
   setAiListeningEnabled,
@@ -30,6 +31,7 @@ import LeadQuestionManager from '@/components/settings/LeadQuestionManager'
 import LeadMagnetFeaturesEditor from '@/components/settings/LeadMagnetFeaturesEditor'
 import EmailVerificationPanel from '@/components/settings/EmailVerificationPanel'
 import InboundAddressRow from '@/components/settings/InboundAddressRow'
+import { CopyButton } from '@/components/ui/copy-button'
 import type { LeadQuestion } from '@/lib/lead-questions'
 
 export type LeadSupportState = {
@@ -45,6 +47,12 @@ export type LeadSupportState = {
   // Pre-constructed plus-addressed inbound email for the lead channel,
   // computed server-side from organizations.inbound_lead_email_tag.
   inbound_lead_email_address:            string | null
+  // Slug under organizations.lead_magnet_slug — rendered as a public URL
+  // (`${landingBase}/l/${lead_magnet_slug}`) above the inbound email row.
+  // Null hides the URL row entirely; no placeholder, no config affordance
+  // (HQ owns slug configuration).
+  lead_magnet_slug:                      string | null
+  landing_base:                          string
 }
 
 // Local tokens — kept inline so this file is self-contained. They match
@@ -378,6 +386,32 @@ export default function LeadSupportTab({ state: initialState }: { state: LeadSup
         refreshAction={refreshLeadEmailStatus}
         onSuccessToast={setToast}
       />
+
+      {/* Public lead magnet URL — read-only. HQ owns slug configuration;
+          this row only renders when a slug is set, and renders nothing
+          when it's null (no empty-state, no config affordance). */}
+      {initialState.lead_magnet_slug && (
+        <section className="rounded-lg border border-pvx-border bg-pvx-surface/60 p-4">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-300">
+            Your lead magnet URL
+          </h3>
+          <div className="mt-2 flex items-center gap-2">
+            <a
+              href={`${initialState.landing_base}/l/${initialState.lead_magnet_slug}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-xs font-mono text-violet-300 hover:text-violet-200"
+            >
+              {`${initialState.landing_base}/l/${initialState.lead_magnet_slug}`}
+              <ExternalLink className="w-3 h-3" />
+            </a>
+            <CopyButton
+              text={`${initialState.landing_base}/l/${initialState.lead_magnet_slug}`}
+              label="Copy link"
+            />
+          </div>
+        </section>
+      )}
 
       {/* Lead-channel inbound forwarding address — parallel to the
           Support Settings tab's Kinvox Forwarding Address. Replies threaded

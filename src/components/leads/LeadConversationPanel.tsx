@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useEffect, useRef, useState, useActionState } from 'react'
-import { AlertTriangle, ExternalLink } from 'lucide-react'
+import { AlertTriangle, ExternalLink, Lock } from 'lucide-react'
 import {
   postLeadInternalNote,
   postLeadPublicReply,
@@ -15,13 +15,21 @@ import ConversationThread, {
 type Mode = 'public' | 'internal'
 
 type Props = {
-  leadId:   string
-  orgSlug:  string                 // for the "verify your lead notifications email" deep-link
-  messages: ConversationMessage[]
+  leadId:     string
+  orgSlug:    string                 // for the "verify your lead notifications email" deep-link
+  messages:   ConversationMessage[]
+  leadStatus: string                 // gates the Public Reply composer when 'converted'
 }
 
-export default function LeadConversationPanel({ leadId, orgSlug, messages }: Props) {
-  const [mode, setMode] = useState<Mode>('public')
+export default function LeadConversationPanel({ leadId, orgSlug, messages, leadStatus }: Props) {
+  // Terminal leads (currently only 'converted') are read-only for the
+  // public channel — customer-facing replies are blocked end-to-end (UI
+  // here, server action in postLeadPublicReply, and inbound webhook in
+  // route.ts). Internal notes remain available so the team can keep
+  // working state on the row.
+  const publicDisabled = leadStatus === 'converted'
+
+  const [mode, setMode] = useState<Mode>(publicDisabled ? 'internal' : 'public')
 
   // Two server actions, two action handles. Switching tabs only flips
   // which action the form invokes — the textarea state survives the flip.
@@ -63,13 +71,16 @@ export default function LeadConversationPanel({ leadId, orgSlug, messages }: Pro
           <div className="flex items-center gap-1 rounded-lg border border-pvx-border bg-pvx-surface p-1 w-fit">
             <button
               type="button"
-              onClick={() => setMode('public')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                mode === 'public'
+              onClick={() => { if (!publicDisabled) setMode('public') }}
+              disabled={publicDisabled}
+              title={publicDisabled ? 'Public replies are disabled on converted leads' : undefined}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                mode === 'public' && !publicDisabled
                   ? 'bg-violet-600 text-white'
                   : 'text-gray-400 hover:text-white'
-              }`}
+              } ${publicDisabled ? 'opacity-40 cursor-not-allowed hover:text-gray-400' : ''}`}
             >
+              {publicDisabled && <Lock className="w-3 h-3" />}
               Public Reply
             </button>
             <button
@@ -85,13 +96,21 @@ export default function LeadConversationPanel({ leadId, orgSlug, messages }: Pro
             </button>
           </div>
 
+          {publicDisabled && !isInternal && (
+            <div className="flex items-start gap-2 text-xs text-gray-400 bg-gray-900/40 border border-pvx-border rounded-lg px-3 py-2">
+              <Lock className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+              <span>This lead is marked as converted. Replies are disabled — internal notes are still available.</span>
+            </div>
+          )}
+
           <textarea
             ref={textareaRef}
             name="body"
             required
             rows={4}
+            disabled={!isInternal && publicDisabled}
             placeholder={isInternal ? 'Write a private note for your team…' : 'Write a reply to the lead…'}
-            className={`w-full rounded-lg border px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 resize-none transition-colors ${
+            className={`w-full rounded-lg border px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 resize-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
               isInternal
                 ? 'border-yellow-500/40 bg-yellow-500/5 focus:ring-yellow-500'
                 : 'border-pvx-border bg-gray-900 focus:ring-violet-500'
@@ -123,7 +142,7 @@ export default function LeadConversationPanel({ leadId, orgSlug, messages }: Pro
           <div className="flex justify-end">
             <button
               type="submit"
-              disabled={pending}
+              disabled={pending || (!isInternal && publicDisabled)}
               className={`px-4 py-2 text-sm font-medium rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors ${
                 isInternal
                   ? 'bg-yellow-500 text-gray-900 hover:bg-yellow-400'

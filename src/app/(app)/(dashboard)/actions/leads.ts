@@ -62,10 +62,12 @@ type MirrorArgs = {
   company:        string | null
 }
 
+type MirrorResult = { ok: true } | { ok: false; error: string }
+
 async function mirrorLeadToCustomer(
   supabase: Awaited<ReturnType<typeof createClient>>,
   m: MirrorArgs,
-): Promise<void> {
+): Promise<MirrorResult> {
   // 1. If a customer with this (org, email) already exists and isn't yet
   //    linked to a lead, attach this lead to it. The unique partial index
   //    on (organization_id, lower(email)) WHERE deleted_at IS NULL
@@ -80,6 +82,7 @@ async function mirrorLeadToCustomer(
       .is('lead_id', null)
     if (linkErr) {
       console.warn(`[lead-mirror] link existing customer failed lead=${m.leadId}: ${linkErr.message}`)
+      return { ok: false, error: linkErr.message }
     }
   }
 
@@ -91,7 +94,7 @@ async function mirrorLeadToCustomer(
     .eq('lead_id', m.leadId)
     .maybeSingle()
 
-  if (already) return
+  if (already) return { ok: true }
 
   const { error: insErr } = await supabase.from('customers').insert({
     organization_id: m.organizationId,
@@ -103,7 +106,9 @@ async function mirrorLeadToCustomer(
   })
   if (insErr) {
     console.warn(`[lead-mirror] customer insert failed lead=${m.leadId}: ${insErr.message}`)
+    return { ok: false, error: insErr.message }
   }
+  return { ok: true }
 }
 
 const LEAD_SOURCES: NonNullable<Lead['source']>[] = ['web', 'referral', 'import', 'manual', 'other']
@@ -147,28 +152,61 @@ export async function updateLead(
 
 const LEAD_STATUSES: Lead['status'][] = ['new', 'contacted', 'qualified', 'lost', 'converted']
 
-export async function updateLeadStatus(leadId: string, status: string): Promise<void> {
-  if (!(LEAD_STATUSES as string[]).includes(status)) return
+export type UpdateLeadStatusState =
+  | { status: 'success' }
+  | { status: 'error'; error: string }
+
+export async function updateLeadStatus(leadId: string, status: string): Promise<UpdateLeadStatusState> {
+  if (!(LEAD_STATUSES as string[]).includes(status)) {
+    return { status: 'error', error: 'Invalid status' }
+  }
 
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return
+  if (!user) return { status: 'error', error: 'Not authenticated' }
 
   const orgId = await resolveEffectiveOrgId(supabase, user.id)
 
+  // Read the current status so we can decide what to do with converted_at:
+  // setting on transition INTO converted, clearing on transition OUT of
+  // converted, untouched otherwise. The mirror itself is keyed on
+  // 'next === converted' below, but converted_at is purely diagnostic and
+  // is updated regardless of whether the mirror succeeds.
+  const { data: existing } = await supabase
+    .from('leads')
+    .select('status')
+    .eq('id', leadId)
+    .maybeSingle<{ status: Lead['status'] }>()
+
+  const prevStatus = existing?.status ?? null
+  const update: { status: Lead['status']; converted_at?: string | null } = {
+    status: status as Lead['status'],
+  }
+  if (status === 'converted' && prevStatus !== 'converted') {
+    update.converted_at = new Date().toISOString()
+  } else if (status !== 'converted' && prevStatus === 'converted') {
+    update.converted_at = null
+  }
+
   const { error: updErr } = await supabase
     .from('leads')
-    .update({ status: status as Lead['status'] })
+    .update(update)
     .eq('id', leadId)
   if (updErr) {
     console.warn(`[lead-status] update failed lead=${leadId}: ${updErr.message}`)
-    return
+    return { status: 'error', error: updErr.message }
   }
 
   // Convert-on-demand: when (and only when) the lead flips to 'converted'
   // for the first time, mirror it into customers. Any other status change
   // \u2014 including leaving 'converted' \u2014 leaves the customer row untouched
   // so downstream records (tickets, appointments) never lose their link.
+  //
+  // The status update has already committed above. If the mirror fails we
+  // surface the error to the caller but do NOT revert the status \u2014 the
+  // user can manually re-toggle to retry once the underlying issue (RLS,
+  // constraint, etc.) is resolved.
+  let mirrorError: string | null = null
   if (status === 'converted') {
     // Pull the org-scoped lead snapshot the mirror helper needs.
     const { data: lead } = await supabase
@@ -186,7 +224,7 @@ export async function updateLeadStatus(leadId: string, status: string): Promise<
         .maybeSingle()
 
       if (!already) {
-        await mirrorLeadToCustomer(supabase, {
+        const result = await mirrorLeadToCustomer(supabase, {
           leadId:         lead.id,
           organizationId: lead.organization_id,
           firstName:      lead.first_name,
@@ -194,7 +232,11 @@ export async function updateLeadStatus(leadId: string, status: string): Promise<
           email:          lead.email,
           company:        lead.company,
         })
-        await revalidateOrgPath(supabase, lead.organization_id, '/customers')
+        if (!result.ok) {
+          mirrorError = result.error
+        } else {
+          await revalidateOrgPath(supabase, lead.organization_id, '/customers')
+        }
       }
     }
   }
@@ -204,7 +246,65 @@ export async function updateLeadStatus(leadId: string, status: string): Promise<
   }
   revalidatePath('/[orgSlug]/leads', 'page')
   revalidatePath('/')
+
+  if (mirrorError) {
+    return { status: 'error', error: `Status updated, but customer mirror failed: ${mirrorError}` }
+  }
+  return { status: 'success' }
 }
+
+// ── archiveLead / restoreLead ───────────────────────────────────────────────
+//
+// Archive sets archived_at to the current timestamp. Archived leads are
+// hidden from the active leads list but preserved in the database; the
+// magnet capture-action restores the row automatically when the same email
+// resubmits the form (see src/app/(public)/l/[slug]/actions.ts). RLS is
+// already org-scoped on leads, but the explicit organization_id filter on
+// the update guards against an HQ admin accidentally archiving a row
+// outside the impersonation scope.
+
+export async function archiveLead(formData: FormData): Promise<void> {
+  const leadId = String(formData.get('lead_id') ?? '').trim()
+  if (!leadId) return
+
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return
+
+  const orgId = await resolveEffectiveOrgId(supabase, user.id)
+  if (!orgId) return
+
+  await supabase
+    .from('leads')
+    .update({ archived_at: new Date().toISOString() })
+    .eq('id', leadId)
+    .eq('organization_id', orgId)
+
+  await revalidateOrgPath(supabase, orgId, '/leads')
+  await revalidateOrgPath(supabase, orgId, `/leads/${leadId}`)
+}
+
+export async function restoreLead(formData: FormData): Promise<void> {
+  const leadId = String(formData.get('lead_id') ?? '').trim()
+  if (!leadId) return
+
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return
+
+  const orgId = await resolveEffectiveOrgId(supabase, user.id)
+  if (!orgId) return
+
+  await supabase
+    .from('leads')
+    .update({ archived_at: null })
+    .eq('id', leadId)
+    .eq('organization_id', orgId)
+
+  await revalidateOrgPath(supabase, orgId, '/leads')
+  await revalidateOrgPath(supabase, orgId, `/leads/${leadId}`)
+}
+
 
 export type AddNoteState =
   | { status: 'success' }
@@ -262,10 +362,10 @@ async function resolveLeadInOrg(
 ) {
   const { data: lead } = await supabase
     .from('leads')
-    .select('id, organization_id, email, display_id, first_name')
+    .select('id, organization_id, email, display_id, first_name, status')
     .eq('id', leadId)
     .is('deleted_at', null)
-    .maybeSingle<{ id: string; organization_id: string; email: string | null; display_id: string | null; first_name: string }>()
+    .maybeSingle<{ id: string; organization_id: string; email: string | null; display_id: string | null; first_name: string; status: string }>()
   if (!lead || lead.organization_id !== orgId) return null
   return lead
 }
@@ -319,6 +419,13 @@ export async function postLeadPublicReply(
 
   const lead = await resolveLeadInOrg(supabase, leadId, orgId)
   if (!lead) return { status: 'error', error: 'Lead not found' }
+
+  // Backstop for the LeadConversationPanel UI gate: refuse public replies
+  // on terminal leads even if the client somehow bypasses the disabled
+  // composer. Internal notes are unaffected.
+  if (lead.status === 'converted') {
+    return { status: 'error', error: 'Lead is converted — public replies disabled.' }
+  }
 
   if (!lead.email) {
     return { status: 'error', error: 'Lead has no email address' }

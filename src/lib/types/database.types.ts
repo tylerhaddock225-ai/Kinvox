@@ -134,6 +134,7 @@ export type Database = {
           metadata: Json | null
           converted_at: string | null
           deleted_at: string | null
+          archived_at: string | null
           unlocked_at: string | null
           unlocked_by: string | null
           created_at: string
@@ -156,6 +157,7 @@ export type Database = {
           metadata?: Json | null
           converted_at?: string | null
           deleted_at?: string | null
+          archived_at?: string | null
           unlocked_at?: string | null
           unlocked_by?: string | null
           created_at?: string
@@ -335,6 +337,7 @@ export type Database = {
           body: string
           type: 'public' | 'internal'
           external_message_id: string | null
+          inbound_email_from: string | null
           created_at: string
         }
         Insert: {
@@ -345,6 +348,7 @@ export type Database = {
           body: string
           type?: 'public' | 'internal'
           external_message_id?: string | null
+          inbound_email_from?: string | null
           created_at?: string
         }
         Update: Partial<Database['public']['Tables']['ticket_messages']['Insert']>
