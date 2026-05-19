@@ -352,8 +352,8 @@ export async function POST(request: NextRequest) {
   // defensive: a misconfigured forwarding chain that pings our own
   // support-channel inbound back at us would otherwise loop indefinitely,
   // and a stray reply from the lead-notifications mailbox should never
-  // turn into a ticket. Covers paths 4a, B, and C — the lead-channel
-  // block above has its own narrower lead-side guard.
+  // turn into a ticket. Covers paths B and C — the lead-channel block
+  // above has its own narrower lead-side guard.
   const verifiedSupportEmail = org.verified_support_email?.toLowerCase() ?? null
   const verifiedLeadEmail    = org.verified_lead_email?.toLowerCase() ?? null
   if (
@@ -364,124 +364,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ignored: 'loop_guard' }, { status: 200 })
   }
 
-  // 4a. Lead-conversation routing — does the subject reference an existing
-  //     lead in this org via [ld_<display_id>]? Lead-magnet confirmations
-  //     and lead public replies prepend this tag exactly like Tickets does
-  //     with [tk_<display_id>]. Lead-tag check runs BEFORE the ticket-tag
-  //     check so a lead-tagged thread routes to lead_messages even if the
-  //     visitor's reply somehow also contains a tk_ token in the body.
-  const leadTagMatch = subject.match(LEAD_TAG_RE)
-  if (leadTagMatch) {
-    const leadDisplayId = leadTagMatch[1].toLowerCase()
-    const { data: lead, error: lErr } = await supabase
-      .from('leads')
-      .select('id, organization_id, status, archived_at')
-      .eq('organization_id', orgId)
-      .eq('display_id', leadDisplayId)
-      .is('deleted_at', null)
-      .maybeSingle<{ id: string; organization_id: string; status: string; archived_at: string | null }>()
-
-    if (lErr) {
-      console.error(`${LOG} lead lookup failed display_id=${leadDisplayId} org=${orgId}:`, lErr.message)
-      return NextResponse.json({ error: lErr.message }, { status: 500 })
-    }
-
-    if (lead && lead.status !== 'converted' && lead.archived_at === null) {
-      const { error: insErr } = await supabase.from('lead_messages').insert({
-        lead_id:             lead.id,
-        organization_id:     orgId,
-        message_type:        'public_reply',
-        author_kind:         'lead',
-        body:                messageBody,
-        postmark_message_id: messageId,
-        inbound_email_from:  fromEmail,
-      })
-      if (insErr) {
-        console.error(`${LOG} append failed lead=${leadDisplayId}:`, insErr.message)
-        return NextResponse.json({ error: insErr.message }, { status: 500 })
-      }
-      // Phase 6b: same activity-bump as the lead-channel path — non-fatal,
-      // we don't fail the webhook over a badge timestamp.
-      const { error: bumpErr } = await supabase
-        .from('leads')
-        .update({ last_lead_activity_at: new Date().toISOString() })
-        .eq('id', lead.id)
-      if (bumpErr) {
-        console.error(`${LOG} support-channel activity bump failed lead=${lead.id}:`, bumpErr.message)
-      }
-      console.log(`${LOG} routed to lead lead_id=${lead.id} org_id=${orgId} message_id=${messageId ?? '-'}`)
-      return NextResponse.json({ status: 'appended_lead', lead_id: lead.id }, { status: 200 })
-    }
-
-    if (lead && lead.status !== 'converted' && lead.archived_at !== null) {
-      // Phase 6c-inline: archived lead replying via support-channel [ld_X]
-      // auto-restores, mirroring Path A. Same atomic UPDATE folds in the
-      // Phase 6b activity bump.
-      const priorStatus = lead.status
-      const nowIso      = new Date().toISOString()
-
-      const { error: restoreErr } = await supabase
-        .from('leads')
-        .update({
-          archived_at:           null,
-          status:                'new',
-          last_lead_activity_at: nowIso,
-        })
-        .eq('id', lead.id)
-      if (restoreErr) {
-        console.error(`${LOG} support-channel auto-restore UPDATE failed lead=${lead.id}:`, restoreErr.message)
-        return NextResponse.json({ error: restoreErr.message }, { status: 500 })
-      }
-
-      const { error: insErr } = await supabase.from('lead_messages').insert({
-        lead_id:             lead.id,
-        organization_id:     orgId,
-        message_type:        'public_reply',
-        author_kind:         'lead',
-        body:                messageBody,
-        postmark_message_id: messageId,
-        inbound_email_from:  fromEmail,
-      })
-      if (insErr) {
-        console.error(`${LOG} support-channel auto-restore append failed lead=${lead.id}:`, insErr.message)
-        return NextResponse.json({ error: insErr.message }, { status: 500 })
-      }
-
-      const sysBody = composeInboundAutoRestoreBody({
-        priorStatus,
-        fromEmail,
-        subject: subject || null,
-      })
-      const { error: sysErr } = await supabase.from('lead_messages').insert({
-        lead_id:         lead.id,
-        organization_id: orgId,
-        message_type:    'internal_note',
-        author_kind:     'system',
-        author_user_id:  null,
-        body:            sysBody,
-      })
-      if (sysErr) {
-        console.error(`${LOG} support-channel auto-restore system msg failed lead=${lead.id}:`, sysErr.message)
-      }
-
-      console.log(`${LOG} auto-restored archived lead via support-channel lead_id=${lead.id} prior_status=${priorStatus} from=${fromEmail}`)
-      return NextResponse.json({ status: 'auto_restored', lead_id: lead.id }, { status: 200 })
-    }
-
-    // Fallthrough cases — control continues past this block to the [tk_X]
-    // check and then the new-ticket path. Three reasons we fall through:
-    //   1. No lead matched the display_id in this org (was the only case
-    //      before Phase 6c-inline).
-    //   2. Lead matched but is converted — Path 4a converted handling is
-    //      preserved (becomes a support ticket via the customer-match path).
-    if (!lead) {
-      console.warn(`${LOG} lead-tag matched no lead id=${leadDisplayId} org=${orgId} — falling through`)
-    } else {
-      console.warn(`${LOG} lead-tag matched converted lead id=${leadDisplayId} org=${orgId} — falling through to ticket`)
-    }
-  }
-
-  // 4b. Threading — does the subject reference an existing ticket in this org?
+  // 4. Threading — does the subject reference an existing ticket in this org?
   const tagMatch = subject.match(TICKET_TAG_RE)
   if (tagMatch) {
     const displayId = tagMatch[1].toLowerCase()
