@@ -238,7 +238,13 @@ export default async function LeadsPage({
   function hasUnreadActivity(lead: LeadListRow): boolean {
     if (!lead.last_lead_activity_at) return false
     const lastViewed = viewMap.get(lead.id)
-    return !lastViewed || lead.last_lead_activity_at > lastViewed
+    if (!lastViewed) return true
+    // Parse to Date — last_lead_activity_at can be microsecond-precision
+    // (when backfilled from lead_messages.created_at at migration time) or
+    // millisecond-precision (from JS writes). Lexicographic string > on
+    // these mixed formats is unreliable. new Date() truncates to ms but
+    // preserves the ordering we care about for the badge.
+    return new Date(lead.last_lead_activity_at).getTime() > new Date(lastViewed).getTime()
   }
 
   return (

@@ -57,16 +57,21 @@ export default async function LeadDetailPage({
   const l = lead as Lead
 
   // Phase 6b: record this view so the activity badge clears for this user.
-  // Fire-and-forget — RLS enforces org scoping via the lead_id → org chain,
-  // so this is safe even under HQ-admin impersonation. We don't await
-  // completion because the badge state is non-critical and we don't want
-  // to block render on a write.
-  void supabase
+  // We await the upsert because the supabase-js query builder is a deferred
+  // thenable — `void <builder>` constructs the builder without invoking
+  // .then(), so no HTTP request is dispatched. Awaiting is the correct way
+  // to fire the request. RLS enforces org scoping via the lead_id → org
+  // chain, so this is safe even under HQ-admin impersonation. We swallow
+  // any error (non-critical badge state must never block render).
+  const { error: viewErr } = await supabase
     .from('lead_views')
     .upsert(
       { lead_id: id, user_id: user.id, last_viewed_at: new Date().toISOString() },
       { onConflict: 'lead_id,user_id' },
     )
+  if (viewErr) {
+    console.error(`[leads/${id}] lead_views upsert failed:`, viewErr.message)
+  }
 
   const [messagesRes, customerRes] = await Promise.all([
     supabase
