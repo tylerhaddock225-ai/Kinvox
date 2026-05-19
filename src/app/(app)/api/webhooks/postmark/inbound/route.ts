@@ -211,6 +211,17 @@ export async function POST(request: NextRequest) {
         console.error(`${LOG} lead-channel append failed lead=${matchedLead.id}:`, insErr.message)
         return NextResponse.json({ error: insErr.message }, { status: 500 })
       }
+      // Phase 6b: inbound reply from the lead is the canonical lead-
+      // originated event. Bump last_lead_activity_at so the activity dot
+      // appears on the leads list until a user opens the lead.
+      // Non-fatal — a badge timestamp must never reject a real reply.
+      const { error: bumpErr } = await supabase
+        .from('leads')
+        .update({ last_lead_activity_at: new Date().toISOString() })
+        .eq('id', matchedLead.id)
+      if (bumpErr) {
+        console.error(`${LOG} lead-channel activity bump failed lead=${matchedLead.id}:`, bumpErr.message)
+      }
       console.log(`${LOG} appended to lead_messages lead_id=${matchedLead.id} status=${matchedLead.status} from=${fromEmail}`)
       return NextResponse.json({ status: 'appended_lead', lead_id: matchedLead.id }, { status: 200 })
     }
@@ -310,6 +321,15 @@ export async function POST(request: NextRequest) {
       if (insErr) {
         console.error(`${LOG} append failed lead=${leadDisplayId}:`, insErr.message)
         return NextResponse.json({ error: insErr.message }, { status: 500 })
+      }
+      // Phase 6b: same activity-bump as the lead-channel path — non-fatal,
+      // we don't fail the webhook over a badge timestamp.
+      const { error: bumpErr } = await supabase
+        .from('leads')
+        .update({ last_lead_activity_at: new Date().toISOString() })
+        .eq('id', lead.id)
+      if (bumpErr) {
+        console.error(`${LOG} support-channel activity bump failed lead=${lead.id}:`, bumpErr.message)
       }
       console.log(`${LOG} routed to lead lead_id=${lead.id} org_id=${orgId} message_id=${messageId ?? '-'}`)
       return NextResponse.json({ status: 'appended_lead', lead_id: lead.id }, { status: 200 })

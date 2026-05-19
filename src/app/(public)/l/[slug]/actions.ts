@@ -214,6 +214,10 @@ export async function captureLeadAction(
       // set_leads_updated_at trigger even on the active branch where no
       // other fields change. Trigger overwrites with NOW() server-side.
       updated_at: new Date().toISOString(),
+      // Phase 6b: form resubmission is a lead-originated event, so bump
+      // last_lead_activity_at. Distinct from updated_at, which fires on
+      // every UPDATE including org-side writes (status, edit, archive).
+      last_lead_activity_at: new Date().toISOString(),
     }
     if (isArchived) updates.archived_at = null
     if (willReopen) updates.status      = 'new'
@@ -286,14 +290,17 @@ export async function captureLeadAction(
   const { data: lead, error: insertErr } = await supabase
     .from('leads')
     .insert({
-      organization_id: org.id,
-      first_name:      firstName || 'Unknown',
-      last_name:       lastName,
+      organization_id:       org.id,
+      first_name:            firstName || 'Unknown',
+      last_name:             lastName,
       email,
       phone,
-      status:          'new',
-      source:          'web',
+      status:                'new',
+      source:                'web',
       metadata,
+      // Phase 6b: capture-flow INSERT is itself the first lead-originated
+      // event for this lead row.
+      last_lead_activity_at: new Date().toISOString(),
     })
     .select('id, display_id')
     .single<{ id: string; display_id: string | null }>()

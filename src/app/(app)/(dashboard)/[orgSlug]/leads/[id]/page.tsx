@@ -56,6 +56,18 @@ export default async function LeadDetailPage({
   if (!lead) notFound()
   const l = lead as Lead
 
+  // Phase 6b: record this view so the activity badge clears for this user.
+  // Fire-and-forget — RLS enforces org scoping via the lead_id → org chain,
+  // so this is safe even under HQ-admin impersonation. We don't await
+  // completion because the badge state is non-critical and we don't want
+  // to block render on a write.
+  void supabase
+    .from('lead_views')
+    .upsert(
+      { lead_id: id, user_id: user.id, last_viewed_at: new Date().toISOString() },
+      { onConflict: 'lead_id,user_id' },
+    )
+
   const [messagesRes, customerRes] = await Promise.all([
     supabase
       .from('lead_messages')

@@ -135,6 +135,7 @@ export type Database = {
           converted_at: string | null
           deleted_at: string | null
           archived_at: string | null
+          last_lead_activity_at: string | null
           unlocked_at: string | null
           unlocked_by: string | null
           created_at: string
@@ -158,6 +159,7 @@ export type Database = {
           converted_at?: string | null
           deleted_at?: string | null
           archived_at?: string | null
+          last_lead_activity_at?: string | null
           unlocked_at?: string | null
           unlocked_by?: string | null
           created_at?: string
@@ -202,22 +204,18 @@ export type Database = {
         }
         Update: Partial<Database['public']['Tables']['customers']['Insert']>
       }
-      lead_activities: {
+      lead_views: {
         Row: {
-          id: string
-          lead_id: string
-          user_id: string | null
-          content: string
-          created_at: string
+          lead_id:        string
+          user_id:        string
+          last_viewed_at: string
         }
         Insert: {
-          id?: string
-          lead_id: string
-          user_id?: string | null
-          content: string
-          created_at?: string
+          lead_id:         string
+          user_id:         string
+          last_viewed_at?: string
         }
-        Update: Partial<Database['public']['Tables']['lead_activities']['Insert']>
+        Update: Partial<Database['public']['Tables']['lead_views']['Insert']>
       }
       user_dashboard_configs: {
         Row: {
@@ -599,7 +597,6 @@ export type Database = {
 }
 
 export type Appointment   = Database['public']['Tables']['appointments']['Row']
-export type LeadActivity  = Database['public']['Tables']['lead_activities']['Row']
 export type Profile      = Database['public']['Tables']['profiles']['Row']
 export type Organization = Database['public']['Tables']['organizations']['Row']
 export type Lead         = Database['public']['Tables']['leads']['Row']

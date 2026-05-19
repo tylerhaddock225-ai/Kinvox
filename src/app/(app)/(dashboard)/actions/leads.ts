@@ -306,40 +306,6 @@ export async function restoreLead(formData: FormData): Promise<void> {
 }
 
 
-export type AddNoteState =
-  | { status: 'success' }
-  | { status: 'error'; error: string }
-  | null
-
-export async function addLeadNote(
-  leadId: string,
-  _prev: AddNoteState,
-  formData: FormData,
-): Promise<AddNoteState> {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { status: 'error', error: 'Unauthorized' }
-
-  const content = (formData.get('content') as string | null)?.trim()
-  if (!content) return { status: 'error', error: 'Note cannot be empty' }
-
-  const orgId = await resolveEffectiveOrgId(supabase, user.id)
-
-  const { error } = await supabase.from('lead_activities').insert({
-    lead_id: leadId,
-    user_id: user.id,
-    content,
-  })
-
-  if (error) return { status: 'error', error: error.message }
-
-  if (orgId) {
-    await revalidateOrgPath(supabase, orgId, `/leads/${leadId}`)
-  }
-  return { status: 'success' }
-}
-
-
 // ── Lead conversation (lead_messages) ───────────────────────────────────
 //
 // Two surfaces: an internal note (org-only) and a public reply (sent via
