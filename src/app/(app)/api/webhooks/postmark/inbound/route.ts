@@ -69,6 +69,27 @@ function safeEqual(a: string, b: string): boolean {
   return timingSafeEqual(ab, bb)
 }
 
+// Phase 6c-inline: body composer for the system message that records an
+// archived-lead auto-restore from an inbound email reply. Mirrors the
+// Phase 6a magnet-resubmission archived-restore system message shape but
+// without form-submission fields (inbound emails don't carry name/phone/
+// appointment data — only sender, subject, and the message body itself).
+function composeInboundAutoRestoreBody(args: {
+  priorStatus: string
+  fromEmail:   string
+  subject:     string | null
+}): string {
+  const lines: string[] = ['Auto-restored from Archived.']
+  if (args.priorStatus !== 'new') {
+    lines.push(`Status reset from '${args.priorStatus}' to 'new'.`)
+  }
+  lines.push(`Inbound reply from ${args.fromEmail}.`)
+  if (args.subject && args.subject.trim()) {
+    lines.push(`Subject: ${args.subject.trim()}`)
+  }
+  return lines.join('\n')
+}
+
 export async function POST(request: NextRequest) {
   // 1. Shared-secret query-param guard. Postmark appends `?token=...` to the
   //    inbound webhook URL; we compare it against POSTMARK_INBOUND_SECRET.
@@ -168,35 +189,93 @@ export async function POST(request: NextRequest) {
   // silently to avoid steering customers at a dead end. Lead-channel
   // inbound NEVER falls through to the new-lead + new-ticket support path.
   if (channel === 'lead') {
-    let matchedLead: { id: string; status: string } | null = null
+    let matchedLead: { id: string; status: string; archived_at: string | null } | null = null
 
     const leadTagMatch = subject.match(LEAD_TAG_RE)
     if (leadTagMatch) {
       const displayId = leadTagMatch[1].toLowerCase()
       const { data } = await supabase
         .from('leads')
-        .select('id, status')
+        .select('id, status, archived_at')
         .eq('organization_id', orgId)
         .eq('display_id', displayId)
         .is('deleted_at', null)
-        .is('archived_at', null)
-        .maybeSingle<{ id: string; status: string }>()
+        .maybeSingle<{ id: string; status: string; archived_at: string | null }>()
       if (data) matchedLead = data
     }
 
     if (!matchedLead) {
       const { data } = await supabase
         .from('leads')
-        .select('id, status')
+        .select('id, status, archived_at')
         .eq('organization_id', orgId)
         .ilike('email', fromEmail.replace(/[\\%_]/g, m => '\\' + m))
         .is('deleted_at', null)
-        .is('archived_at', null)
-        .maybeSingle<{ id: string; status: string }>()
+        .maybeSingle<{ id: string; status: string; archived_at: string | null }>()
       if (data) matchedLead = data
     }
 
     if (matchedLead && matchedLead.status !== 'converted') {
+      // Phase 6c-inline: archived lead replying via the lead-channel auto-
+      // restores back to the active list. Single UPDATE folds the Phase 6b
+      // activity bump into the restore write (one round-trip, atomic).
+      // Converted has already been excluded above; converted-and-archived
+      // still bounces below.
+      if (matchedLead.archived_at !== null) {
+        const priorStatus = matchedLead.status
+        const nowIso      = new Date().toISOString()
+
+        const { error: restoreErr } = await supabase
+          .from('leads')
+          .update({
+            archived_at:           null,
+            status:                'new',
+            last_lead_activity_at: nowIso,
+          })
+          .eq('id', matchedLead.id)
+        if (restoreErr) {
+          console.error(`${LOG} lead-channel auto-restore UPDATE failed lead=${matchedLead.id}:`, restoreErr.message)
+          return NextResponse.json({ error: restoreErr.message }, { status: 500 })
+        }
+
+        const { error: insErr } = await supabase.from('lead_messages').insert({
+          lead_id:             matchedLead.id,
+          organization_id:     orgId,
+          message_type:        'public_reply',
+          author_kind:         'lead',
+          author_user_id:      null,
+          body:                messageBody,
+          postmark_message_id: messageId,
+          inbound_email_from:  fromEmail,
+        })
+        if (insErr) {
+          console.error(`${LOG} lead-channel auto-restore append failed lead=${matchedLead.id}:`, insErr.message)
+          return NextResponse.json({ error: insErr.message }, { status: 500 })
+        }
+
+        const sysBody = composeInboundAutoRestoreBody({
+          priorStatus,
+          fromEmail,
+          subject: subject || null,
+        })
+        const { error: sysErr } = await supabase.from('lead_messages').insert({
+          lead_id:         matchedLead.id,
+          organization_id: orgId,
+          message_type:    'internal_note',
+          author_kind:     'system',
+          author_user_id:  null,
+          body:            sysBody,
+        })
+        if (sysErr) {
+          // Non-fatal — the restore + thread already succeeded; an audit-trail
+          // miss must not flap the webhook.
+          console.error(`${LOG} lead-channel auto-restore system msg failed lead=${matchedLead.id}:`, sysErr.message)
+        }
+
+        console.log(`${LOG} auto-restored archived lead lead_id=${matchedLead.id} prior_status=${priorStatus} from=${fromEmail}`)
+        return NextResponse.json({ status: 'auto_restored', lead_id: matchedLead.id }, { status: 200 })
+      }
+
       const { error: insErr } = await supabase.from('lead_messages').insert({
         lead_id:             matchedLead.id,
         organization_id:     orgId,
@@ -210,6 +289,17 @@ export async function POST(request: NextRequest) {
       if (insErr) {
         console.error(`${LOG} lead-channel append failed lead=${matchedLead.id}:`, insErr.message)
         return NextResponse.json({ error: insErr.message }, { status: 500 })
+      }
+      // Phase 6b: inbound reply from the lead is the canonical lead-
+      // originated event. Bump last_lead_activity_at so the activity dot
+      // appears on the leads list until a user opens the lead.
+      // Non-fatal — a badge timestamp must never reject a real reply.
+      const { error: bumpErr } = await supabase
+        .from('leads')
+        .update({ last_lead_activity_at: new Date().toISOString() })
+        .eq('id', matchedLead.id)
+      if (bumpErr) {
+        console.error(`${LOG} lead-channel activity bump failed lead=${matchedLead.id}:`, bumpErr.message)
       }
       console.log(`${LOG} appended to lead_messages lead_id=${matchedLead.id} status=${matchedLead.status} from=${fromEmail}`)
       return NextResponse.json({ status: 'appended_lead', lead_id: matchedLead.id }, { status: 200 })
@@ -262,8 +352,8 @@ export async function POST(request: NextRequest) {
   // defensive: a misconfigured forwarding chain that pings our own
   // support-channel inbound back at us would otherwise loop indefinitely,
   // and a stray reply from the lead-notifications mailbox should never
-  // turn into a ticket. Covers paths 4a, B, and C — the lead-channel
-  // block above has its own narrower lead-side guard.
+  // turn into a ticket. Covers paths B and C — the lead-channel block
+  // above has its own narrower lead-side guard.
   const verifiedSupportEmail = org.verified_support_email?.toLowerCase() ?? null
   const verifiedLeadEmail    = org.verified_lead_email?.toLowerCase() ?? null
   if (
@@ -274,54 +364,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ignored: 'loop_guard' }, { status: 200 })
   }
 
-  // 4a. Lead-conversation routing — does the subject reference an existing
-  //     lead in this org via [ld_<display_id>]? Lead-magnet confirmations
-  //     and lead public replies prepend this tag exactly like Tickets does
-  //     with [tk_<display_id>]. Lead-tag check runs BEFORE the ticket-tag
-  //     check so a lead-tagged thread routes to lead_messages even if the
-  //     visitor's reply somehow also contains a tk_ token in the body.
-  const leadTagMatch = subject.match(LEAD_TAG_RE)
-  if (leadTagMatch) {
-    const leadDisplayId = leadTagMatch[1].toLowerCase()
-    const { data: lead, error: lErr } = await supabase
-      .from('leads')
-      .select('id, organization_id')
-      .eq('organization_id', orgId)
-      .eq('display_id', leadDisplayId)
-      .is('deleted_at', null)
-      .is('archived_at', null)
-      .maybeSingle()
-
-    if (lErr) {
-      console.error(`${LOG} lead lookup failed display_id=${leadDisplayId} org=${orgId}:`, lErr.message)
-      return NextResponse.json({ error: lErr.message }, { status: 500 })
-    }
-
-    if (lead) {
-      const { error: insErr } = await supabase.from('lead_messages').insert({
-        lead_id:             lead.id,
-        organization_id:     orgId,
-        message_type:        'public_reply',
-        author_kind:         'lead',
-        body:                messageBody,
-        postmark_message_id: messageId,
-        inbound_email_from:  fromEmail,
-      })
-      if (insErr) {
-        console.error(`${LOG} append failed lead=${leadDisplayId}:`, insErr.message)
-        return NextResponse.json({ error: insErr.message }, { status: 500 })
-      }
-      console.log(`${LOG} routed to lead lead_id=${lead.id} org_id=${orgId} message_id=${messageId ?? '-'}`)
-      return NextResponse.json({ status: 'appended_lead', lead_id: lead.id }, { status: 200 })
-    }
-
-    // Tag was lead-shaped but didn't match a lead in this org. Mirror the
-    // ticket-tag fall-through: log + continue to the no-tag path so the
-    // message still becomes a ticket and isn't dropped silently.
-    console.warn(`${LOG} lead-tag matched no lead id=${leadDisplayId} org=${orgId} — falling through`)
-  }
-
-  // 4b. Threading — does the subject reference an existing ticket in this org?
+  // 4. Threading — does the subject reference an existing ticket in this org?
   const tagMatch = subject.match(TICKET_TAG_RE)
   if (tagMatch) {
     const displayId = tagMatch[1].toLowerCase()

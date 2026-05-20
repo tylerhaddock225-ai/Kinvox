@@ -6,6 +6,7 @@ import { resolveImpersonation } from '@/lib/impersonation'
 import type { Lead } from '@/lib/types/database.types'
 import CreateLeadModal from '@/components/CreateLeadModal'
 import CopyId from '@/components/CopyId'
+import SortableHeader from '@/components/SortableHeader'
 import LeadsFilters from './LeadsFilters'
 import LeadRow from './LeadRow'
 
@@ -22,11 +23,37 @@ const STATUS_COLORS: Record<Lead['status'], string> = {
   pending_unlock: 'bg-violet-500/10 text-violet-300 border-violet-500/30',
 }
 
+// Allowed sort keys → DB column + preferred default direction. `status` has
+// no db column because alphabetical sort isn't useful; it's ranked in JS
+// after the fetch via STATUS_RANK below. The `id` key sorts on `created_at`
+// because display_id is text ('ld_2' < 'ld_10' lexicographically) — visual
+// order matches creation order regardless.
+const SORT_COLUMNS = {
+  id:                    { db: 'created_at',            defaultOrder: 'desc' as const },
+  name:                  { db: 'first_name',            defaultOrder: 'asc'  as const },
+  email:                 { db: 'email',                 defaultOrder: 'asc'  as const },
+  status:                { db: null,                    defaultOrder: 'asc'  as const },
+  created_at:            { db: 'created_at',            defaultOrder: 'desc' as const },
+  updated_at:            { db: 'updated_at',            defaultOrder: 'desc' as const },
+  last_lead_activity_at: { db: 'last_lead_activity_at', defaultOrder: 'desc' as const },
+} as const
+
+const STATUS_RANK: Record<Lead['status'], number> = {
+  new:            0,
+  contacted:      1,
+  qualified:      2,
+  pending_unlock: 3,
+  converted:      4,
+  lost:           5,
+}
+
 type SearchParams = Promise<{
   q?:      string
   status?: string
   source?: string
   view?:   string
+  sort?:   string
+  order?:  string
 }>
 
 type LeadView = 'active' | 'archived'
@@ -35,8 +62,8 @@ function pickView(v: string | undefined): LeadView {
   return v === 'archived' ? 'archived' : 'active'
 }
 
-// Tab affordance for Active | Archived. Preserves q/status/source across
-// switches; drops the `view` key so the default (active) URL stays clean.
+// Tab affordance for Active | Archived. Preserves q/status/source/sort/order
+// across switches; drops the `view` key so the default (active) URL stays clean.
 function ViewTab({
   view, current, label, orgSlug, params,
 }: {
@@ -83,6 +110,22 @@ function pickSource(v: string | undefined): NonNullable<Lead['source']> | null {
   return (allowed as string[]).includes(v) ? (v as NonNullable<Lead['source']>) : null
 }
 
+type LeadListRow = Pick<
+  Lead,
+  | 'id'
+  | 'display_id'
+  | 'first_name'
+  | 'last_name'
+  | 'email'
+  | 'company'
+  | 'status'
+  | 'source'
+  | 'created_at'
+  | 'updated_at'
+  | 'last_lead_activity_at'
+  | 'archived_at'
+>
+
 export default async function LeadsPage({
   params,
   searchParams,
@@ -119,17 +162,44 @@ export default async function LeadsPage({
   const source = pickSource(sp.source)
   const view   = pickView(sp.view)
 
+  // Sort: validate against the allowed-keys list. The `hasExplicitSort` flag
+  // controls whether the archived branch keeps its archived_at desc default
+  // (no explicit sort) or honours the user's chosen column (explicit sort).
+  const rawSort         = typeof sp.sort === 'string' ? sp.sort : null
+  const hasExplicitSort = rawSort !== null && rawSort in SORT_COLUMNS
+  const sortKey         = (hasExplicitSort ? rawSort : 'updated_at') as keyof typeof SORT_COLUMNS
+  const rawOrder        = typeof sp.order === 'string' ? sp.order : null
+  const order: 'asc' | 'desc' = rawOrder === 'asc' || rawOrder === 'desc'
+    ? rawOrder
+    : SORT_COLUMNS[sortKey].defaultOrder
+
   let query = supabase
     .from('leads')
-    .select('id, display_id, first_name, last_name, email, company, status, source, created_at, archived_at')
+    .select('id, display_id, first_name, last_name, email, company, status, source, created_at, updated_at, last_lead_activity_at, archived_at')
     .eq('organization_id', effectiveOrgId)
     .is('deleted_at', null)
     .limit(200)
 
   if (view === 'archived') {
-    query = query.not('archived_at', 'is', null).order('archived_at', { ascending: false })
+    query = query.not('archived_at', 'is', null)
+    if (hasExplicitSort) {
+      if (SORT_COLUMNS[sortKey].db) {
+        query = query.order(SORT_COLUMNS[sortKey].db!, { ascending: order === 'asc', nullsFirst: false })
+      } else {
+        // JS-sorted column — fetch with a stable secondary order.
+        query = query.order('updated_at', { ascending: false })
+      }
+    } else {
+      query = query.order('archived_at', { ascending: false })
+    }
   } else {
-    query = query.is('archived_at', null).order('created_at', { ascending: false })
+    query = query.is('archived_at', null)
+    if (SORT_COLUMNS[sortKey].db) {
+      query = query.order(SORT_COLUMNS[sortKey].db!, { ascending: order === 'asc', nullsFirst: false })
+    } else {
+      // JS-sorted column — fetch with a stable secondary order.
+      query = query.order('updated_at', { ascending: false })
+    }
   }
 
   if (status) query = query.eq('status', status)
@@ -142,7 +212,40 @@ export default async function LeadsPage({
   }
 
   const { data: leads } = await query
-  const rows = (leads ?? []) as Pick<Lead, 'id' | 'display_id' | 'first_name' | 'last_name' | 'email' | 'company' | 'status' | 'source' | 'created_at' | 'archived_at'>[]
+  let rows = (leads ?? []) as LeadListRow[]
+
+  // JS sort for columns whose DB column is null (status uses a workflow-
+  // progression rank rather than alphabetical).
+  if (sortKey === 'status') {
+    rows = [...rows].sort((a, b) => {
+      const diff = (STATUS_RANK[a.status] ?? 99) - (STATUS_RANK[b.status] ?? 99)
+      return order === 'asc' ? diff : -diff
+    })
+  }
+
+  // Per-user "last viewed" lookup for the activity-badge column. Empty if
+  // no leads were fetched (avoids a no-op IN() round trip).
+  const viewMap = new Map<string, string>()
+  if (rows.length > 0) {
+    const { data: views } = await supabase
+      .from('lead_views')
+      .select('lead_id, last_viewed_at')
+      .eq('user_id', user.id)
+      .in('lead_id', rows.map(l => l.id))
+    for (const v of views ?? []) viewMap.set(v.lead_id, v.last_viewed_at)
+  }
+
+  function hasUnreadActivity(lead: LeadListRow): boolean {
+    if (!lead.last_lead_activity_at) return false
+    const lastViewed = viewMap.get(lead.id)
+    if (!lastViewed) return true
+    // Parse to Date — last_lead_activity_at can be microsecond-precision
+    // (when backfilled from lead_messages.created_at at migration time) or
+    // millisecond-precision (from JS writes). Lexicographic string > on
+    // these mixed formats is unreliable. new Date() truncates to ms but
+    // preserves the ordering we care about for the badge.
+    return new Date(lead.last_lead_activity_at).getTime() > new Date(lastViewed).getTime()
+  }
 
   return (
     <div className="px-8 py-8 space-y-6">
@@ -163,7 +266,7 @@ export default async function LeadsPage({
         <LeadsFilters />
       </Suspense>
 
-      <div className="rounded-xl border border-pvx-border bg-pvx-surface overflow-hidden">
+      <div className="rounded-xl border border-pvx-border bg-pvx-surface overflow-x-auto">
         {rows.length === 0 ? (
           <div className="px-6 py-16 text-center text-gray-500 text-sm">
             {q || status || source
@@ -176,13 +279,27 @@ export default async function LeadsPage({
           <table className="w-full text-sm">
             <thead>
               <tr className="text-xs text-gray-500 border-b border-pvx-border bg-pvx-bg/40">
-                <th className="pl-6 pr-3 py-3 text-left font-medium w-28">ID</th>
-                <th className="px-3 py-3 text-left font-medium">Name</th>
-                <th className="px-3 py-3 text-left font-medium">Company</th>
-                <th className="px-3 py-3 text-left font-medium">Email</th>
-                <th className="px-3 py-3 text-left font-medium">Source</th>
-                <th className="px-3 py-3 text-left font-medium">Status</th>
-                <th className="px-3 py-3 pr-6 text-left font-medium">Created</th>
+                <th className="pl-6 pr-3 py-3 text-left font-medium w-28">
+                  <SortableHeader label="ID" sortKey="id" defaultOrder="desc" />
+                </th>
+                <th className="px-3 py-3 text-left font-medium">
+                  <SortableHeader label="Name" sortKey="name" defaultOrder="asc" />
+                </th>
+                <th className="hidden md:table-cell px-3 py-3 text-left font-medium">
+                  <SortableHeader label="Email" sortKey="email" defaultOrder="asc" />
+                </th>
+                <th className="px-3 py-3 text-left font-medium">
+                  <SortableHeader label="Status" sortKey="status" defaultOrder="asc" />
+                </th>
+                <th className="hidden md:table-cell px-3 py-3 text-left font-medium">
+                  <SortableHeader label="Created" sortKey="created_at" defaultOrder="desc" />
+                </th>
+                <th className="px-3 py-3 text-left font-medium">
+                  <SortableHeader label="Updated" sortKey="updated_at" defaultOrder="desc" />
+                </th>
+                <th className="px-3 py-3 pr-6 text-left font-medium">
+                  <SortableHeader label="Activity" sortKey="last_lead_activity_at" defaultOrder="desc" />
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-pvx-border">
@@ -194,16 +311,25 @@ export default async function LeadsPage({
                   <td className="px-3 py-3 text-gray-200 font-medium">
                     {lead.first_name} {lead.last_name ?? ''}
                   </td>
-                  <td className="px-3 py-3 text-gray-400">{lead.company ?? '—'}</td>
-                  <td className="px-3 py-3 text-gray-400">{lead.email ?? '—'}</td>
-                  <td className="px-3 py-3 text-gray-400 capitalize">{lead.source ?? '—'}</td>
+                  <td className="hidden md:table-cell px-3 py-3 text-gray-400">{lead.email ?? '—'}</td>
                   <td className="px-3 py-3">
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border capitalize ${STATUS_COLORS[lead.status]}`}>
                       {lead.status}
                     </span>
                   </td>
-                  <td className="px-3 py-3 pr-6 text-gray-500">
+                  <td className="hidden md:table-cell px-3 py-3 text-gray-500">
                     {new Date(lead.created_at).toLocaleDateString()}
+                  </td>
+                  <td className="px-3 py-3 text-gray-500">
+                    {new Date(lead.updated_at).toLocaleString()}
+                  </td>
+                  <td className="px-3 py-3 pr-6">
+                    {hasUnreadActivity(lead) && (
+                      <span
+                        className="inline-block w-2 h-2 rounded-full bg-violet-500"
+                        aria-label="Unread activity"
+                      />
+                    )}
                   </td>
                 </LeadRow>
               ))}
