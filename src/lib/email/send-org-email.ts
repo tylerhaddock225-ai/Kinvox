@@ -35,7 +35,12 @@ export type FromAddressSource = 'support' | 'lead'
 
 export type SendOrgEmailParams = {
   org:                 OrgEmailContext
-  to:                  string
+  // `to` and `cc` accept either a single address or an array. Arrays are
+  // joined with ", " before handing to Postmark (the underlying SDK only
+  // takes a comma-separated string). All array entries appear in the same
+  // RFC header, so multi-To recipients see each other on the To: line.
+  to:                  string | string[]
+  cc?:                 string | string[]
   subject:             string
   htmlBody:            string
   textBody:            string
@@ -72,10 +77,17 @@ function resolveFromAddress(org: OrgEmailContext, source: FromAddressSource): st
   return KINVOX_FALLBACK_FROM
 }
 
+function joinAddresses(value: string | string[] | undefined): string | undefined {
+  if (value === undefined) return undefined
+  if (typeof value === 'string') return value
+  if (value.length === 0)        return undefined
+  return value.join(', ')
+}
+
 export async function sendOrgTransactionalEmail(
   params: SendOrgEmailParams,
 ): Promise<SendOrgEmailResult> {
-  const { org, to, subject, htmlBody, textBody, replyTo, tag, fromAddressSource, headers } = params
+  const { org, to, cc, subject, htmlBody, textBody, replyTo, tag, fromAddressSource, headers } = params
   const source = fromAddressSource ?? 'support'
   const LOG = '[send-org-email]'
 
@@ -85,11 +97,20 @@ export async function sendOrgTransactionalEmail(
     return { ok: false, error: 'Postmark token not configured' }
   }
 
+  const toJoined = joinAddresses(to)
+  if (!toJoined) {
+    console.error(`${LOG} empty To — org=${org.id} tag=${tag ?? '-'} source=${source}`)
+    return { ok: false, error: 'Recipient list is empty' }
+  }
+  const ccJoined = joinAddresses(cc)
+  const ccCount  = Array.isArray(cc) ? cc.length : (cc ? 1 : 0)
+
   try {
     const client = new ServerClient(token)
     const result = await client.sendEmail({
       From:     resolveFromAddress(org, source),
-      To:       to,
+      To:       toJoined,
+      Cc:       ccJoined,
       Subject:  subject,
       HtmlBody: htmlBody,
       TextBody: textBody,
@@ -97,7 +118,7 @@ export async function sendOrgTransactionalEmail(
       Tag:      tag,
       Headers:  headers,
     })
-    console.log(`${LOG} ok org=${org.id} tag=${tag ?? '-'} source=${source} postmark_id=${result.MessageID}`)
+    console.log(`${LOG} ok org=${org.id} tag=${tag ?? '-'} source=${source} cc=${ccCount} postmark_id=${result.MessageID}`)
     return { ok: true, messageId: result.MessageID }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)

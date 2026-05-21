@@ -3,6 +3,7 @@ import { timingSafeEqual } from 'node:crypto'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { sendOrgTransactionalEmail } from '@/lib/email/send-org-email'
 import { renderLeadChannelBounce } from '@/lib/email/templates/lead-channel-bounce'
+import { renderTicketConfirmationEmail } from '@/lib/email/templates/ticket-confirmation'
 import { constructInboundEmailAddress } from '@/lib/email/inbound-address'
 
 export const runtime = 'nodejs'
@@ -17,6 +18,16 @@ const TICKET_TAG_RE = /\[(tk_[a-z0-9]+)\]/i
 // lead-magnet confirmation + lead public reply pipeline. Routed into
 // public.lead_messages instead of ticket_messages.
 const LEAD_TAG_RE   = /\[(ld_[a-z0-9]+)\]/i
+
+// Auto-responder suppression for the Path C confirmation email. Skipping
+// these avoids pinging bounces / out-of-office daemons / no-reply replies
+// that would otherwise create needless inbound noise. Substring match (not
+// equality) so noreply+anything@... and team-noreply@... both match.
+const AUTO_RESPONDER_LOCALPARTS = ['noreply', 'no-reply', 'mailer-daemon', 'postmaster', 'bounces']
+function isLikelyAutoResponder(email: string): boolean {
+  const localpart = email.split('@')[0]?.toLowerCase() ?? ''
+  return AUTO_RESPONDER_LOCALPARTS.some(needle => localpart.includes(needle))
+}
 
 // Postmark inbound payload (subset we use). Full shape lives in
 // node_modules/postmark/dist/client/models/webhooks/payload/InboundWebhook.d.ts
@@ -486,6 +497,69 @@ export async function POST(request: NextRequest) {
   }
 
   // TODO: persist payload.Attachments to Supabase Storage (see above).
+
+  // Workstream E — seed a 'to' recipient row for outbound dispatch. Future
+  // ticket replies fan out from ticket_recipients first, falling back to
+  // customers.email + ticket_messages.inbound_email_from for legacy rows.
+  // Non-fatal — the ticket and inbound message already persisted.
+  const { error: recipErr } = await supabase
+    .from('ticket_recipients')
+    .insert({
+      ticket_id: newTicket.id,
+      kind:      'to',
+      email:     fromEmail,
+      added_by:  ownerId,
+    })
+  if (recipErr) {
+    console.error(`${LOG} Path C: ticket_recipients insert failed ticket=${newTicket.id}:`, recipErr.message)
+  }
+
+  // Workstream E — send a confirmation email to the sender. Skipped for
+  // likely auto-responders so we don't ping bounces / no-reply daemons.
+  // Non-fatal on send failure: the ticket already exists; if we 500'd here
+  // Postmark would retry the entire webhook and duplicate the ticket.
+  const ticketDisplayId = newTicket.display_id ?? newTicket.id
+  if (!isLikelyAutoResponder(fromEmail)) {
+    const { subject: confSubject, htmlBody, textBody } = renderTicketConfirmationEmail({
+      orgName:         org.name,
+      ticketDisplayId,
+      originalSubject: subject.trim() || null,
+    })
+
+    const threadingId = `<${ticketDisplayId}@kinvox.com>`
+
+    const sendResult = await sendOrgTransactionalEmail({
+      org: {
+        id:                                  org.id,
+        name:                                org.name,
+        verified_support_email:              org.verified_support_email,
+        verified_support_email_confirmed_at: org.verified_support_email_confirmed_at,
+        verified_lead_email:                 org.verified_lead_email,
+        verified_lead_email_confirmed_at:    org.verified_lead_email_confirmed_at,
+      },
+      to:                fromEmail,
+      subject:           confSubject,
+      htmlBody,
+      textBody,
+      fromAddressSource: 'support',
+      tag:               'ticket-confirmation',
+      // Message-ID (not References/In-Reply-To) — this is the start of the
+      // thread, not a reply. Future inbound replies match by the bracketed
+      // [tk_…] subject tag, but a Message-ID on the seed mail lets mail
+      // clients group threads by ID too.
+      headers: [
+        { Name: 'Message-ID', Value: threadingId },
+      ],
+    })
+
+    if (!sendResult.ok) {
+      console.error(`${LOG} Path C: confirmation email send failed ticket=${newTicket.id}:`, sendResult.error)
+    } else {
+      console.log(`${LOG} Path C: confirmation sent ticket=${newTicket.id} to=${fromEmail} postmark_id=${sendResult.messageId}`)
+    }
+  } else {
+    console.log(`${LOG} Path C: confirmation skipped (auto-responder sender) ticket=${newTicket.id} from=${fromEmail}`)
+  }
 
   console.log(`${LOG} created ticket ${newTicket.display_id ?? newTicket.id} from ${fromEmail} customer=${customerId ?? 'none'}`)
   return NextResponse.json({ status: 'created', ticket_id: newTicket.id, customer_id: customerId }, { status: 201 })
