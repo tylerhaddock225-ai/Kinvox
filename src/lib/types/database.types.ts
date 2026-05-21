@@ -351,6 +351,27 @@ export type Database = {
         }
         Update: Partial<Database['public']['Tables']['ticket_messages']['Insert']>
       }
+      ticket_recipients: {
+        Row: {
+          id:        string
+          ticket_id: string
+          kind:      'to' | 'cc'
+          user_id:   string | null
+          email:     string | null
+          added_at:  string
+          added_by:  string | null
+        }
+        Insert: {
+          id?:        string
+          ticket_id:  string
+          kind:       'to' | 'cc'
+          user_id?:   string | null
+          email?:     string | null
+          added_at?:  string
+          added_by?:  string | null
+        }
+        Update: Partial<Database['public']['Tables']['ticket_recipients']['Insert']>
+      }
       platform_settings: {
         Row: {
           key: string

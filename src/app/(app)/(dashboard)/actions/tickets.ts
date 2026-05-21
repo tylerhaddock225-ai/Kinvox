@@ -1,10 +1,11 @@
 'use server'
 
-import { ServerClient } from 'postmark'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { resolveEffectiveOrgId, revalidateOrgPath } from '@/lib/impersonation'
 import { revalidatePath } from 'next/cache'
 import { constructInboundEmailAddress } from '@/lib/email/inbound-address'
+import { sendOrgTransactionalEmail } from '@/lib/email/send-org-email'
 import { renderConversationReply, type PriorMessage } from '@/lib/email/templates/reply'
 
 type State = { status: 'success' } | { status: 'error'; error: string } | null
@@ -336,82 +337,41 @@ type DispatchArgs = {
 }
 
 async function dispatchOutboundEmail(args: DispatchArgs) {
-  const token = process.env.POSTMARK_SERVER_TOKEN
-  if (!token) {
-    console.error('[ticket-email] POSTMARK_SERVER_TOKEN not set — skipping outbound email')
-    return
-  }
-
   const { data: org } = await args.supabase
     .from('organizations')
-    .select('name, inbound_email_tag, verified_support_email')
+    .select('id, name, inbound_email_tag, verified_support_email, verified_support_email_confirmed_at')
     .eq('id', args.orgId)
     .single()
 
-  // Recipient resolution. Tier 1: linked customer's email. Tier 2: the
-  // most-recent inbound_email_from on this ticket — covers customerless
-  // tickets opened from an inbound whose sender matched no customer row.
-  // leads are NEVER consulted on the support rail (Master Manifest Part 5
-  // separates leads/customers; the support inbound webhook stores the
-  // sender on ticket_messages.inbound_email_from for this exact purpose).
-  let recipientEmail:     string | null = null
-  let recipientFirstName: string | null = null
-
-  if (args.ticketCustomerId) {
-    const { data: customer } = await args.supabase
-      .from('customers')
-      .select('email, first_name')
-      .eq('id', args.ticketCustomerId)
-      .is('deleted_at', null)
-      .maybeSingle<{ email: string | null; first_name: string | null }>()
-    if (customer?.email) {
-      recipientEmail     = customer.email
-      recipientFirstName = customer.first_name ?? null
-    }
+  if (!org) {
+    console.error(`[ticket-email] org ${args.orgId} not found — skipping outbound email`)
+    return
   }
 
-  if (!recipientEmail) {
-    const { data: lastInbound } = await args.supabase
-      .from('ticket_messages')
-      .select('inbound_email_from')
-      .eq('ticket_id', args.ticketId)
-      .not('inbound_email_from', 'is', null)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle<{ inbound_email_from: string | null }>()
-    recipientEmail = lastInbound?.inbound_email_from ?? null
-    // No name available from inbound fallback — greeting collapses to "Hi there".
-  }
+  // Workstream E — recipient resolution via ticket_recipients with legacy
+  // (customers.email / ticket_messages.inbound_email_from) fallback.
+  const { to, cc, firstName: recipientFirstName } = await resolveTicketRecipients(
+    args.supabase,
+    args.ticketId,
+    args.ticketCustomerId,
+  )
 
-  if (!recipientEmail) {
+  if (to.length === 0) {
     console.error(`[ticket-email] no recipient resolvable for ticket ${args.ticketId} — skipping outbound email`)
     return
   }
 
-  const displayId  = args.ticketDisplayId ?? args.ticketId
-  const senderName = args.senderName || 'Support'
-
-  // Use the org's verified support address when available; otherwise fall back
-  // to the shared Kinvox mailbox so outbound never silently breaks.
-  const fromAddress = org?.verified_support_email
-    ? `${senderName} <${org.verified_support_email}>`
-    : `${senderName} <support@kinvoxtech.com>`
-
-  if (!org?.verified_support_email) {
-    console.warn(`[ticket-email] org ${args.orgId} has no verified_support_email — sending from support@kinvoxtech.com`)
-  }
+  const displayId = args.ticketDisplayId ?? args.ticketId
 
   // Strip any pre-existing [tk_…] tag so we don't double-tag on follow-ups.
   const baseSubject = args.ticketSubject.replace(/\[tk_[a-z0-9]+\]\s*/gi, '').trim()
-  const subject = `[${displayId}] ${baseSubject || '(no subject)'}`
-
+  const subject     = `[${displayId}] ${baseSubject || '(no subject)'}`
   const threadingId = `<${displayId}@kinvox.com>`
 
   // Plus-addressed Reply-To routes the recipient's reply through Postmark's
-  // inbound mailbox into the support webhook. Without this, the support
-  // tag selected above was dead code and replies vanished into the org's
-  // verified support mailbox with no conversation-panel ingest.
-  const replyTo = constructInboundEmailAddress(org?.inbound_email_tag ?? null)
+  // inbound mailbox into the support webhook. Without this, replies vanish
+  // into the org's verified mailbox with no conversation-panel ingest.
+  const replyTo = constructInboundEmailAddress(org.inbound_email_tag ?? null)
   if (!replyTo) {
     console.warn(`[outbound] inbound tag missing for org=${args.orgId} channel=support — reply-to omitted, recipient replies will land in org's verified mailbox and bypass conversation panel`)
   }
@@ -456,7 +416,7 @@ async function dispatchOutboundEmail(args: DispatchArgs) {
   }
 
   const replierFirstName = args.senderName?.trim().split(/\s+/)[0] ?? null
-  const orgName          = org?.name ?? 'Support'
+  const orgName          = org.name
 
   const { htmlBody, textBody } = renderConversationReply({
     leadFirstName:    recipientFirstName,
@@ -466,25 +426,31 @@ async function dispatchOutboundEmail(args: DispatchArgs) {
     prior,
   })
 
-  const client = new ServerClient(token)
+  const result = await sendOrgTransactionalEmail({
+    org: {
+      id:                                  org.id,
+      name:                                org.name,
+      verified_support_email:              org.verified_support_email,
+      verified_support_email_confirmed_at: org.verified_support_email_confirmed_at,
+    },
+    to,
+    cc:                cc.length > 0 ? cc : undefined,
+    subject,
+    htmlBody,
+    textBody,
+    replyTo:           replyTo ?? undefined,
+    tag:               'ticket-reply',
+    fromAddressSource: 'support',
+    headers: [
+      { Name: 'References',  Value: threadingId },
+      { Name: 'In-Reply-To', Value: threadingId },
+    ],
+  })
 
-  try {
-    const result = await client.sendEmail({
-      From:    fromAddress,
-      To:      recipientEmail,
-      Subject: subject,
-      HtmlBody: htmlBody,
-      TextBody: textBody,
-      ReplyTo: replyTo ?? undefined,
-      Headers: [
-        { Name: 'References',  Value: threadingId },
-        { Name: 'In-Reply-To', Value: threadingId },
-      ],
-    })
-    console.log(`[ticket-email] dispatched ticket=${displayId} from="${fromAddress}" to=${recipientEmail} subject="${subject}" postmark_id=${result.MessageID}`)
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    console.error(`[ticket-email] FAILED ticket=${displayId} to=${recipientEmail}: ${msg}`)
+  if (!result.ok) {
+    console.error(`[ticket-email] FAILED ticket=${displayId} to=${to.join(',')}: ${result.error}`)
+  } else {
+    console.log(`[ticket-email] dispatched ticket=${displayId} to=${to.join(',')} cc=${cc.length} postmark_id=${result.messageId}`)
   }
 }
 
@@ -500,59 +466,38 @@ type ClosureArgs = {
 }
 
 async function dispatchClosureEmail(args: ClosureArgs) {
-  const token = process.env.POSTMARK_SERVER_TOKEN
-  if (!token) {
-    console.error('[ticket-email] POSTMARK_SERVER_TOKEN not set — skipping closure notification')
+  // Workstream E — bug fix: closure now honors org.verified_support_email
+  // when set. The prior shape omitted the columns from this SELECT and
+  // hardcoded the Kinvox shared mailbox even for merchants with a verified
+  // sender on file.
+  const { data: org } = await args.supabase
+    .from('organizations')
+    .select('id, name, inbound_email_tag, verified_support_email, verified_support_email_confirmed_at')
+    .eq('id', args.orgId)
+    .single()
+
+  if (!org) {
+    console.error(`[ticket-email] org ${args.orgId} not found — skipping closure notification`)
     return
   }
 
-  // Same Tier-1 customer / Tier-2 inbound_email_from chain as
-  // dispatchOutboundEmail. leads are not consulted on the support rail.
-  let recipientEmail:     string | null = null
-  let recipientFirstName: string | null = null
+  const { to, cc, firstName: recipientFirstName } = await resolveTicketRecipients(
+    args.supabase,
+    args.ticketId,
+    args.ticketCustomerId,
+  )
 
-  if (args.ticketCustomerId) {
-    const { data: customer } = await args.supabase
-      .from('customers')
-      .select('email, first_name')
-      .eq('id', args.ticketCustomerId)
-      .is('deleted_at', null)
-      .maybeSingle<{ email: string | null; first_name: string | null }>()
-    if (customer?.email) {
-      recipientEmail     = customer.email
-      recipientFirstName = customer.first_name ?? null
-    }
-  }
-
-  if (!recipientEmail) {
-    const { data: lastInbound } = await args.supabase
-      .from('ticket_messages')
-      .select('inbound_email_from')
-      .eq('ticket_id', args.ticketId)
-      .not('inbound_email_from', 'is', null)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle<{ inbound_email_from: string | null }>()
-    recipientEmail = lastInbound?.inbound_email_from ?? null
-  }
-
-  if (!recipientEmail) {
+  if (to.length === 0) {
     console.warn(`[ticket-email] no recipient resolvable for ticket ${args.ticketId} — skipping closure notification`)
     return
   }
-
-  const { data: org } = await args.supabase
-    .from('organizations')
-    .select('name, inbound_email_tag')
-    .eq('id', args.orgId)
-    .single()
 
   const displayId   = args.ticketDisplayId ?? args.ticketId
   const baseSubject = args.ticketSubject.replace(/\[tk_[a-z0-9]+\]\s*/gi, '').trim()
   const subject     = `[${displayId}] ${baseSubject || '(no subject)'}`
   const threadingId = `<${displayId}@kinvox.com>`
 
-  const replyTo = constructInboundEmailAddress(org?.inbound_email_tag ?? null)
+  const replyTo = constructInboundEmailAddress(org.inbound_email_tag ?? null)
   if (!replyTo) {
     console.warn(`[outbound] inbound tag missing for org=${args.orgId} channel=support — reply-to omitted, recipient replies will land in org's verified mailbox and bypass conversation panel`)
   }
@@ -564,7 +509,7 @@ async function dispatchClosureEmail(args: ClosureArgs) {
   // notification — quoting one prior message would feel arbitrary).
   const cannedBody = `Your ticket (${displayId}) has been marked as resolved. If you have further questions, simply reply to this email to reopen it.`
   const replierFirstName = args.closerName?.trim().split(/\s+/)[0] ?? null
-  const orgName = org?.name ?? 'Support'
+  const orgName = org.name
   const { htmlBody, textBody } = renderConversationReply({
     leadFirstName:    recipientFirstName,
     replierFirstName,
@@ -573,25 +518,113 @@ async function dispatchClosureEmail(args: ClosureArgs) {
     prior:            null,
   })
 
-  const client = new ServerClient(token)
-  try {
-    const result = await client.sendEmail({
-      From:    'Kinvox Support <support@kinvoxtech.com>',
-      To:      recipientEmail,
-      Subject: subject,
-      HtmlBody: htmlBody,
-      TextBody: textBody,
-      ReplyTo: replyTo ?? undefined,
-      Headers: [
-        { Name: 'References',  Value: threadingId },
-        { Name: 'In-Reply-To', Value: threadingId },
-      ],
-    })
-    console.log(`[ticket-email] closure notice dispatched ticket=${displayId} to=${recipientEmail} postmark_id=${result.MessageID}`)
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    console.error(`[ticket-email] closure notice FAILED ticket=${displayId} to=${recipientEmail}: ${msg}`)
+  const result = await sendOrgTransactionalEmail({
+    org: {
+      id:                                  org.id,
+      name:                                org.name,
+      verified_support_email:              org.verified_support_email,
+      verified_support_email_confirmed_at: org.verified_support_email_confirmed_at,
+    },
+    to,
+    cc:                cc.length > 0 ? cc : undefined,
+    subject,
+    htmlBody,
+    textBody,
+    replyTo:           replyTo ?? undefined,
+    tag:               'ticket-closure',
+    fromAddressSource: 'support',
+    headers: [
+      { Name: 'References',  Value: threadingId },
+      { Name: 'In-Reply-To', Value: threadingId },
+    ],
+  })
+
+  if (!result.ok) {
+    console.error(`[ticket-email] closure notice FAILED ticket=${displayId} to=${to.join(',')}: ${result.error}`)
+  } else {
+    console.log(`[ticket-email] closure notice dispatched ticket=${displayId} to=${to.join(',')} cc=${cc.length} postmark_id=${result.messageId}`)
   }
+}
+
+// Workstream E — outbound recipient resolution.
+//
+// Authoritative source is ticket_recipients (kind='to' / 'cc') seeded by the
+// inbound webhook on ticket creation (Path C) and editable via the recipient
+// picker UI. Each row is either email-populated (use as-is) or user_id-
+// populated (resolve via auth.admin.getUserById — needs the service-role
+// admin client because the request-scoped supabase client doesn't expose
+// .auth.admin).
+//
+// When no recipient rows exist (legacy tickets that pre-date the table) we
+// fall back to the original Tier-1 customers.email / Tier-2
+// ticket_messages.inbound_email_from chain. firstName is only populated on
+// the Tier-1 customer path — explicit recipient rows have no first-name
+// field, so the conversation-reply greeting collapses to "Hi there".
+type ResolvedRecipients = {
+  to:        string[]
+  cc:        string[]
+  firstName: string | null
+}
+
+async function resolveTicketRecipients(
+  supabase:         Awaited<ReturnType<typeof createClient>>,
+  ticketId:         string,
+  ticketCustomerId: string | null,
+): Promise<ResolvedRecipients> {
+  const { data: rows } = await supabase
+    .from('ticket_recipients')
+    .select('kind, user_id, email')
+    .eq('ticket_id', ticketId)
+
+  if (rows && rows.length > 0) {
+    const to: string[] = []
+    const cc: string[] = []
+    let adminClient: ReturnType<typeof createAdminClient> | null = null
+    for (const row of rows) {
+      let resolvedEmail: string | null = row.email
+      if (!resolvedEmail && row.user_id) {
+        if (!adminClient) adminClient = createAdminClient()
+        const { data, error } = await adminClient.auth.admin.getUserById(row.user_id)
+        if (error || !data?.user?.email) {
+          console.warn(`[ticket-email] could not resolve user_id=${row.user_id} for ticket=${ticketId}`)
+          continue
+        }
+        resolvedEmail = data.user.email
+      }
+      if (!resolvedEmail) continue
+      if (row.kind === 'cc') cc.push(resolvedEmail)
+      else                   to.push(resolvedEmail)
+    }
+    return { to, cc, firstName: null }
+  }
+
+  // Legacy fallback for tickets created before ticket_recipients existed.
+  let toEmail:   string | null = null
+  let firstName: string | null = null
+  if (ticketCustomerId) {
+    const { data: customer } = await supabase
+      .from('customers')
+      .select('email, first_name')
+      .eq('id', ticketCustomerId)
+      .is('deleted_at', null)
+      .maybeSingle<{ email: string | null; first_name: string | null }>()
+    if (customer?.email) {
+      toEmail   = customer.email
+      firstName = customer.first_name ?? null
+    }
+  }
+  if (!toEmail) {
+    const { data: lastInbound } = await supabase
+      .from('ticket_messages')
+      .select('inbound_email_from')
+      .eq('ticket_id', ticketId)
+      .not('inbound_email_from', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle<{ inbound_email_from: string | null }>()
+    toEmail = lastInbound?.inbound_email_from ?? null
+  }
+  return { to: toEmail ? [toEmail] : [], cc: [], firstName }
 }
 
 // Resolve {customer_id, lead_id} pair from whatever the caller provided.
