@@ -157,35 +157,40 @@ export async function updateAppointment(
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-// Resolve {customer_id, lead_id} from whatever the caller posted. Modal forms
-// submit customer_id; older flows may submit lead_id. Always scoped by orgId
-// so a stale customer_id pointing at another org silently downgrades to nulls
-// rather than leaking across tenants.
+// Resolve {customer_id, lead_id} from whatever the caller posted. Returns
+// ONLY the side the user submitted — never both. Customers and leads are
+// separate communication rails; the appointments_link_exclusivity CHECK
+// constraint enforces this at the DB level, the modal enforces it
+// client-side via mutual-exclusion selects, and this helper enforces it
+// server-side as a third layer. Always scoped by orgId so a stale id
+// pointing at another org silently downgrades to nulls rather than
+// leaking across tenants.
 async function resolveCustomerLink(
   supabase:   Awaited<ReturnType<typeof createClient>>,
   orgId:      string,
   customerId: string | null,
   leadId:     string | null,
 ): Promise<{ customerId: string | null; leadId: string | null }> {
+  // Mutual exclusion: customer_id wins if the form somehow submits both.
   if (customerId) {
     const { data } = await supabase
       .from('customers')
-      .select('id, lead_id')
+      .select('id')
       .eq('id', customerId)
       .eq('organization_id', orgId)
       .maybeSingle()
-    if (!data) return { customerId: null, leadId: null }
-    return { customerId: data.id, leadId: data.lead_id }
+    return data ? { customerId: data.id, leadId: null } : { customerId: null, leadId: null }
   }
 
   if (leadId) {
     const { data } = await supabase
-      .from('customers')
-      .select('id, lead_id')
-      .eq('lead_id', leadId)
+      .from('leads')
+      .select('id')
+      .eq('id', leadId)
       .eq('organization_id', orgId)
+      .is('archived_at', null)
       .maybeSingle()
-    return { customerId: data?.id ?? null, leadId }
+    return data ? { customerId: null, leadId: data.id } : { customerId: null, leadId: null }
   }
 
   return { customerId: null, leadId: null }

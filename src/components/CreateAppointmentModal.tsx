@@ -6,6 +6,7 @@ import { createAppointment } from '@/app/(app)/(dashboard)/actions/appointments'
 
 type Member   = { id: string; full_name: string | null }
 type Customer = { id: string; first_name: string; last_name: string | null; email: string | null }
+type Lead     = { id: string; display_id: string | null; first_name: string | null; last_name: string | null; email: string | null }
 
 export type CreateAppointmentModalHandle = {
   openWithStart: (iso: string) => void
@@ -14,6 +15,7 @@ export type CreateAppointmentModalHandle = {
 interface Props {
   members:      Member[]
   customers:    Customer[]
+  leads:        Lead[]
   hideTrigger?: boolean
   onClose?:     () => void
   ref?:         Ref<CreateAppointmentModalHandle>
@@ -23,6 +25,13 @@ function customerLabel(c: Customer): string {
   const name = [c.first_name, c.last_name].filter(Boolean).join(' ').trim()
   if (c.email && name) return `${name} — ${c.email}`
   return name || c.email || 'Unknown'
+}
+
+function leadLabel(l: Lead): string {
+  const name = [l.first_name, l.last_name].filter(Boolean).join(' ').trim()
+  const tail = l.email ?? l.display_id
+  if (name && tail) return `${name} — ${tail}`
+  return name || tail || 'Unnamed lead'
 }
 
 const INITIAL = null as ReturnType<typeof useActionState<Awaited<ReturnType<typeof createAppointment>>, FormData>>[0]
@@ -36,10 +45,15 @@ function addMinutesToLocal(dtLocal: string, mins: number): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
-export default function CreateAppointmentModal({ members, customers, hideTrigger, onClose, ref }: Props) {
+export default function CreateAppointmentModal({ members, customers, leads, hideTrigger, onClose, ref }: Props) {
   const [state, action, isPending] = useActionState(createAppointment, INITIAL)
-  const [startVal, setStartVal] = useState<string>('')
-  const [endVal,   setEndVal]   = useState<string>('')
+  const [startVal,   setStartVal]   = useState<string>('')
+  const [endVal,     setEndVal]     = useState<string>('')
+  // Mutual-exclusion state for the link pickers. Server-side
+  // resolveCustomerLink and the appointments_link_exclusivity CHECK
+  // constraint each enforce the same invariant; this is the UX layer.
+  const [customerId, setCustomerId] = useState<string>('')
+  const [leadId,     setLeadId]     = useState<string>('')
   const dialogRef = useRef<HTMLDialogElement>(null)
   const formRef   = useRef<HTMLFormElement>(null)
 
@@ -49,6 +63,8 @@ export default function CreateAppointmentModal({ members, customers, hideTrigger
       formRef.current?.reset()
       setStartVal('')
       setEndVal('')
+      setCustomerId('')
+      setLeadId('')
     }
   }, [state])
 
@@ -70,6 +86,8 @@ export default function CreateAppointmentModal({ members, customers, hideTrigger
   function open() {
     setStartVal('')
     setEndVal('')
+    setCustomerId('')
+    setLeadId('')
     formRef.current?.reset()
     dialogRef.current?.showModal()
   }
@@ -145,29 +163,60 @@ export default function CreateAppointmentModal({ members, customers, hideTrigger
             />
           </div>
 
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Meeting With (target user)</label>
+            <select name="assigned_to" defaultValue="" className="w-full rounded-lg border border-pvx-border bg-gray-900 px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-violet-500">
+              <option value="">— Unassigned —</option>
+              {members.map(m => (
+                <option key={m.id} value={m.id}>{m.full_name ?? 'Unknown'}</option>
+              ))}
+            </select>
+            <p className="text-[10px] text-gray-500 mt-1">
+              Invite goes to this user&rsquo;s calendar. You&rsquo;ll get a confirmation copy.
+            </p>
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs text-gray-400 mb-1">Meeting With (target user)</label>
-              <select name="assigned_to" defaultValue="" className="w-full rounded-lg border border-pvx-border bg-gray-900 px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-violet-500">
-                <option value="">— Unassigned —</option>
-                {members.map(m => (
-                  <option key={m.id} value={m.id}>{m.full_name ?? 'Unknown'}</option>
-                ))}
-              </select>
-              <p className="text-[10px] text-gray-500 mt-1">
-                Invite goes to this user&rsquo;s calendar. You&rsquo;ll get a confirmation copy.
-              </p>
-            </div>
-            <div>
               <label className="block text-xs text-gray-400 mb-1">Customer</label>
-              <select name="customer_id" defaultValue="" className="w-full rounded-lg border border-pvx-border bg-gray-900 px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-violet-500">
+              <select
+                name="customer_id"
+                value={customerId}
+                onChange={e => {
+                  const v = e.target.value
+                  setCustomerId(v)
+                  if (v) setLeadId('')
+                }}
+                className="w-full rounded-lg border border-pvx-border bg-gray-900 px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-violet-500"
+              >
                 <option value="">— None —</option>
                 {customers.map(c => (
                   <option key={c.id} value={c.id}>{customerLabel(c)}</option>
                 ))}
               </select>
             </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Lead</label>
+              <select
+                name="lead_id"
+                value={leadId}
+                onChange={e => {
+                  const v = e.target.value
+                  setLeadId(v)
+                  if (v) setCustomerId('')
+                }}
+                className="w-full rounded-lg border border-pvx-border bg-gray-900 px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-violet-500"
+              >
+                <option value="">— None —</option>
+                {leads.map(l => (
+                  <option key={l.id} value={l.id}>{leadLabel(l)}</option>
+                ))}
+              </select>
+            </div>
           </div>
+          <p className="text-[10px] text-gray-500 -mt-2">
+            Pick a customer OR a lead — they&rsquo;re separate communication rails. Selecting one clears the other.
+          </p>
 
           <div>
             <label className="block text-xs text-gray-400 mb-1">Description</label>
