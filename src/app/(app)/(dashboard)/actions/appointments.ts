@@ -1,10 +1,16 @@
 'use server'
 
-import { ServerClient } from 'postmark'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { revalidateOrgPath } from '@/lib/impersonation'
 import { buildIcs } from '@/lib/ics'
+import { sendOrgTransactionalEmail, type EmailAttachment } from '@/lib/email/send-org-email'
+import { resolveProfileEmail } from '@/lib/email/resolve-profile-email'
+import {
+  renderAppointmentAgentInvite,
+  renderAppointmentCreatorConfirmation,
+  renderAppointmentRecipientInvite,
+} from '@/lib/email/templates/appointment-invite'
 
 export type State = { status: 'success' } | { status: 'error'; error: string } | null
 
@@ -66,6 +72,7 @@ export async function createAppointment(_prev: State, formData: FormData): Promi
     creatorName:   profile.full_name,
     assignedToId:  assigned_to || null,
     leadId:        link.leadId,
+    customerId:    link.customerId,
     organizationId: profile.organization_id,
   })
 
@@ -191,75 +198,120 @@ type NotifyArgs = {
   creatorName:    string | null
   assignedToId:   string | null
   leadId:         string | null
+  customerId:     string | null
   organizationId: string
 }
 
 async function dispatchAppointmentNotifications(a: NotifyArgs) {
-  const token = process.env.POSTMARK_SERVER_TOKEN
-  if (!token) {
-    console.error(`${LOG} POSTMARK_SERVER_TOKEN not set — skipping notifications`)
-    return
-  }
-
   const admin = createAdminClient()
 
-  // Resolve org's verified support address (used as From) and lead/agent emails.
-  const [orgRes, agentProfileRes, creatorAuthRes, leadRes] = await Promise.all([
+  // Widened SELECT — pulls everything sendOrgTransactionalEmail needs to
+  // resolve the From address with _confirmed_at gating for BOTH channels.
+  const [orgRes, agentProfileRes, creatorAuthRes] = await Promise.all([
     admin
       .from('organizations')
-      .select('name, verified_support_email')
+      .select('id, name, verified_support_email, verified_support_email_confirmed_at, verified_lead_email, verified_lead_email_confirmed_at')
       .eq('id', a.organizationId)
       .single(),
     a.assignedToId
-      ? admin.from('profiles').select('full_name, calendar_email').eq('id', a.assignedToId).single()
+      ? admin
+          .from('profiles')
+          .select('id, full_name, calendar_email, is_org_inbox, org_inbox_kind, organization_id')
+          .eq('id', a.assignedToId)
+          .single()
       : Promise.resolve({ data: null }),
     admin.auth.admin.getUserById(a.creatorId),
-    a.leadId
-      ? admin.from('leads').select('email, first_name, last_name').eq('id', a.leadId).single()
-      : Promise.resolve({ data: null }),
   ])
 
-  const org         = orgRes.data
-  const fromAddress = org?.verified_support_email
-    ? `${org.name ?? 'Kinvox'} <${org.verified_support_email}>`
-    : 'Kinvox <support@kinvoxtech.com>'
+  const org = orgRes.data
+  if (!org) {
+    console.error(`${LOG} org ${a.organizationId} not found — skipping notifications appt=${a.displayId ?? a.apptId}`)
+    return
+  }
 
-  // Resolve target agent email — calendar_email override → auth email fallback.
+  // Resolve target agent email. Pseudo-agent inbox profiles (is_org_inbox=true,
+  // e.g. Lead Email) route through resolveProfileEmail to the org's verified
+  // channel address; real users get calendar_email > auth.users.email.
   let agentEmail: string | null = null
   let agentName:  string | null = null
+  // Default the From channel to 'support'. resolveProfileEmail overrides to
+  // 'lead' for the Lead Email pseudo-agent. 'platform' would only arrive when
+  // the profile is missing — in that case agentEmail is null and we skip the
+  // send below, so the default never reaches Postmark.
+  let agentFromAddressSource: 'support' | 'lead' = 'support'
   if (a.assignedToId) {
-    const p = (agentProfileRes.data ?? null) as { full_name: string | null; calendar_email: string | null } | null
+    const p = (agentProfileRes.data ?? null) as { full_name: string | null } | null
     agentName = p?.full_name ?? null
-    if (p?.calendar_email) {
-      agentEmail = p.calendar_email
-    } else {
-      const { data: agentAuth } = await admin.auth.admin.getUserById(a.assignedToId)
-      agentEmail = agentAuth?.user?.email ?? null
+
+    const resolved = await resolveProfileEmail(admin, a.assignedToId)
+    agentEmail = resolved.email
+    if (resolved.fromAddressSource !== 'platform') {
+      agentFromAddressSource = resolved.fromAddressSource
+    }
+
+    if (!agentEmail) {
+      console.warn(
+        `${LOG} no deliverable email for assignee assignedToId=${a.assignedToId} isInbox=${resolved.isInbox} inboxKind=${resolved.inboxKind ?? '-'} — skipping agent send`,
+      )
     }
   }
 
   const creatorEmail = creatorAuthRes.data?.user?.email ?? null
-  const lead         = (leadRes.data ?? null) as { email: string | null; first_name: string; last_name: string | null } | null
+
+  // Workstream F — resolve the attendee from EITHER the lead or the customer
+  // path. The org has two verified-sender channels; the recipient send must
+  // pick the matching one (lead → verified_lead_email, customer →
+  // verified_support_email). leadId wins when both are set, matching the
+  // pre-Workstream-F behavior where lead linkage was the only path.
+  let attendeeEmail:     string | null = null
+  let attendeeName:      string | null = null
+  let attendeeFirstName: string | null = null
+  let attendeeChannel:   'lead' | 'support' = 'support'
+
+  if (a.leadId) {
+    const { data: lead } = await admin
+      .from('leads')
+      .select('email, first_name, last_name')
+      .eq('id', a.leadId)
+      .maybeSingle<{ email: string | null; first_name: string | null; last_name: string | null }>()
+    if (lead) {
+      attendeeEmail     = lead.email ?? null
+      attendeeFirstName = lead.first_name ?? null
+      attendeeName      = [lead.first_name, lead.last_name].filter(Boolean).join(' ').trim() || null
+      attendeeChannel   = 'lead'
+    }
+  } else if (a.customerId) {
+    const { data: customer } = await admin
+      .from('customers')
+      .select('email, first_name, last_name')
+      .eq('id', a.customerId)
+      .maybeSingle<{ email: string | null; first_name: string | null; last_name: string | null }>()
+    if (customer) {
+      attendeeEmail     = customer.email ?? null
+      attendeeFirstName = customer.first_name ?? null
+      attendeeName      = [customer.first_name, customer.last_name].filter(Boolean).join(' ').trim() || null
+      attendeeChannel   = 'support'
+    }
+  }
 
   const start = new Date(a.startAt)
   const end   = a.endAt ? new Date(a.endAt) : new Date(start.getTime() + 30 * 60_000)
-
   const displayId = a.displayId ?? a.apptId
-  const subject   = `[${displayId}] ${a.title}`
 
   const formatLocal = (d: Date) =>
     d.toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+  const startLocal = formatLocal(start)
+  const endLocal   = formatLocal(end)
 
-  const client = new ServerClient(token)
-
-  // Determine attendees for ICS — agent and lead are participants; the creator
-  // organizes (so the calendar shows the agent as host on the customer's view).
+  // ICS — agent organizes (so calendar clients show them as host on the
+  // recipient's view). Falls back to creator if no agent. Attendees = the
+  // resolved recipient (lead or customer) + the agent when distinct.
   const organizer = agentEmail
     ? { email: agentEmail, name: agentName ?? 'Kinvox' }
     : { email: creatorEmail ?? 'noreply@kinvoxtech.com', name: a.creatorName ?? 'Kinvox' }
 
   const attendees: { email: string; name?: string }[] = []
-  if (lead?.email) attendees.push({ email: lead.email, name: [lead.first_name, lead.last_name].filter(Boolean).join(' ') || undefined })
+  if (attendeeEmail) attendees.push({ email: attendeeEmail, name: attendeeName ?? undefined })
   if (agentEmail && agentEmail !== organizer.email) attendees.push({ email: agentEmail, name: agentName ?? undefined })
 
   const ics = buildIcs({
@@ -272,71 +324,127 @@ async function dispatchAppointmentNotifications(a: NotifyArgs) {
     attendees,
   })
 
-  const icsAttachment = {
-    Name:        'invite.ics',
-    ContentType: 'text/calendar; method=REQUEST; charset=UTF-8',
-    Content:     Buffer.from(ics, 'utf8').toString('base64'),
-    ContentID:   null,
+  const icsAttachment: EmailAttachment = {
+    name:        'invite.ics',
+    contentType: 'text/calendar; method=REQUEST; charset=UTF-8',
+    content:     Buffer.from(ics, 'utf8').toString('base64'),
+    contentId:   null,
   }
 
-  const sendOne = async (label: string, to: string, body: string, withIcs: boolean) => {
-    try {
-      const result = await client.sendEmail({
-        From:    fromAddress,
-        To:      to,
-        Subject: subject,
-        TextBody: body,
-        Attachments: withIcs ? [icsAttachment] : undefined,
-      })
-      console.log(`${LOG} ${label} dispatched appt=${displayId} to=${to} postmark_id=${result.MessageID}`)
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      console.error(`${LOG} ${label} FAILED appt=${displayId} to=${to}: ${msg}`)
-    }
+  // Message-ID matches the existing ICS UID (kinvox.com domain) so future
+  // reschedule / cancel emails can In-Reply-To / References this id and
+  // thread in the recipient's mail client without a separate id lookup.
+  // kinvox.com vs kinvoxtech.com divergence is pre-existing — not this
+  // workstream's job to reconcile.
+  const threadingId     = `<${a.apptId}@kinvox.com>`
+  const threadingHeader = { Name: 'Message-ID', Value: threadingId }
+
+  const orgCtx = {
+    id:                                  org.id,
+    name:                                org.name,
+    verified_support_email:              org.verified_support_email,
+    verified_support_email_confirmed_at: org.verified_support_email_confirmed_at,
+    verified_lead_email:                 org.verified_lead_email,
+    verified_lead_email_confirmed_at:    org.verified_lead_email_confirmed_at,
   }
 
   const isProxyBooking = !!(a.assignedToId && a.assignedToId !== a.creatorId)
 
-  // 1. Target agent gets the meeting + ICS.
+  // 1. Agent invite — always fires when agentEmail resolves.
   if (agentEmail) {
-    const body = [
-      `${a.creatorName ?? 'A teammate'} booked a meeting on your calendar.`,
-      '',
-      `When:     ${formatLocal(start)} – ${formatLocal(end)}`,
-      a.location ? `Where:    ${a.location}` : null,
-      lead?.email ? `Customer: ${[lead.first_name, lead.last_name].filter(Boolean).join(' ')} <${lead.email}>` : null,
-      a.description ? `\n${a.description}` : null,
-    ].filter(Boolean).join('\n')
-    await sendOne('agent-invite', agentEmail, body, true)
+    const tpl = renderAppointmentAgentInvite({
+      orgName:          org.name,
+      displayId,
+      appointmentTitle: a.title,
+      startLocal,
+      endLocal,
+      location:         a.location,
+      description:      a.description,
+      bookedByName:     a.creatorName,
+      attendeeName,
+      attendeeEmail,
+    })
+    const result = await sendOrgTransactionalEmail({
+      org:               orgCtx,
+      to:                agentEmail,
+      subject:           tpl.subject,
+      htmlBody:          tpl.htmlBody,
+      textBody:          tpl.textBody,
+      fromAddressSource: agentFromAddressSource,
+      tag:               'appointment-agent',
+      attachments:       [icsAttachment],
+      headers:           [threadingHeader],
+    })
+    if (!result.ok) {
+      console.error(`${LOG} agent-invite FAILED appt=${displayId} to=${agentEmail}: ${result.error}`)
+    } else {
+      console.log(`${LOG} agent-invite dispatched appt=${displayId} to=${agentEmail} postmark_id=${result.messageId}`)
+    }
   } else {
     console.warn(`${LOG} skipping agent invite — appointment ${displayId} has no resolvable agent email`)
   }
 
-  // 2. Booking-confirmed receipt to the support agent who created it.
-  //    Only when proxying for someone else; otherwise the agent invite above already covered them.
+  // 2. Creator confirmation — only fires when proxy-booking AND creatorEmail.
+  //    Workstream F decision 2B: now WITH ICS attachment (previously omitted).
   if (isProxyBooking && creatorEmail) {
-    const body = [
-      `Booking confirmed.`,
-      '',
-      `You scheduled "${a.title}" with ${agentName ?? 'the assigned agent'} on behalf of the customer.`,
-      `When: ${formatLocal(start)} – ${formatLocal(end)}`,
-      a.location ? `Where: ${a.location}` : null,
-      '',
-      'You\'ll receive a copy on your own calendar separately if you opt in to the appointment.',
-    ].filter(Boolean).join('\n')
-    await sendOne('creator-confirmation', creatorEmail, body, false)
+    const tpl = renderAppointmentCreatorConfirmation({
+      orgName:          org.name,
+      displayId,
+      appointmentTitle: a.title,
+      startLocal,
+      endLocal,
+      location:         a.location,
+      agentName,
+      attendeeName,
+      attendeeEmail,
+    })
+    const result = await sendOrgTransactionalEmail({
+      org:               orgCtx,
+      to:                creatorEmail,
+      subject:           tpl.subject,
+      htmlBody:          tpl.htmlBody,
+      textBody:          tpl.textBody,
+      fromAddressSource: 'support',
+      tag:               'appointment-creator',
+      attachments:       [icsAttachment],
+      headers:           [threadingHeader],
+    })
+    if (!result.ok) {
+      console.error(`${LOG} creator-confirmation FAILED appt=${displayId} to=${creatorEmail}: ${result.error}`)
+    } else {
+      console.log(`${LOG} creator-confirmation dispatched appt=${displayId} to=${creatorEmail} postmark_id=${result.messageId}`)
+    }
   }
 
-  // 3. Customer invite — agent appears as host (organizer above).
-  if (lead?.email) {
-    const customerBody = [
-      `${agentName ?? 'Your contact'} from ${org?.name ?? 'Kinvox'} has scheduled a meeting with you.`,
-      '',
-      `When:  ${formatLocal(start)} – ${formatLocal(end)}`,
-      a.location ? `Where: ${a.location}` : null,
-      '',
-      'The attached invite (.ics) will add this meeting to your calendar.',
-    ].filter(Boolean).join('\n')
-    await sendOne('customer-invite', lead.email, customerBody, true)
+  // 3. Recipient invite — fires when attendeeEmail resolves (lead or customer).
+  //    fromAddressSource picks the From channel by attendee type — fixes the
+  //    May 21 lead-channel from-address bug.
+  if (attendeeEmail) {
+    const tpl = renderAppointmentRecipientInvite({
+      orgName:           org.name,
+      displayId,
+      appointmentTitle:  a.title,
+      startLocal,
+      endLocal,
+      location:          a.location,
+      agentName,
+      attendeeFirstName,
+    })
+    const result = await sendOrgTransactionalEmail({
+      org:               orgCtx,
+      to:                attendeeEmail,
+      subject:           tpl.subject,
+      htmlBody:          tpl.htmlBody,
+      textBody:          tpl.textBody,
+      fromAddressSource: attendeeChannel,
+      tag:               'appointment-recipient',
+      attachments:       [icsAttachment],
+      headers:           [threadingHeader],
+    })
+    if (!result.ok) {
+      console.error(`${LOG} recipient-invite FAILED appt=${displayId} to=${attendeeEmail}: ${result.error}`)
+    } else {
+      console.log(`${LOG} recipient-invite dispatched appt=${displayId} to=${attendeeEmail} channel=${attendeeChannel} postmark_id=${result.messageId}`)
+    }
   }
 }

@@ -56,8 +56,12 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
     .limit(1000)
 
   if (view === 'mine') {
-    // Creator OR target. PostgREST OR syntax.
-    apptsQ = apptsQ.or(`created_by.eq.${user.id},assigned_to.eq.${user.id}`)
+    // "Mine" = appointments where I am the agent (target). Workstream F:
+    // creator-or-target was widening the view to include lead-magnet
+    // appointments only because the owner was the created_by surrogate —
+    // those now belong to the Lead Email pseudo-agent, so filter strictly
+    // by assigned_to.
+    apptsQ = apptsQ.eq('assigned_to', user.id)
   } else if (view === 'agent' && agentParam) {
     apptsQ = apptsQ.eq('assigned_to', agentParam)
   }

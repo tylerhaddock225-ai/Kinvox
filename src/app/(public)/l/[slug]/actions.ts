@@ -325,12 +325,25 @@ export async function captureLeadAction(
   // never from the form payload.
   let appointmentBooked = false
   if (geofence === 'inside' && lead?.id) {
+    // Default assignment for lead-magnet appointments is the org's Lead Email
+    // pseudo-agent inbox — so notifications route to verified_lead_email and
+    // the row appears in the inbox-owned "Lead Email" agent view. The trigger
+    // + backfill data-op guarantee this profile exists for every org.
+    const { data: leadInbox } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('organization_id', org.id)
+      .eq('is_org_inbox', true)
+      .eq('org_inbox_kind', 'lead')
+      .maybeSingle<{ id: string }>()
+
     const { error: apptErr } = await supabase
       .from('appointments')
       .insert({
         organization_id: org.id,
         lead_id:         lead.id,
         created_by:      org.owner_id,
+        assigned_to:     leadInbox?.id ?? null,
         title:           `Initial consultation — ${trimmedName}`,
         description:     `Booked from ${slug} lead magnet. Service address: ${address}`,
         start_at:        apptIso,
