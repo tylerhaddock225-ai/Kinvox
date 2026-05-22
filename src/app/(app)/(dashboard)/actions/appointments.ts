@@ -2,7 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { revalidateOrgPath } from '@/lib/impersonation'
+import { resolveEffectiveOrgId, revalidateOrgPath } from '@/lib/impersonation'
 import { buildIcs } from '@/lib/ics'
 import { sendOrgTransactionalEmail, type EmailAttachment } from '@/lib/email/send-org-email'
 import { resolveProfileEmail } from '@/lib/email/resolve-profile-email'
@@ -21,13 +21,20 @@ export async function createAppointment(_prev: State, formData: FormData): Promi
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { status: 'error', error: 'Not authenticated' }
 
+  // Resolve target org: impersonated tenant if HQ admin is impersonating,
+  // otherwise the user's own org. Mirrors the pattern in customers.ts.
+  // The previous code read profile.organization_id directly, which mis-filed
+  // appointments created by impersonating HQ admins under the HQ admin's
+  // own org instead of the tenant org.
+  const orgId = await resolveEffectiveOrgId(supabase, user.id)
+  if (!orgId) return { status: 'error', error: 'No organization found' }
+
+  // Still need full_name for creatorName below.
   const { data: profile } = await supabase
     .from('profiles')
-    .select('organization_id, full_name')
+    .select('full_name')
     .eq('id', user.id)
     .single()
-
-  if (!profile?.organization_id) return { status: 'error', error: 'No organization' }
 
   const title       = formData.get('title')       as string
   const description = formData.get('description') as string | null
@@ -41,10 +48,10 @@ export async function createAppointment(_prev: State, formData: FormData): Promi
   if (!title?.trim())  return { status: 'error', error: 'Title is required' }
   if (!start_at)       return { status: 'error', error: 'Start time is required' }
 
-  const link = await resolveCustomerLink(supabase, profile.organization_id, customer_id, lead_id_raw)
+  const link = await resolveCustomerLink(supabase, orgId, customer_id, lead_id_raw)
 
   const { data: created, error } = await supabase.from('appointments').insert({
-    organization_id: profile.organization_id,
+    organization_id: orgId,
     created_by:  user.id,
     title:       title.trim(),
     description: description || null,
@@ -69,14 +76,14 @@ export async function createAppointment(_prev: State, formData: FormData): Promi
     endAt:         end_at || null,
     location:      location || null,
     creatorId:     user.id,
-    creatorName:   profile.full_name,
+    creatorName:   profile?.full_name ?? null,
     assignedToId:  assigned_to || null,
     leadId:        link.leadId,
     customerId:    link.customerId,
-    organizationId: profile.organization_id,
+    organizationId: orgId,
   })
 
-  await revalidateOrgPath(supabase, profile.organization_id, '/appointments')
+  await revalidateOrgPath(supabase, orgId, '/appointments')
   return { status: 'success' }
 }
 
