@@ -230,6 +230,46 @@ export async function captureLeadAction(
       console.error(`[lead-capture] resubmission update failed lead=${existingLead.id}: ${updErr.message}`)
     }
 
+    // Phase 6d-inline: resubmissions now create a new appointment via the
+    // same path as the new-lead branch. Bookings remain gated by
+    // geofence === 'inside'; out-of-area resubmissions stay advisory only.
+    // assigned_to defaults to the org's Lead Email pseudo-agent inbox so
+    // the appointment routes to verified_lead_email and lands in the
+    // inbox-owned "Lead Email" agent view (Workstream F).
+    let appointmentBooked = false
+    let appointmentInsertFailed = false
+    if (geofence === 'inside') {
+      const { data: leadInbox } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('organization_id', org.id)
+        .eq('is_org_inbox', true)
+        .eq('org_inbox_kind', 'lead')
+        .maybeSingle<{ id: string }>()
+
+      const { error: apptErr } = await supabase
+        .from('appointments')
+        .insert({
+          organization_id: org.id,
+          lead_id:         existingLead.id,
+          created_by:      org.owner_id,
+          assigned_to:     leadInbox?.id ?? null,
+          title:           `Initial consultation — ${trimmedName}`,
+          description:     `Booked from ${slug} lead magnet resubmission. Service address: ${address}`,
+          start_at:        apptIso,
+          status:          'scheduled',
+        })
+
+      if (apptErr) {
+        appointmentInsertFailed = true
+        console.error(
+          `[lead-capture] resubmission appointment insert failed lead=${existingLead.id}: ${apptErr.message}`,
+        )
+      } else {
+        appointmentBooked = true
+      }
+    }
+
     const sysBody = composeResubmissionMessageBody({
       isArchived,
       isDisposed,
@@ -242,6 +282,8 @@ export async function captureLeadAction(
       homestead:      homesteadProvided ? homestead : null,
       geofence,
       distanceMiles,
+      appointmentBooked,
+      appointmentInsertFailed,
     })
     const { error: msgErr } = await supabase.from('lead_messages').insert({
       lead_id:         existingLead.id,
@@ -256,21 +298,20 @@ export async function captureLeadAction(
     }
 
     // Re-fire the merchant alert with a [Resubmission] subject prefix so the
-    // merchant can distinguish in their inbox. Appointment is NEVER recreated
-    // on resubmission for Phase 6a — Phase 6d will rebuild appointment flow.
+    // merchant can distinguish in their inbox.
     await sendLeadAlertEmail({
       org,
       geofence,
       distanceMiles,
       fullName:      trimmedName,
       phone,
-      appointmentAt: null,
+      appointmentAt: appointmentBooked ? apptIso : null,
       subjectPrefix: '[Resubmission] ',
     })
 
-    // Re-send confirmation to the prospect. appointmentTime is null
-    // (no new appointment booked) — confirmation copy collapses to the
-    // no-appointment variant.
+    // Re-send confirmation to the prospect. appointmentTime carries the
+    // booked time when a new appointment landed; otherwise the confirmation
+    // copy collapses to the no-appointment variant.
     await dispatchLeadConfirmation({
       org,
       email,
@@ -278,7 +319,7 @@ export async function captureLeadAction(
       address,
       phone,
       customAnswersWithLabels,
-      appointmentTime: null,
+      appointmentTime: appointmentBooked ? formatAppointmentTime(apptIso) : null,
       leadDisplayId:   existingLead.display_id,
       leadId:          existingLead.id,
     })
@@ -524,8 +565,9 @@ async function sendLeadAlertEmail({
 }
 
 // Confirmation-email dispatch. Used by both the new-lead path and the
-// resubmission path. Resubmissions pass appointmentTime=null because
-// Phase 6a does not recreate appointments on resubmit (Phase 6d will).
+// resubmission path. appointmentTime may be null when the booking was
+// skipped (out-of-area resubmit) or failed; the rendered template
+// collapses to a no-appointment variant in that case.
 type LeadConfirmationArgs = {
   org:                     OrgRow
   email:                   string
@@ -600,6 +642,8 @@ type ResubmissionBodyArgs = {
   homestead:               boolean | null
   geofence:                'inside' | 'outside'
   distanceMiles:           number | null
+  appointmentBooked:       boolean
+  appointmentInsertFailed: boolean
 }
 
 function composeResubmissionMessageBody(args: ResubmissionBodyArgs): string {
@@ -628,7 +672,13 @@ function composeResubmissionMessageBody(args: ResubmissionBodyArgs): string {
     }
   }
   lines.push('')
-  lines.push('No new appointment was created (Phase 6a defers appointment rebooking).')
+  if (args.appointmentBooked) {
+    lines.push(`Appointment booked: ${new Date(args.apptIso).toLocaleString()}.`)
+  } else if (args.appointmentInsertFailed) {
+    lines.push('Appointment booking failed — please follow up manually.')
+  } else if (args.geofence === 'outside') {
+    lines.push('No appointment was created (visitor is outside service area).')
+  }
 
   return lines.join('\n')
 }
