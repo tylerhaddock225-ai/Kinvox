@@ -66,7 +66,8 @@ export default async function TeamSettingsPage({
     supabase
       .from('profiles')
       .select('id, full_name, role, role_id, roles(id, name)')
-      .eq('organization_id', orgId),
+      .eq('organization_id', orgId)
+      .eq('is_org_inbox', false),
     supabase
       .from('roles')
       .select('id, name, permissions, is_system_role')

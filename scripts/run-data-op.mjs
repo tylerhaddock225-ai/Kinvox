@@ -73,11 +73,12 @@ if (linkedEnv !== envArg) {
 
 console.log(`run-data-op: env=${envArg} file=${fileArg} linked_ref=${linkedRef} — proceeding`);
 
-const sql = readFileSync(filePath, 'utf8');
-
-const result = spawnSync('npx', ['supabase', 'db', 'query', '--linked', sql], {
+// Use --file rather than passing SQL as a positional arg: the supabase CLI
+// parses any positional starting with "--" (e.g., a SQL comment) as a flag.
+// shell:true so Windows can resolve npx via npx.cmd shim.
+const result = spawnSync('npx', ['supabase', 'db', 'query', '--linked', '--file', filePath], {
   stdio: 'inherit',
-  shell: false,
+  shell: true,
 });
 
 const operator = process.env.USER || process.env.USERNAME || 'unknown';

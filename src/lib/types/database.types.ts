@@ -79,6 +79,8 @@ export type Database = {
           role: 'admin' | 'agent' | 'viewer'
           role_id: string | null
           calendar_email: string | null
+          is_org_inbox: boolean
+          org_inbox_kind: 'lead' | null
           created_at: string
           updated_at: string
         }
@@ -90,6 +92,8 @@ export type Database = {
           role?: 'admin' | 'agent' | 'viewer'
           role_id?: string | null
           calendar_email?: string | null
+          is_org_inbox?: boolean
+          org_inbox_kind?: 'lead' | null
           created_at?: string
           updated_at?: string
         }
@@ -239,6 +243,7 @@ export type Database = {
           organization_id: string
           lead_id: string | null
           customer_id: string | null
+          ticket_id: string | null
           assigned_to: string | null
           created_by: string
           title: string
@@ -257,6 +262,7 @@ export type Database = {
           organization_id: string
           lead_id?: string | null
           customer_id?: string | null
+          ticket_id?: string | null
           assigned_to?: string | null
           created_by: string
           title: string

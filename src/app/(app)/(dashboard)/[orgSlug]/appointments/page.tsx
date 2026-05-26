@@ -56,14 +56,18 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
     .limit(1000)
 
   if (view === 'mine') {
-    // Creator OR target. PostgREST OR syntax.
-    apptsQ = apptsQ.or(`created_by.eq.${user.id},assigned_to.eq.${user.id}`)
+    // "Mine" = appointments where I am the agent (target). Workstream F:
+    // creator-or-target was widening the view to include lead-magnet
+    // appointments only because the owner was the created_by surrogate —
+    // those now belong to the Lead Email pseudo-agent, so filter strictly
+    // by assigned_to.
+    apptsQ = apptsQ.eq('assigned_to', user.id)
   } else if (view === 'agent' && agentParam) {
     apptsQ = apptsQ.eq('assigned_to', agentParam)
   }
   // view === 'global' applies no extra filter; full org list.
 
-  const [apptsRes, membersRes, customersRes] = await Promise.all([
+  const [apptsRes, membersRes, customersRes, leadsRes] = await Promise.all([
     apptsQ,
     supabase
       .from('profiles')
@@ -76,6 +80,18 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
       .is('deleted_at', null)
       .order('first_name', { ascending: true })
       .limit(500),
+    // Active, non-archived, non-converted leads for the modal's Lead picker.
+    // Converted leads have a companion customer row — the customer picker
+    // is the right surface for them, not the lead picker.
+    supabase
+      .from('leads')
+      .select('id, display_id, first_name, last_name, email')
+      .eq('organization_id', orgId)
+      .is('deleted_at', null)
+      .is('archived_at', null)
+      .neq('status', 'converted')
+      .order('created_at', { ascending: false })
+      .limit(200),
   ])
 
   let appointments = (apptsRes.data ?? []) as CalAppt[]
@@ -94,6 +110,7 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
 
   const members   = (membersRes.data   ?? []) as { id: string; full_name: string | null }[]
   const customers = (customersRes.data ?? []) as { id: string; first_name: string; last_name: string | null; email: string | null }[]
+  const leads     = (leadsRes.data     ?? []) as { id: string; display_id: string | null; first_name: string | null; last_name: string | null; email: string | null }[]
 
   return (
     <div className="px-8 py-8 space-y-6">
@@ -102,7 +119,7 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
           <h1 className="text-2xl font-bold text-white">Appointments</h1>
           <p className="text-sm text-gray-400 mt-1">Schedule and manage meetings with leads and clients.</p>
         </div>
-        <CreateAppointmentModal members={members} customers={customers} />
+        <CreateAppointmentModal members={members} customers={customers} leads={leads} />
       </div>
 
       <CalendarViewToggle members={members} canSeeGlobal={isAdmin} />
@@ -113,6 +130,7 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
             appointments={appointments}
             members={members}
             customers={customers}
+            leads={leads}
             colorByAgent={view === 'global'}
           />
         </Suspense>

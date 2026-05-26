@@ -33,6 +33,16 @@ export type OrgEmailContext = {
 
 export type FromAddressSource = 'support' | 'lead'
 
+// One attachment row, mapped to Postmark's shape inside the helper. `content`
+// is the file body base64-encoded — callers should pre-encode (e.g. via
+// `Buffer.from(text, 'utf8').toString('base64')`).
+export type EmailAttachment = {
+  name:        string
+  content:     string
+  contentType: string
+  contentId?:  string | null
+}
+
 export type SendOrgEmailParams = {
   org:                 OrgEmailContext
   // `to` and `cc` accept either a single address or an array. Arrays are
@@ -51,6 +61,7 @@ export type SendOrgEmailParams = {
   // outbound callers to wire In-Reply-To / References for client-side
   // threading. Omit when not threading.
   headers?:            Array<{ Name: string; Value: string }>
+  attachments?:        EmailAttachment[]
 }
 
 export type SendOrgEmailResult =
@@ -87,7 +98,7 @@ function joinAddresses(value: string | string[] | undefined): string | undefined
 export async function sendOrgTransactionalEmail(
   params: SendOrgEmailParams,
 ): Promise<SendOrgEmailResult> {
-  const { org, to, cc, subject, htmlBody, textBody, replyTo, tag, fromAddressSource, headers } = params
+  const { org, to, cc, subject, htmlBody, textBody, replyTo, tag, fromAddressSource, headers, attachments } = params
   const source = fromAddressSource ?? 'support'
   const LOG = '[send-org-email]'
 
@@ -104,21 +115,37 @@ export async function sendOrgTransactionalEmail(
   }
   const ccJoined = joinAddresses(cc)
   const ccCount  = Array.isArray(cc) ? cc.length : (cc ? 1 : 0)
+  const attCount = attachments?.length ?? 0
+
+  // Build the Postmark payload from a base of always-present fields, then
+  // layer optional fields conditionally. Adding a new optional field (Bcc,
+  // MessageStream, Metadata, TrackOpens, TrackLinks, raw From override) is
+  // a one-line addition: a SendOrgEmailParams entry above + an `if (…)`
+  // assignment here.
+  const payload: Parameters<ServerClient['sendEmail']>[0] = {
+    From:     resolveFromAddress(org, source),
+    To:       toJoined,
+    Subject:  subject,
+    HtmlBody: htmlBody,
+    TextBody: textBody,
+  }
+  if (ccJoined !== undefined) payload.Cc       = ccJoined
+  if (replyTo  !== undefined) payload.ReplyTo  = replyTo
+  if (tag      !== undefined) payload.Tag      = tag
+  if (headers  !== undefined) payload.Headers  = headers
+  if (attachments && attachments.length > 0) {
+    payload.Attachments = attachments.map(a => ({
+      Name:        a.name,
+      Content:     a.content,
+      ContentType: a.contentType,
+      ContentID:   a.contentId ?? null,
+    }))
+  }
 
   try {
     const client = new ServerClient(token)
-    const result = await client.sendEmail({
-      From:     resolveFromAddress(org, source),
-      To:       toJoined,
-      Cc:       ccJoined,
-      Subject:  subject,
-      HtmlBody: htmlBody,
-      TextBody: textBody,
-      ReplyTo:  replyTo,
-      Tag:      tag,
-      Headers:  headers,
-    })
-    console.log(`${LOG} ok org=${org.id} tag=${tag ?? '-'} source=${source} cc=${ccCount} postmark_id=${result.MessageID}`)
+    const result = await client.sendEmail(payload)
+    console.log(`${LOG} ok org=${org.id} tag=${tag ?? '-'} source=${source} cc=${ccCount} att=${attCount} postmark_id=${result.MessageID}`)
     return { ok: true, messageId: result.MessageID }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
