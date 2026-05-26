@@ -243,6 +243,7 @@ export type Database = {
           organization_id: string
           lead_id: string | null
           customer_id: string | null
+          ticket_id: string | null
           assigned_to: string | null
           created_by: string
           title: string
@@ -261,6 +262,7 @@ export type Database = {
           organization_id: string
           lead_id?: string | null
           customer_id?: string | null
+          ticket_id?: string | null
           assigned_to?: string | null
           created_by: string
           title: string

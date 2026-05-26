@@ -19,6 +19,13 @@ const TICKET_TAG_RE = /\[(tk_[a-z0-9]+)\]/i
 // public.lead_messages instead of ticket_messages.
 const LEAD_TAG_RE   = /\[(ld_[a-z0-9]+)\]/i
 
+// Appointment-confirmation tag — Workstream F Hotfix #6. On the lead
+// channel, resolves to the appointment's linked lead (alias-safe vs.
+// sender-email fallback). On the support channel, resolves to the
+// appointment's linked ticket (if backfilled) or falls through to Path C
+// with a backfill, so subsequent replies thread to the same ticket.
+const APPT_TAG_RE   = /\[(ap_[a-z0-9]+)\]/i
+
 // Auto-responder suppression for the Path C confirmation email. Skipping
 // these avoids pinging bounces / out-of-office daemons / no-reply replies
 // that would otherwise create needless inbound noise. Substring match (not
@@ -215,6 +222,36 @@ export async function POST(request: NextRequest) {
       if (data) matchedLead = data
     }
 
+    // Workstream F Hotfix #6: [ap_X] appointment-tag lookup.
+    // Deterministic routing for appointment-confirmation replies — the
+    // sender-email fallback (below) is alias-unsafe when users share an
+    // inbox across multiple lead/customer rows. The [ap_X] tag points
+    // directly to the appointment row, which has the authoritative lead_id.
+    if (!matchedLead) {
+      const apptTagMatch = subject.match(APPT_TAG_RE)
+      if (apptTagMatch) {
+        const apptDisplayId = apptTagMatch[1].toLowerCase()
+        const { data: appt } = await supabase
+          .from('appointments')
+          .select('lead_id')
+          .eq('organization_id', orgId)
+          .eq('display_id', apptDisplayId)
+          .maybeSingle<{ lead_id: string | null }>()
+        if (appt?.lead_id) {
+          const { data: lead } = await supabase
+            .from('leads')
+            .select('id, status, archived_at')
+            .eq('id', appt.lead_id)
+            .is('deleted_at', null)
+            .maybeSingle<{ id: string; status: string; archived_at: string | null }>()
+          if (lead) {
+            matchedLead = lead
+            console.log(`${LOG} matched lead via [ap_X] tag appt=${apptDisplayId} lead_id=${lead.id}`)
+          }
+        }
+      }
+    }
+
     if (!matchedLead) {
       const { data } = await supabase
         .from('leads')
@@ -375,16 +412,26 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ignored: 'loop_guard' }, { status: 200 })
   }
 
-  // 4. Threading — does the subject reference an existing ticket in this org?
-  const tagMatch = subject.match(TICKET_TAG_RE)
-  if (tagMatch) {
-    const displayId = tagMatch[1].toLowerCase()
+  // 4. Threading — try [tk_X] then [ap_X] subject tags, in that order.
+  //    [tk_X] points at a ticket directly. [ap_X] points at an appointment
+  //    whose ticket_id (when populated) is the stable threading destination;
+  //    if the appointment has no ticket yet (pre-Workstream-G rows), the
+  //    [ap_X] branch sets a backfill marker and falls through to Path C,
+  //    which then writes appointments.ticket_id so subsequent replies
+  //    thread here instead of duplicating tickets.
+  let matchedTicket: { id: string; status: string; displayLabel: string } | null = null
+  let backfillApptId: string | null = null
+  let apptCustomerForFallback: string | null = null
+
+  const tkTagMatch = subject.match(TICKET_TAG_RE)
+  if (tkTagMatch) {
+    const displayId = tkTagMatch[1].toLowerCase()
     const { data: ticket, error: tErr } = await supabase
       .from('tickets')
       .select('id, status')
       .eq('organization_id', orgId)
       .eq('display_id', displayId)
-      .maybeSingle()
+      .maybeSingle<{ id: string; status: string }>()
 
     if (tErr) {
       console.error(`${LOG} ticket lookup failed display_id=${displayId} org=${orgId}:`, tErr.message)
@@ -392,46 +439,87 @@ export async function POST(request: NextRequest) {
     }
 
     if (ticket) {
-      const { error: insErr } = await supabase.from('ticket_messages').insert({
-        ticket_id:           ticket.id,
-        org_id:              orgId,
-        sender_id:           null,
-        body:                messageBody,
-        type:                'public',
-        external_message_id: messageId,
-        inbound_email_from:  fromEmail,
-      })
-      if (insErr) {
-        console.error(`${LOG} append failed ticket=${displayId}:`, insErr.message)
-        return NextResponse.json({ error: insErr.message }, { status: 500 })
-      }
+      matchedTicket = { ...ticket, displayLabel: displayId }
+    } else {
+      console.warn(`${LOG} subject tag ${displayId} not in org ${orgId} — falling through to next lookup`)
+    }
+  }
 
-      // Auto-reopen: a customer reply on a closed ticket bounces it back to
-      // the Active queue so the team sees it again.
-      let reopened = false
-      if (ticket.status === 'closed') {
-        const { error: reopenErr } = await supabase
-          .from('tickets')
-          .update({ status: 'open' })
-          .eq('id', ticket.id)
-        if (reopenErr) {
-          console.error(`${LOG} auto-reopen failed for ticket=${displayId}:`, reopenErr.message)
+  // Workstream F Hotfix #6: [ap_X] appointment-tag lookup on support channel.
+  if (!matchedTicket) {
+    const apptTagMatch = subject.match(APPT_TAG_RE)
+    if (apptTagMatch) {
+      const apptDisplayId = apptTagMatch[1].toLowerCase()
+      const { data: appt } = await supabase
+        .from('appointments')
+        .select('id, customer_id, ticket_id')
+        .eq('organization_id', orgId)
+        .eq('display_id', apptDisplayId)
+        .maybeSingle<{ id: string; customer_id: string | null; ticket_id: string | null }>()
+      if (appt) {
+        if (appt.ticket_id) {
+          const { data: ticket } = await supabase
+            .from('tickets')
+            .select('id, status')
+            .eq('id', appt.ticket_id)
+            .maybeSingle<{ id: string; status: string }>()
+          if (ticket) {
+            matchedTicket = { ...ticket, displayLabel: apptDisplayId }
+            console.log(`${LOG} matched ticket via [ap_X] tag appt=${apptDisplayId} ticket_id=${ticket.id}`)
+          }
         } else {
-          reopened = true
-          console.log(`${LOG} auto-reopened ticket ${displayId} on inbound reply`)
+          // First reply on a pre-G appointment. Path C creates the ticket;
+          // backfillApptId triggers the UPDATE after creation. Pre-populating
+          // the customer link makes Path C alias-safe (sender email may not
+          // match customers.email for shared-inbox testers).
+          backfillApptId = appt.id
+          if (appt.customer_id) {
+            apptCustomerForFallback = appt.customer_id
+          }
+          console.log(`${LOG} [ap_X] tag appt=${apptDisplayId} has no ticket — falling through to Path C with backfill`)
         }
       }
+    }
+  }
 
-      // TODO: persist payload.Attachments to Supabase Storage and link rows
-      //       (e.g. a `ticket_message_attachments` table) once that surface
-      //       lands. Postmark provides each attachment as base64 `Content`
-      //       with `Name`, `ContentType`, `ContentLength`.
-
-      console.log(`${LOG} appended message to ticket ${displayId} (${ticket.id}) from=${fromEmail}${reopened ? ' [reopened]' : ''}`)
-      return NextResponse.json({ status: 'appended', ticket_id: ticket.id, reopened }, { status: 200 })
+  if (matchedTicket) {
+    const { error: insErr } = await supabase.from('ticket_messages').insert({
+      ticket_id:           matchedTicket.id,
+      org_id:              orgId,
+      sender_id:           null,
+      body:                messageBody,
+      type:                'public',
+      external_message_id: messageId,
+      inbound_email_from:  fromEmail,
+    })
+    if (insErr) {
+      console.error(`${LOG} append failed ticket=${matchedTicket.displayLabel}:`, insErr.message)
+      return NextResponse.json({ error: insErr.message }, { status: 500 })
     }
 
-    console.warn(`${LOG} subject tag ${displayId} not in org ${orgId} — falling through to new ticket`)
+    // Auto-reopen: a customer reply on a closed ticket bounces it back to
+    // the Active queue so the team sees it again.
+    let reopened = false
+    if (matchedTicket.status === 'closed') {
+      const { error: reopenErr } = await supabase
+        .from('tickets')
+        .update({ status: 'open' })
+        .eq('id', matchedTicket.id)
+      if (reopenErr) {
+        console.error(`${LOG} auto-reopen failed for ticket=${matchedTicket.displayLabel}:`, reopenErr.message)
+      } else {
+        reopened = true
+        console.log(`${LOG} auto-reopened ticket ${matchedTicket.displayLabel} on inbound reply`)
+      }
+    }
+
+    // TODO: persist payload.Attachments to Supabase Storage and link rows
+    //       (e.g. a `ticket_message_attachments` table) once that surface
+    //       lands. Postmark provides each attachment as base64 `Content`
+    //       with `Name`, `ContentType`, `ContentLength`.
+
+    console.log(`${LOG} appended message to ticket ${matchedTicket.displayLabel} (${matchedTicket.id}) from=${fromEmail}${reopened ? ' [reopened]' : ''}`)
+    return NextResponse.json({ status: 'appended', ticket_id: matchedTicket.id, reopened }, { status: 200 })
   }
 
   // 5. No tag (or tag missed) → new customerless-or-customer-linked ticket.
@@ -442,19 +530,26 @@ export async function POST(request: NextRequest) {
   //    NULL on the support rail; leads and customers are separate rails
   //    (see Master Manifest Part 5) and a support-channel inbound never
   //    creates or touches a lead.
-  const { data: customer } = await supabase
-    .from('customers')
-    .select('id')
-    .eq('organization_id', orgId)
-    .ilike('email', fromEmail.replace(/[\\%_]/g, m => '\\' + m))
-    .is('deleted_at', null)
-    .maybeSingle()
-
-  const customerId = customer?.id ?? null
+  // Customer resolution: [ap_X] appointment-tag wins when present (alias-
+  // safe, points at the appointment's canonical customer), else sender-
+  // email match.
+  let customerId: string | null = apptCustomerForFallback
   if (customerId) {
-    console.log(`${LOG} matched customer ${customerId} for ${fromEmail}`)
+    console.log(`${LOG} matched customer ${customerId} via [ap_X] tag for ${fromEmail}`)
   } else {
-    console.log(`${LOG} no customer match for ${fromEmail} — opening customerless ticket`)
+    const { data: customer } = await supabase
+      .from('customers')
+      .select('id')
+      .eq('organization_id', orgId)
+      .ilike('email', fromEmail.replace(/[\\%_]/g, m => '\\' + m))
+      .is('deleted_at', null)
+      .maybeSingle()
+    customerId = customer?.id ?? null
+    if (customerId) {
+      console.log(`${LOG} matched customer ${customerId} for ${fromEmail}`)
+    } else {
+      console.log(`${LOG} no customer match for ${fromEmail} — opening customerless ticket`)
+    }
   }
 
   // Create the ticket. Description holds the full original body; the
@@ -479,6 +574,23 @@ export async function POST(request: NextRequest) {
   if (tCreateErr || !newTicket) {
     console.error(`${LOG} ticket create failed org=${orgId}:`, tCreateErr?.message ?? 'unknown')
     return NextResponse.json({ error: tCreateErr?.message ?? 'Failed to create ticket' }, { status: 500 })
+  }
+
+  // Workstream F Hotfix #6: backfill appointments.ticket_id when this Path C
+  // run was triggered by an [ap_X] reply on a pre-G appointment. Subsequent
+  // replies to that appointment will then thread to this ticket via the
+  // [ap_X] lookup above instead of creating duplicate tickets. Non-fatal
+  // on failure — the ticket already exists.
+  if (backfillApptId) {
+    const { error: backfillErr } = await supabase
+      .from('appointments')
+      .update({ ticket_id: newTicket.id, updated_at: new Date().toISOString() })
+      .eq('id', backfillApptId)
+    if (backfillErr) {
+      console.error(`${LOG} failed to backfill appointment.ticket_id appt=${backfillApptId} ticket=${newTicket.id}:`, backfillErr.message)
+    } else {
+      console.log(`${LOG} backfilled appointment.ticket_id appt=${backfillApptId} ticket=${newTicket.id}`)
+    }
   }
 
   const { error: msgErr } = await supabase.from('ticket_messages').insert({
