@@ -67,6 +67,37 @@ export async function createAppointment(_prev: State, formData: FormData): Promi
 
   if (error) return { status: 'error', error: error.message }
 
+  // Workstream F Hotfix #7: write a system-message activity note to the
+  // lead's detail thread (lead-rail) or customer's activity log
+  // (customer-rail) so every appointment creation produces a consistent
+  // audit trail on the entity's detail page. Non-fatal: a failed insert
+  // logs and continues; the appointment row + notification dispatch
+  // already succeeded.
+  const activityBody = `Appointment booked: ${title.trim()} on ${new Date(start_at).toLocaleString()}. Reference: ${created.display_id}`
+
+  if (link.leadId) {
+    const { error: noteErr } = await supabase.from('lead_messages').insert({
+      lead_id:         link.leadId,
+      organization_id: orgId,
+      author_kind:     'system',
+      message_type:    'internal_note',
+      author_user_id:  null,
+      body:            activityBody,
+    })
+    if (noteErr) {
+      console.error(`[appointments] activity note insert failed lead=${link.leadId} appt=${created.display_id}: ${noteErr.message}`)
+    }
+  } else if (link.customerId) {
+    const { error: noteErr } = await supabase.from('customer_activities').insert({
+      customer_id: link.customerId,
+      user_id:     user.id,
+      content:     activityBody,
+    })
+    if (noteErr) {
+      console.error(`[appointments] activity note insert failed customer=${link.customerId} appt=${created.display_id}: ${noteErr.message}`)
+    }
+  }
+
   // Fire-and-forget notifications. Failures here log but never block creation.
   void dispatchAppointmentNotifications({
     apptId:        created.id,

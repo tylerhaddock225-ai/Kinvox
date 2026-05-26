@@ -238,6 +238,8 @@ export async function captureLeadAction(
     // inbox-owned "Lead Email" agent view (Workstream F).
     let appointmentBooked = false
     let appointmentInsertFailed = false
+    let resubmissionApptTitle:     string | null = null
+    let resubmissionApptDisplayId: string | null = null
     if (geofence === 'inside') {
       const { data: leadInbox } = await supabase
         .from('profiles')
@@ -247,7 +249,7 @@ export async function captureLeadAction(
         .eq('org_inbox_kind', 'lead')
         .maybeSingle<{ id: string }>()
 
-      const { error: apptErr } = await supabase
+      const { data: createdAppt, error: apptErr } = await supabase
         .from('appointments')
         .insert({
           organization_id: org.id,
@@ -259,6 +261,8 @@ export async function captureLeadAction(
           start_at:        apptIso,
           status:          'scheduled',
         })
+        .select('id, display_id, title')
+        .single<{ id: string; display_id: string | null; title: string }>()
 
       if (apptErr) {
         appointmentInsertFailed = true
@@ -267,6 +271,8 @@ export async function captureLeadAction(
         )
       } else {
         appointmentBooked = true
+        resubmissionApptTitle     = createdAppt?.title ?? null
+        resubmissionApptDisplayId = createdAppt?.display_id ?? null
       }
     }
 
@@ -284,6 +290,8 @@ export async function captureLeadAction(
       distanceMiles,
       appointmentBooked,
       appointmentInsertFailed,
+      apptTitle:      resubmissionApptTitle,
+      apptDisplayId:  resubmissionApptDisplayId,
     })
     const { error: msgErr } = await supabase.from('lead_messages').insert({
       lead_id:         existingLead.id,
@@ -378,7 +386,7 @@ export async function captureLeadAction(
       .eq('org_inbox_kind', 'lead')
       .maybeSingle<{ id: string }>()
 
-    const { error: apptErr } = await supabase
+    const { data: createdAppt, error: apptErr } = await supabase
       .from('appointments')
       .insert({
         organization_id: org.id,
@@ -390,6 +398,8 @@ export async function captureLeadAction(
         start_at:        apptIso,
         status:          'scheduled',
       })
+      .select('id, display_id')
+      .single<{ id: string; display_id: string | null }>()
 
     if (apptErr) {
       // Lead is captured; surface the booking failure in metadata for HQ
@@ -402,6 +412,25 @@ export async function captureLeadAction(
         .eq('id', lead.id)
     } else {
       appointmentBooked = true
+
+      // Workstream F Hotfix #7: activity note on the new lead's detail
+      // page for the just-booked appointment. Mirrors the dashboard
+      // createAppointment system-note pattern. Non-fatal — the lead and
+      // appointment rows already exist.
+      if (createdAppt?.display_id) {
+        const activityBody = `Appointment booked: Initial consultation — ${trimmedName} on ${new Date(apptIso).toLocaleString()}. Reference: ${createdAppt.display_id}`
+        const { error: noteErr } = await supabase.from('lead_messages').insert({
+          lead_id:         lead.id,
+          organization_id: org.id,
+          author_kind:     'system',
+          message_type:    'internal_note',
+          author_user_id:  null,
+          body:            activityBody,
+        })
+        if (noteErr) {
+          console.error(`[lead-capture] new-lead appointment activity note failed lead=${lead.id} appt=${createdAppt.display_id}: ${noteErr.message}`)
+        }
+      }
     }
   }
 
@@ -644,6 +673,8 @@ type ResubmissionBodyArgs = {
   distanceMiles:           number | null
   appointmentBooked:       boolean
   appointmentInsertFailed: boolean
+  apptTitle:               string | null
+  apptDisplayId:           string | null
 }
 
 function composeResubmissionMessageBody(args: ResubmissionBodyArgs): string {
@@ -672,8 +703,8 @@ function composeResubmissionMessageBody(args: ResubmissionBodyArgs): string {
     }
   }
   lines.push('')
-  if (args.appointmentBooked) {
-    lines.push(`Appointment booked: ${new Date(args.apptIso).toLocaleString()}.`)
+  if (args.appointmentBooked && args.apptDisplayId) {
+    lines.push(`Appointment booked: ${args.apptTitle ?? 'Initial consultation'} on ${new Date(args.apptIso).toLocaleString()}. Reference: ${args.apptDisplayId}`)
   } else if (args.appointmentInsertFailed) {
     lines.push('Appointment booking failed — please follow up manually.')
   } else if (args.geofence === 'outside') {
