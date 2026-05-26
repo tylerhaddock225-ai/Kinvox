@@ -76,7 +76,11 @@ export async function createAppointment(_prev: State, formData: FormData): Promi
   const activityBody = `Appointment booked: ${title.trim()} on ${new Date(start_at).toLocaleString()}. Reference: ${created.display_id}`
 
   if (link.leadId) {
-    const { error: noteErr } = await supabase.from('lead_messages').insert({
+    // System messages bypass author_kind='org_user' RLS via admin client.
+    // Same pattern as l/[slug]/actions.ts resubmission flow and the
+    // inbound webhook — system author writes always go through admin.
+    const admin = createAdminClient()
+    const { error: noteErr } = await admin.from('lead_messages').insert({
       lead_id:         link.leadId,
       organization_id: orgId,
       author_kind:     'system',
@@ -86,6 +90,8 @@ export async function createAppointment(_prev: State, formData: FormData): Promi
     })
     if (noteErr) {
       console.error(`[appointments] activity note insert failed lead=${link.leadId} appt=${created.display_id}: ${noteErr.message}`)
+    } else {
+      await revalidateOrgPath(supabase, orgId, `/leads/${link.leadId}`)
     }
   } else if (link.customerId) {
     const { error: noteErr } = await supabase.from('customer_activities').insert({
@@ -95,6 +101,8 @@ export async function createAppointment(_prev: State, formData: FormData): Promi
     })
     if (noteErr) {
       console.error(`[appointments] activity note insert failed customer=${link.customerId} appt=${created.display_id}: ${noteErr.message}`)
+    } else {
+      await revalidateOrgPath(supabase, orgId, `/customers/${link.customerId}`)
     }
   }
 
