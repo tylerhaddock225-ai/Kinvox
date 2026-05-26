@@ -6,6 +6,7 @@ import { resolveEffectiveOrgId, revalidateOrgPath } from '@/lib/impersonation'
 import { buildIcs } from '@/lib/ics'
 import { sendOrgTransactionalEmail, type EmailAttachment } from '@/lib/email/send-org-email'
 import { resolveProfileEmail } from '@/lib/email/resolve-profile-email'
+import { constructInboundEmailAddress } from '@/lib/email/inbound-address'
 import {
   renderAppointmentAgentInvite,
   renderAppointmentCreatorConfirmation,
@@ -222,7 +223,7 @@ async function dispatchAppointmentNotifications(a: NotifyArgs) {
   const [orgRes, agentProfileRes, creatorAuthRes] = await Promise.all([
     admin
       .from('organizations')
-      .select('id, name, verified_support_email, verified_support_email_confirmed_at, verified_lead_email, verified_lead_email_confirmed_at')
+      .select('id, name, verified_support_email, verified_support_email_confirmed_at, verified_lead_email, verified_lead_email_confirmed_at, inbound_email_tag, inbound_lead_email_tag')
       .eq('id', a.organizationId)
       .single(),
     a.assignedToId
@@ -360,6 +361,15 @@ async function dispatchAppointmentNotifications(a: NotifyArgs) {
     verified_lead_email_confirmed_at:    org.verified_lead_email_confirmed_at,
   }
 
+  // Reply-To routing: each channel's inbound subdomain address. Replies sent
+  // to the verified mailbox would dead-end in Gmail; Postmark inbound routes
+  // through these to the webhook for thread continuation (lead → lead detail
+  // panel; support → ticket via Path C). Null when the tag or
+  // POSTMARK_INBOUND_DOMAIN env is missing — sendOrgTransactionalEmail
+  // omits Reply-To in that case.
+  const supportReplyTo = constructInboundEmailAddress(org.inbound_email_tag ?? null)
+  const leadReplyTo    = constructInboundEmailAddress(org.inbound_lead_email_tag ?? null)
+
   const isProxyBooking = !!(a.assignedToId && a.assignedToId !== a.creatorId)
 
   // 1. Agent invite — always fires when agentEmail resolves.
@@ -383,6 +393,7 @@ async function dispatchAppointmentNotifications(a: NotifyArgs) {
       htmlBody:          tpl.htmlBody,
       textBody:          tpl.textBody,
       fromAddressSource: agentFromAddressSource,
+      replyTo:           (agentFromAddressSource === 'lead' ? leadReplyTo : supportReplyTo) ?? undefined,
       tag:               'appointment-agent',
       attachments:       [icsAttachment],
       headers:           [threadingHeader],
@@ -417,6 +428,7 @@ async function dispatchAppointmentNotifications(a: NotifyArgs) {
       htmlBody:          tpl.htmlBody,
       textBody:          tpl.textBody,
       fromAddressSource: 'support',
+      replyTo:           supportReplyTo ?? undefined,
       tag:               'appointment-creator',
       attachments:       [icsAttachment],
       headers:           [threadingHeader],
@@ -449,6 +461,7 @@ async function dispatchAppointmentNotifications(a: NotifyArgs) {
       htmlBody:          tpl.htmlBody,
       textBody:          tpl.textBody,
       fromAddressSource: attendeeChannel,
+      replyTo:           (attendeeChannel === 'lead' ? leadReplyTo : supportReplyTo) ?? undefined,
       tag:               'appointment-recipient',
       attachments:       [icsAttachment],
       headers:           [threadingHeader],
