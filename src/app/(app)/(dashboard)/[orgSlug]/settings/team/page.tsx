@@ -75,7 +75,7 @@ export default async function TeamSettingsPage({
       .order('name'),
     supabase
       .from('organizations')
-      .select('inbound_email_tag, inbound_lead_email_tag, verified_support_email, verified_support_email_confirmed_at, verified_lead_email, verified_lead_email_confirmed_at, ai_listening_enabled, cancel_at_period_end, current_period_end, custom_lead_questions, signal_engagement_mode, vertical, lead_magnet_settings, lead_magnet_slug')
+      .select('inbound_email_tag, inbound_lead_email_tag, verified_support_email, verified_support_email_confirmed_at, verified_lead_email, verified_lead_email_confirmed_at, ai_listening_enabled, custom_lead_questions, signal_engagement_mode, vertical, lead_magnet_settings, lead_magnet_slug')
       .eq('id', orgId)
       .single(),
     supabase
@@ -152,8 +152,6 @@ export default async function TeamSettingsPage({
     : []
 
   const leadSupport = {
-    cancel_at_period_end:             orgRes.data?.cancel_at_period_end             ?? false,
-    current_period_end:               orgRes.data?.current_period_end               ?? null,
     custom_lead_questions:            normalizeLeadQuestions(orgRes.data?.custom_lead_questions),
     lead_magnet_features:             leadMagnetFeatures,
     verified_lead_email:              orgRes.data?.verified_lead_email              ?? null,

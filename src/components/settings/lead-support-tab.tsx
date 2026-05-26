@@ -1,18 +1,10 @@
 'use client'
 
-import { useEffect, useRef, useState, useActionState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   CheckCircle2,
-  Clock,
-  ShieldAlert,
-  X,
-  RotateCcw,
   ExternalLink,
 } from 'lucide-react'
-import {
-  cancelSubscription,
-  reactivateSubscription,
-} from '@/app/(app)/(dashboard)/actions/lead-support'
 import {
   updateLeadEmail,
   refreshLeadEmailStatus,
@@ -26,8 +18,6 @@ import { CopyButton } from '@/components/ui/copy-button'
 import type { LeadQuestion } from '@/lib/lead-questions'
 
 export type LeadSupportState = {
-  cancel_at_period_end:                  boolean
-  current_period_end:                    string | null
   custom_lead_questions:                 LeadQuestion[]
   lead_magnet_features:                  string[]
   verified_lead_email:                   string | null
@@ -42,14 +32,6 @@ export type LeadSupportState = {
   lead_magnet_slug:                      string | null
   landing_base:                          string
 }
-
-// Local tokens — kept inline so this file is self-contained. They match
-// the tokens used in TeamTabs.tsx (the tenant settings design system).
-const BTN            = 'inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
-const BTN_PRIMARY    = `${BTN} bg-indigo-600 text-white hover:bg-indigo-500`
-const BTN_SECONDARY  = `${BTN} text-gray-400 hover:text-white`
-const BTN_DANGER     = `${BTN} bg-rose-600 text-white hover:bg-rose-500`
-const BTN_DANGER_OUT = `${BTN} border border-rose-700/60 bg-rose-900/30 text-rose-100 hover:bg-rose-900/50`
 
 // ── Toast ────────────────────────────────────────────────────────────────────
 
@@ -66,89 +48,10 @@ function Toast({ message, onDone }: { message: string; onDone: () => void }) {
   )
 }
 
-// ── Cancel Subscription Modal ────────────────────────────────────────────────
-
-function CancelSubscriptionModal({
-  currentPeriodEnd,
-  onClose,
-}: {
-  currentPeriodEnd: string | null
-  onClose: (reason: 'dismissed' | 'submitted') => void
-}) {
-  const dialogRef = useRef<HTMLDialogElement>(null)
-  const [state, action, pending] = useActionState(cancelSubscription, null)
-
-  useEffect(() => { dialogRef.current?.showModal() }, [])
-  useEffect(() => { if (state?.status === 'success') onClose('submitted') }, [state, onClose])
-
-  const endCopy = currentPeriodEnd
-    ? `on ${new Date(currentPeriodEnd).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}`
-    : 'at the end of your current billing period'
-
-  return (
-    <dialog
-      ref={dialogRef}
-      onClose={() => onClose('dismissed')}
-      className="m-auto w-full max-w-md rounded-xl border border-rose-900/60 bg-rose-950/20 p-6 text-white shadow-2xl backdrop:bg-black/70"
-    >
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
-          <ShieldAlert className="w-5 h-5 text-rose-400" />
-          <h2 className="text-base font-semibold text-rose-100">Cancel Subscription</h2>
-        </div>
-        <button type="button" onClick={() => dialogRef.current?.close()} className="text-gray-400 hover:text-white">
-          <X className="w-5 h-5" />
-        </button>
-      </div>
-
-      <div className="space-y-3 text-sm text-rose-100/90">
-        <p>
-          Your Organization will remain <span className="font-semibold text-white">Active</span> until your subscription ends {endCopy}.
-        </p>
-        <p className="text-xs text-rose-200/70">
-          After that, signal capture will stop and the AI agent will be paused.
-          Team members keep read-only access to existing leads. You can
-          reactivate at any time before the period ends.
-        </p>
-      </div>
-
-      <form action={action} className="mt-5 space-y-4">
-        {state?.status === 'error' && (
-          <p className="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2">
-            {state.error}
-          </p>
-        )}
-
-        <div className="flex justify-end gap-3">
-          <button type="button" onClick={() => dialogRef.current?.close()} className={BTN_SECONDARY}>
-            Keep subscription
-          </button>
-          <button type="submit" disabled={pending} className={BTN_DANGER}>
-            {pending ? 'Cancelling…' : 'Yes, cancel at period end'}
-          </button>
-        </div>
-      </form>
-    </dialog>
-  )
-}
-
 // ── Lead Support panel ───────────────────────────────────────────────────────
 
 export default function LeadSupportTab({ state: initialState }: { state: LeadSupportState }) {
-  const [reactivateState, reactivateAction, reactivatePending] = useActionState(reactivateSubscription, null)
-
-  const [showCancel, setShowCancel] = useState(false)
-  const [toast,      setToast]      = useState<string | null>(null)
-
-  useEffect(() => {
-    if (reactivateState?.status === 'success' && reactivateState.message) setToast(reactivateState.message)
-  }, [reactivateState])
-
-  const periodEndCopy = initialState.current_period_end
-    ? new Date(initialState.current_period_end).toLocaleDateString(undefined, {
-        year: 'numeric', month: 'long', day: 'numeric',
-      })
-    : null
+  const [toast, setToast] = useState<string | null>(null)
 
   return (
     <div className="space-y-6">
@@ -208,59 +111,6 @@ export default function LeadSupportTab({ state: initialState }: { state: LeadSup
 
       {/* Lead Questionnaire */}
       <LeadQuestionManager initial={initialState.custom_lead_questions} />
-
-      {/* Subscription Management (Danger Zone) */}
-      <div className="rounded-xl border border-rose-900/60 bg-rose-950/20 p-5 space-y-4">
-        <div className="flex items-center gap-2">
-          <ShieldAlert className="w-4 h-4 text-rose-400" />
-          <h3 className="text-sm font-semibold text-rose-200">Subscription Management</h3>
-        </div>
-
-        {initialState.cancel_at_period_end ? (
-          <>
-            <div className="flex items-start gap-2 rounded-md border border-amber-900/60 bg-amber-950/30 px-3 py-2 text-xs text-amber-200">
-              <Clock className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-              <span>
-                Your subscription is scheduled to cancel
-                {periodEndCopy ? <> on <span className="font-semibold">{periodEndCopy}</span></> : ' at the end of the current billing period'}.
-                Your Organization remains Active until then.
-              </span>
-            </div>
-
-            <form action={reactivateAction}>
-              <button type="submit" disabled={reactivatePending} className={`${BTN_PRIMARY}`}>
-                <RotateCcw className="w-4 h-4" />
-                {reactivatePending ? 'Reactivating…' : 'Reactivate subscription'}
-              </button>
-              {reactivateState?.status === 'error' && (
-                <p className="mt-2 text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2">
-                  {reactivateState.error}
-                </p>
-              )}
-            </form>
-          </>
-        ) : (
-          <>
-            <p className="text-xs text-rose-300/80">
-              Cancelling pauses AI signal capture at the end of your current billing period. Your Organization and all existing leads are preserved.
-            </p>
-            <button type="button" onClick={() => setShowCancel(true)} className={BTN_DANGER_OUT}>
-              <ShieldAlert className="w-4 h-4" />
-              Cancel Subscription
-            </button>
-          </>
-        )}
-      </div>
-
-      {showCancel && (
-        <CancelSubscriptionModal
-          currentPeriodEnd={initialState.current_period_end}
-          onClose={(reason) => {
-            setShowCancel(false)
-            if (reason === 'submitted') setToast('Subscription will cancel at period end.')
-          }}
-        />
-      )}
 
       {toast && <Toast message={toast} onDone={() => setToast(null)} />}
     </div>

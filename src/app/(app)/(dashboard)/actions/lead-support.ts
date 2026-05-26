@@ -93,47 +93,6 @@ export async function setAiListeningEnabled(_prev: State, formData: FormData): P
   }
 }
 
-/**
- * Tenant-initiated cancellation. Pre-Stripe behavior: we flip
- * cancel_at_period_end=true and leave the subscription *Active* until
- * current_period_end (when that column is populated by the Stripe webhook
- * later). No data is destroyed — re-activating is a matching flag flip.
- */
-export async function cancelSubscription(_prev: State, _formData: FormData): Promise<State> {
-  const supabase = await createClient()
-  const guard = await requireOrgAdmin(supabase)
-  if (!guard.ok) return { status: 'error', error: guard.error }
-
-  const { error } = await supabase
-    .from('organizations')
-    .update({ cancel_at_period_end: true })
-    .eq('id', guard.orgId)
-
-  if (error) return { status: 'error', error: error.message }
-
-  revalidatePath('/[orgSlug]/settings/team', 'page')
-  return {
-    status:  'success',
-    message: 'Subscription will cancel at the end of the current billing period.',
-  }
-}
-
-export async function reactivateSubscription(_prev: State, _formData: FormData): Promise<State> {
-  const supabase = await createClient()
-  const guard = await requireOrgAdmin(supabase)
-  if (!guard.ok) return { status: 'error', error: guard.error }
-
-  const { error } = await supabase
-    .from('organizations')
-    .update({ cancel_at_period_end: false })
-    .eq('id', guard.orgId)
-
-  if (error) return { status: 'error', error: error.message }
-
-  revalidatePath('/[orgSlug]/settings/team', 'page')
-  return { status: 'success', message: 'Subscription reactivated.' }
-}
-
 const MIN_PACKAGE = 10
 const MAX_PACKAGE = 10_000
 

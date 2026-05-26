@@ -282,6 +282,7 @@ export default function CalendarCore({ appointments, members, customers, leads, 
         ref={editRef}
         members={members}
         customers={customers}
+        leads={leads}
       />
       <DayOverviewModal
         ref={overviewRef}
