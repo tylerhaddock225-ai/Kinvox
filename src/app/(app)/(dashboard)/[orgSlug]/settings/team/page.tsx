@@ -75,7 +75,7 @@ export default async function TeamSettingsPage({
       .order('name'),
     supabase
       .from('organizations')
-      .select('inbound_email_tag, inbound_lead_email_tag, verified_support_email, verified_support_email_confirmed_at, verified_lead_email, verified_lead_email_confirmed_at, ai_listening_enabled, cancel_at_period_end, current_period_end, custom_lead_questions, signal_engagement_mode, vertical, lead_magnet_settings, lead_magnet_slug')
+      .select('inbound_email_tag, inbound_lead_email_tag, verified_support_email, verified_support_email_confirmed_at, verified_lead_email, verified_lead_email_confirmed_at, ai_listening_enabled, custom_lead_questions, signal_engagement_mode, vertical, lead_magnet_settings, lead_magnet_slug')
       .eq('id', orgId)
       .single(),
     supabase
@@ -152,13 +152,8 @@ export default async function TeamSettingsPage({
     : []
 
   const leadSupport = {
-    ai_listening_enabled:             orgRes.data?.ai_listening_enabled             ?? true,
-    balance:                          creditsRow?.balance                           ?? 0,
-    cancel_at_period_end:             orgRes.data?.cancel_at_period_end             ?? false,
-    current_period_end:               orgRes.data?.current_period_end               ?? null,
     custom_lead_questions:            normalizeLeadQuestions(orgRes.data?.custom_lead_questions),
     lead_magnet_features:             leadMagnetFeatures,
-    signal_engagement_mode:           (orgRes.data?.signal_engagement_mode ?? 'ai_draft') as 'ai_draft' | 'manual',
     verified_lead_email:              orgRes.data?.verified_lead_email              ?? null,
     verified_lead_email_confirmed_at: orgRes.data?.verified_lead_email_confirmed_at ?? null,
     inbound_lead_email_address:       leadInboundAddress,
@@ -166,11 +161,18 @@ export default async function TeamSettingsPage({
     landing_base:                     LANDING_BASE,
   }
 
+  // Workstream I: ai_listening_enabled, signal_engagement_mode, and balance
+  // moved here from leadSupport so the Signal Settings tab owns the full
+  // signal-capture control set (toggle + reply mode + credit balance +
+  // hunting profile).
   const signalSettings = {
-    orgVertical:     orgRes.data?.vertical                  ?? null,
-    initialAddress:  signalConfigRes.data?.office_address   ?? null,
-    initialRadius:   signalConfigRes.data?.radius_miles     ?? 25,
-    initialKeywords: signalConfigRes.data?.keywords         ?? [],
+    ai_listening_enabled:   orgRes.data?.ai_listening_enabled                       ?? true,
+    signal_engagement_mode: (orgRes.data?.signal_engagement_mode ?? 'ai_draft')     as 'ai_draft' | 'manual',
+    balance:                creditsRow?.balance                                     ?? 0,
+    orgVertical:            orgRes.data?.vertical                                   ?? null,
+    initialAddress:         signalConfigRes.data?.office_address                    ?? null,
+    initialRadius:          signalConfigRes.data?.radius_miles                      ?? 25,
+    initialKeywords:        signalConfigRes.data?.keywords                          ?? [],
   }
 
   const credentials: CredentialRow[] = credsRes.data ?? []

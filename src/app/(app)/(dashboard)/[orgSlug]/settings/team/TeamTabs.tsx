@@ -17,7 +17,7 @@ import {
 import EmailVerificationPanel from '@/components/settings/EmailVerificationPanel'
 import InboundAddressRow from '@/components/settings/InboundAddressRow'
 import LeadSupportTab, { type LeadSupportState } from '@/components/settings/lead-support-tab'
-import HuntingProfileForm from './HuntingProfileForm'
+import SignalSettingsTab, { type SignalSettingsState } from '@/components/settings/signal-settings-tab'
 import SocialConnectionsTab, {
   type CredentialRow,
   type SocialBannerState,
@@ -489,7 +489,7 @@ function SupportSettingsPanel({ settings }: { settings: OrgSettings }) {
 const TABS = [
   { id: 'users',        label: 'User Administration' },
   { id: 'support',      label: 'Support Settings'    },
-  { id: 'lead-support', label: 'Lead Support'        },
+  { id: 'lead-support', label: 'Lead Settings'       },
   { id: 'signal',       label: 'Signal Settings'     },
   { id: 'social',       label: 'Social Connections'  },
 ] as const
@@ -502,12 +502,7 @@ function isTabId(value: string | undefined): value is TabId {
   return value !== undefined && TAB_IDS.has(value as TabId)
 }
 
-export type SignalSettingsState = {
-  orgVertical:     string | null
-  initialAddress:  string | null
-  initialRadius:   number
-  initialKeywords: string[]
-}
+export type { SignalSettingsState }
 
 export default function TeamTabs({
   members,
@@ -583,12 +578,7 @@ export default function TeamTabs({
       )}
 
       {activeTab === 'signal' && (
-        <HuntingProfileForm
-          orgVertical={signalSettings.orgVertical}
-          initialAddress={signalSettings.initialAddress}
-          initialRadius={signalSettings.initialRadius}
-          initialKeywords={signalSettings.initialKeywords}
-        />
+        <SignalSettingsTab state={signalSettings} />
       )}
 
       {activeTab === 'social' && (
