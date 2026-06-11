@@ -66,7 +66,7 @@ type AffectedTab    = typeof AFFECTED_TABS[number]
 // HQ support tickets live in the merchant's own org (so insert RLS passes
 // without bypass) and are flagged is_platform_support=true. Merchant-facing
 // ticket queries filter the flag out; Admin HQ's /hq/tickets surfaces
-// them via ?scope=platform.
+// them by filtering is_platform_support=true.
 export async function createHQSupportTicket(_prev: State, formData: FormData): Promise<State> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()

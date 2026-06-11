@@ -49,6 +49,7 @@ export async function adminGlobalSearch(query: string): Promise<AdminSearchHit> 
     .from('tickets')
     .select('id')
     .ilike('display_id', q)
+    .eq('is_platform_support', true)
     .is('deleted_at', null)
     .maybeSingle()
 

@@ -52,6 +52,8 @@ export default async function AdminTicketsPage({
   let listingQ = supabase
     .from('tickets')
     .select('id, display_id, subject, status, priority, created_at, organization_id, is_platform_support, hq_category, organizations(name)')
+    .eq('is_platform_support', true)
+    .is('deleted_at', null)
     .order('created_at', { ascending: false })
     .limit(200)
 
@@ -74,8 +76,8 @@ export default async function AdminTicketsPage({
         organizations:        { name: string } | null
       }>
     >(),
-    supabase.from('tickets').select('id', { count: 'exact', head: true }).in('status', ACTIVE_STATUSES),
-    supabase.from('tickets').select('id', { count: 'exact', head: true }).eq('status', 'closed'),
+    supabase.from('tickets').select('id', { count: 'exact', head: true }).eq('is_platform_support', true).is('deleted_at', null).in('status', ACTIVE_STATUSES),
+    supabase.from('tickets').select('id', { count: 'exact', head: true }).eq('is_platform_support', true).is('deleted_at', null).eq('status', 'closed'),
   ])
 
   const tickets = listingRes.data

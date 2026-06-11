@@ -50,7 +50,7 @@ export default async function HQTicketDetailPage({ params }: { params: Promise<{
     .is('deleted_at', null)
     .maybeSingle()
 
-  if (!ticketData) notFound()
+  if (!ticketData || ticketData.is_platform_support !== true) notFound()
 
   const ticket = ticketData as unknown as Pick<
     Ticket,
@@ -70,7 +70,7 @@ export default async function HQTicketDetailPage({ params }: { params: Promise<{
     <div className="max-w-4xl mx-auto space-y-6">
       <div>
         <Link
-          href={isPlatform ? '/hq/tickets?scope=platform' : '/hq/tickets'}
+          href="/hq/tickets"
           className="inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-300 transition-colors"
         >
           <ArrowLeft className="w-3.5 h-3.5" />
