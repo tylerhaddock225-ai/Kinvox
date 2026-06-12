@@ -4,6 +4,11 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { revalidatePath } from 'next/cache'
 import { PERMISSION_KEYS, type Permissions } from '@/lib/permissions'
+import { mintToken, ttlFromNow, TTL } from '@/lib/auth/tokens'
+import { sendOrgTransactionalEmail } from '@/lib/email/send-org-email'
+import { renderTeamInviteEmail } from '@/lib/email/templates/team-invite'
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 export type TeamActionState =
   | { status: 'success' }
@@ -19,12 +24,17 @@ async function requireAdmin() {
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('organization_id, role')
+    .select('organization_id, role, full_name')
     .eq('id', user.id)
     .single()
 
   if (!profile?.organization_id || profile.role !== 'admin') return null
-  return { supabase, orgId: profile.organization_id }
+  return {
+    supabase,
+    orgId:       profile.organization_id,
+    userId:      user.id,
+    inviterName: profile.full_name ?? null,
+  }
 }
 
 // ── Members ──────────────────────────────────────────────────────────────────
@@ -36,27 +46,111 @@ export async function inviteMember(
   const ctx = await requireAdmin()
   if (!ctx) return { status: 'error', error: 'Unauthorized' }
 
-  const email    = (formData.get('email') as string).trim().toLowerCase()
-  const fullName = ((formData.get('full_name') as string) ?? '').trim() || null
+  const email    = String(formData.get('email') ?? '').trim().toLowerCase()
+  const fullName = String(formData.get('full_name') ?? '').trim() || null
   const roleId   = (formData.get('role_id') as string) || null
 
-  if (!email) return { status: 'error', error: 'Email is required' }
+  if (!EMAIL_RE.test(email)) return { status: 'error', error: 'Invalid email address' }
 
   const admin = createAdminClient()
 
-  const { data, error } = await admin.auth.admin.inviteUserByEmail(email, {
-    data: { full_name: fullName ?? '' },
-  })
-  if (error) return { status: 'error', error: error.message }
+  // Role name for the email template. Roles are RLS-readable by org members,
+  // so the SSR client is fine. Tolerate a missing/renamed role.
+  let roleName: string | null = null
+  if (roleId) {
+    const { data: role } = await ctx.supabase
+      .from('roles')
+      .select('name')
+      .eq('id', roleId)
+      .maybeSingle()
+    roleName = role?.name ?? null
+  }
 
-  // Profile is auto-created by the handle_new_user trigger.
-  // Assign them to this org with the chosen custom role.
-  await admin.from('profiles').update({
+  // ── Duplicate-member pre-flight ──────────────────────────────────────────
+  // auth.users isn't reachable via PostgREST, so resolve email → user through
+  // the GoTrue admin API (same pattern as api/auth/reset-password), then check
+  // org membership on profiles.
+  const { data: userList } = await admin.auth.admin.listUsers({ perPage: 1000 })
+  const existingUser = userList?.users.find(u => u.email?.toLowerCase() === email)
+  if (existingUser) {
+    const { data: memberProfile } = await admin
+      .from('profiles')
+      .select('organization_id')
+      .eq('id', existingUser.id)
+      .maybeSingle()
+    if (memberProfile?.organization_id === ctx.orgId) {
+      return { status: 'error', error: 'This email is already a member of the organization' }
+    }
+  }
+
+  // Active (un-accepted) invite already pending for this org + email?
+  const { data: pending } = await admin
+    .from('member_invitations')
+    .select('id')
+    .eq('organization_id', ctx.orgId)
+    .eq('email', email)
+    .is('accepted_at', null)
+    .maybeSingle()
+  if (pending) {
+    return { status: 'error', error: 'An invitation is already pending for this email' }
+  }
+
+  // ── Mint + persist the invitation ────────────────────────────────────────
+  const { raw: token, hash: tokenHash } = mintToken()
+  const expiresAt = ttlFromNow(TTL.MEMBER_INVITE)
+
+  const { error: insErr } = await admin.from('member_invitations').insert({
     organization_id: ctx.orgId,
-    full_name: fullName,
-    role: 'agent',
-    role_id: roleId,
-  }).eq('id', data.user.id)
+    email,
+    full_name:       fullName,
+    role_id:         roleId,
+    token_hash:      tokenHash,
+    expires_at:      expiresAt,
+    invited_by:      ctx.userId,
+  })
+  if (insErr) return { status: 'error', error: insErr.message }
+
+  // ── Branded dispatch via sendOrgTransactionalEmail ───────────────────────
+  const { data: org } = await admin
+    .from('organizations')
+    .select('id, name, verified_support_email, verified_support_email_confirmed_at, verified_lead_email, verified_lead_email_confirmed_at')
+    .eq('id', ctx.orgId)
+    .single()
+  if (!org) return { status: 'error', error: 'Organization not found' }
+
+  // Same fallback pattern as claim.ts — a shared getAppBaseUrl() helper is a
+  // backlog item, intentionally not extracted here.
+  const appBase   = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.kinvoxtech.com'
+  const inviteUrl = `${appBase}/invite/${token}`
+
+  const { subject, htmlBody, textBody } = renderTeamInviteEmail({
+    orgName:     org.name,
+    inviterName: ctx.inviterName,
+    roleName,
+    inviteUrl,
+    expiresAt:   new Date(expiresAt),
+  })
+
+  const result = await sendOrgTransactionalEmail({
+    org: {
+      id:                                  org.id,
+      name:                                org.name,
+      verified_support_email:              org.verified_support_email,
+      verified_support_email_confirmed_at: org.verified_support_email_confirmed_at,
+      verified_lead_email:                 org.verified_lead_email,
+      verified_lead_email_confirmed_at:    org.verified_lead_email_confirmed_at,
+    },
+    to:       [email],
+    subject,
+    htmlBody,
+    textBody,
+    tag:      'team-invite',
+  })
+  if (!result.ok) {
+    // Don't roll back the invitation row — the user can resend; the dead row
+    // expires naturally.
+    return { status: 'error', error: result.error }
+  }
 
   revalidatePath('/[orgSlug]/settings/team', 'page')
   return { status: 'success' }
