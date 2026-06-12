@@ -15,10 +15,16 @@ export type RecipientRow = {
   display_name: string | null
 }
 
+export type OrgMember = {
+  id:        string
+  full_name: string | null
+}
+
 interface Props {
-  ticketId:   string
-  recipients: RecipientRow[]
-  mode:       'org' | 'hq'
+  ticketId:    string
+  recipients:  RecipientRow[]
+  mode:        'org' | 'hq'
+  orgMembers?: OrgMember[]
 }
 
 function recipientLabel(r: RecipientRow): string {
@@ -56,15 +62,20 @@ function RecipientList({
   kind,
   rows,
   mode,
+  orgMembers,
 }: {
-  ticketId: string
-  kind:     'to' | 'cc'
-  rows:     RecipientRow[]
-  mode:     'org' | 'hq'
+  ticketId:   string
+  kind:       'to' | 'cc'
+  rows:       RecipientRow[]
+  mode:       'org' | 'hq'
+  orgMembers: OrgMember[]
 }) {
-  const [emailVal, setEmailVal] = useState('')
-  const [error,    setError]    = useState<string | null>(null)
+  const [emailVal,       setEmailVal]       = useState('')
+  const [selectedUserId, setSelectedUserId] = useState('')
+  const [error,          setError]          = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
+
+  const noMembers = orgMembers.length === 0
 
   function handleAdd() {
     setError(null)
@@ -74,6 +85,19 @@ function RecipientList({
       const res = await addTicketRecipient(ticketId, kind, { mode: 'email', email: value })
       if (res.status === 'success') {
         setEmailVal('')
+      } else {
+        setError(res.error)
+      }
+    })
+  }
+
+  function handleAddUser() {
+    setError(null)
+    if (!selectedUserId) return
+    startTransition(async () => {
+      const res = await addTicketRecipient(ticketId, kind, { mode: 'user', userId: selectedUserId })
+      if (res.status === 'success') {
+        setSelectedUserId('')
       } else {
         setError(res.error)
       }
@@ -136,21 +160,78 @@ function RecipientList({
           {error && <p className="text-xs text-red-400">{error}</p>}
         </div>
       ) : (
-        <p className="text-xs text-gray-500 italic">HQ picker coming in Stage 3</p>
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <select
+              value={selectedUserId}
+              onChange={e => setSelectedUserId(e.target.value)}
+              disabled={isPending || noMembers}
+              className="flex-1 rounded-lg border border-pvx-border bg-gray-900 px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-violet-500 disabled:opacity-50"
+            >
+              {noMembers ? (
+                <option value="">No team members yet</option>
+              ) : (
+                <>
+                  <option value="">Select team member…</option>
+                  {orgMembers.map(m => (
+                    <option key={m.id} value={m.id}>
+                      {m.full_name || '(no name)'}
+                    </option>
+                  ))}
+                </>
+              )}
+            </select>
+            <button
+              type="button"
+              onClick={handleAddUser}
+              disabled={isPending || selectedUserId === ''}
+              className="px-3 py-1.5 text-xs font-medium rounded-lg bg-violet-600 text-white hover:bg-violet-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {isPending ? 'Adding…' : 'Add'}
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <input
+              type="email"
+              value={emailVal}
+              onChange={e => setEmailVal(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  handleAdd()
+                }
+              }}
+              disabled={isPending}
+              placeholder="email@example.com"
+              className="flex-1 rounded-lg border border-pvx-border bg-gray-900 px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-violet-500 disabled:opacity-50"
+            />
+            <button
+              type="button"
+              onClick={handleAdd}
+              disabled={isPending || emailVal.trim().length === 0}
+              className="px-3 py-1.5 text-xs font-medium rounded-lg bg-violet-600 text-white hover:bg-violet-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {isPending ? 'Adding…' : 'Add'}
+            </button>
+          </div>
+
+          {error && <p className="text-xs text-red-400">{error}</p>}
+        </div>
       )}
     </div>
   )
 }
 
-export default function TicketRecipientsSection({ ticketId, recipients, mode }: Props) {
+export default function TicketRecipientsSection({ ticketId, recipients, mode, orgMembers = [] }: Props) {
   const toRows = recipients.filter(r => r.kind === 'to')
   const ccRows = recipients.filter(r => r.kind === 'cc')
 
   return (
     <section className="rounded-xl border border-pvx-border bg-pvx-surface/50 p-4 space-y-4">
       <h2 className="text-sm font-semibold text-gray-300">Recipients</h2>
-      <RecipientList ticketId={ticketId} kind="to" rows={toRows} mode={mode} />
-      <RecipientList ticketId={ticketId} kind="cc" rows={ccRows} mode={mode} />
+      <RecipientList ticketId={ticketId} kind="to" rows={toRows} mode={mode} orgMembers={orgMembers} />
+      <RecipientList ticketId={ticketId} kind="cc" rows={ccRows} mode={mode} orgMembers={orgMembers} />
     </section>
   )
 }
