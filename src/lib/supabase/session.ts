@@ -105,7 +105,10 @@ export async function updateSession(request: NextRequest) {
   // Claim landing is public-facing: unauthenticated visitors see a
   // "Sign in to claim" CTA, signed-in users see the confirmation UI.
   const isClaim      = pathname.startsWith('/claim/')
-  const isPublic     = isAuthRoute || isWebhook || isAuthApi || isLeadMagnet || isPublicApi || isClaim || pathname.startsWith('/_next') || pathname === '/favicon.ico'
+  // Invite landing is public-facing: an unauthenticated invitee resolves the
+  // token, sets a password, and is auto-signed-in (mirrors /claim/).
+  const isInvite     = pathname.startsWith('/invite/')
+  const isPublic     = isAuthRoute || isWebhook || isAuthApi || isLeadMagnet || isPublicApi || isClaim || isInvite || pathname.startsWith('/_next') || pathname === '/favicon.ico'
 
   // ── Gate 0: login-first ────────────────────────────────────
   // Every protected route bounces unauthenticated requests to /login.
