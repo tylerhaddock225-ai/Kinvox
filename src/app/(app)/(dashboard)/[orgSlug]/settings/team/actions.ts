@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { resolveEffectiveOrgId, requireTenantAdmin } from '@/lib/impersonation'
 import { revalidatePath } from 'next/cache'
 import { PERMISSION_KEYS, type Permissions } from '@/lib/permissions'
 import { mintToken, ttlFromNow, TTL } from '@/lib/auth/tokens'
@@ -17,23 +18,38 @@ export type TeamActionState =
 
 // ── Shared auth helper ───────────────────────────────────────────────────────
 
+// Impersonation contract (Hotfix #2 class — mirrors actions/appointments.ts):
+// every write in this file targets the EFFECTIVE org, never the caller's own
+// profile.organization_id. An HQ admin "acting as" a tenant (via the
+// kinvox_impersonate_id cookie → resolveEffectiveOrgId) operates on the
+// impersonated org; requireTenantAdmin() grants access on the impersonating
+// branch and only enforces role === 'admin' when the caller is acting as
+// themselves. Reading profile.organization_id directly here was the bug that
+// misfiled invites/roles into the HQ admin's own org.
 async function requireAdmin() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
 
+  const orgId = await resolveEffectiveOrgId(supabase, user.id)
+  if (!orgId) return null
+
+  const gate = await requireTenantAdmin(supabase, user.id, orgId)
+  if (!gate.ok) return null
+
+  // Inviter display name for the team-invite email template. Fetched
+  // separately because requireTenantAdmin returns only a pass/fail.
   const { data: profile } = await supabase
     .from('profiles')
-    .select('organization_id, role, full_name')
+    .select('full_name')
     .eq('id', user.id)
-    .single()
+    .single<{ full_name: string | null }>()
 
-  if (!profile?.organization_id || profile.role !== 'admin') return null
   return {
     supabase,
-    orgId:       profile.organization_id,
+    orgId,
     userId:      user.id,
-    inviterName: profile.full_name ?? null,
+    inviterName: profile?.full_name ?? null,
   }
 }
 
@@ -224,11 +240,30 @@ export async function updateRole(
   return { status: 'success' }
 }
 
+// deleteRole stays a `void` server action because RolesPanel binds it via a
+// plain `<form action={deleteRole}>` (no useActionState), whose typing only
+// accepts a void/Promise<void> return. The system-role guard therefore blocks
+// the delete by returning early rather than surfacing a TeamActionState the
+// form could not consume anyway. See Stage 1c report — spec deviation #1.
 export async function deleteRole(formData: FormData): Promise<void> {
   const ctx = await requireAdmin()
   if (!ctx) return
 
   const roleId = formData.get('role_id') as string
+
+  // System roles (e.g. the auto-provisioned "Org Admin") can have their
+  // permissions edited but never be deleted. updateRole intentionally stays
+  // open so a later stage can backfill new permission keys onto them.
+  const { data: target } = await ctx.supabase
+    .from('roles')
+    .select('is_system_role')
+    .eq('id', roleId)
+    .eq('organization_id', ctx.orgId)
+    .maybeSingle<{ is_system_role: boolean }>()
+  if (target?.is_system_role) {
+    console.warn(`[deleteRole] blocked delete of system role=${roleId} org=${ctx.orgId}`)
+    return
+  }
 
   // Unassign anyone using this role before deleting
   await ctx.supabase.from('profiles')

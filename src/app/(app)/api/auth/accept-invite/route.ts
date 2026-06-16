@@ -76,14 +76,28 @@ export async function PATCH(request: NextRequest) {
     userId = created.user.id
 
     // handle_new_user has created the profile with full_name from metadata;
-    // attach the org + role.
-    const { error: updErr } = await supabase
+    // attach the org + role. `.select().maybeSingle()` surfaces rows-affected:
+    // a bare UPDATE that matches zero rows returns no error, which would
+    // silently strand the user on /pending-invite. If the profile row isn't
+    // present yet, fall back to an INSERT (mirrors the existing-user branch).
+    const { data: updated, error: updErr } = await supabase
       .from('profiles')
       .update({ organization_id: row.organization_id, role: 'agent', role_id: row.role_id })
       .eq('id', userId)
+      .select('id')
+      .maybeSingle()
     if (updErr) {
       console.error(`${LOG} profile attach failed for ${userId}: ${updErr.message}`)
       return NextResponse.json({ error: updErr.message }, { status: 500 })
+    }
+    if (!updated) {
+      const { error: insErr } = await supabase
+        .from('profiles')
+        .insert({ id: userId, organization_id: row.organization_id, role: 'agent', role_id: row.role_id, full_name: fullName })
+      if (insErr) {
+        console.error(`${LOG} profile insert (new-user fallback) failed for ${userId}: ${insErr.message}`)
+        return NextResponse.json({ error: insErr.message }, { status: 500 })
+      }
     }
   } else {
     // ── Existing user ──────────────────────────────────────────────────────
