@@ -7,8 +7,11 @@
 // sendOrgTransactionalEmail, which derives the From address (org-branded with
 // Kinvox fallback) — so this template intentionally carries NO From branding.
 //
-// Visual: light-theme wrapper (shared appointment-template pattern) + the
-// green CTA button styling borrowed from the HQ claim email.
+// Visual: deliberately mirrors renderConversationReply (reply.ts) — the same
+// light wrapper, short conversational paragraphs, and an inline text link
+// (no green CTA pill, no "You've been invited" heading, no standalone raw
+// token URL). Aligning with the support-reply shape keeps invites out of the
+// Gmail content-classifier penalty box that the promotional CTA layout drew.
 
 const HTML_FONT_STACK =
   "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
@@ -37,20 +40,15 @@ ${inner}
 </html>`
 }
 
-// CTA button — green pill borrowed from hq/actions/claim.ts buildEmail so the
-// two invite surfaces stay visually consistent.
-function renderCtaButton(label: string, url: string): string {
-  return `<a href="${url}" style="display:inline-block;background:#059669;color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;padding:12px 22px;border-radius:10px;">${escapeHtml(label)}</a>`
-}
-
 export function renderTeamInviteEmail(params: {
-  orgName:     string
-  inviterName: string | null
-  roleName:    string | null
-  inviteUrl:   string
-  expiresAt:   Date
+  orgName:      string
+  inviterName:  string | null
+  roleName:     string | null
+  inviteUrl:    string
+  expiresAt:    Date
+  inviteeName?: string | null
 }): { subject: string; htmlBody: string; textBody: string } {
-  const { orgName, inviterName, roleName, inviteUrl, expiresAt } = params
+  const { orgName, inviterName, roleName, inviteUrl, expiresAt, inviteeName } = params
 
   const subject = `${orgName} invited you to join their team on Kinvox`
 
@@ -61,46 +59,44 @@ export function renderTeamInviteEmail(params: {
     timeZone:  'UTC',
   })} UTC`
 
-  const invitedLine = inviterName
-    ? `${inviterName} invited you to join ${orgName} on Kinvox.`
-    : `${orgName} invited you to join their team on Kinvox.`
+  // Greeting name: the invitee's name when known, else a neutral "there"
+  // (mirrors renderConversationReply's resolveGreetingName fallback).
+  const greetingName = inviteeName?.trim() || 'there'
+
+  // "<inviter> has invited you to join <org> as <role> on Kinvox." — a single
+  // conversational sentence rather than a heading + branded role block.
+  const invitedSentence =
+    `${inviterName ? `${inviterName} has` : `${orgName} has`} invited you to join ${orgName}${roleName ? ` as ${roleName}` : ''} on Kinvox.`
 
   // ── Plain text ──────────────────────────────────────────────────────────
-  const textLines: Array<string | null> = [
-    "You've been invited.",
+  const textBody = [
+    `Hi ${greetingName},`,
     '',
-    invitedLine,
-    roleName ? '' : null,
-    roleName ? `Your role: ${roleName}` : null,
+    invitedSentence,
     '',
-    'Accept the invitation using the link below:',
-    inviteUrl,
+    `To accept, please visit: ${inviteUrl}`,
     '',
-    `This invitation expires ${expiresLabel}.`,
+    `This invitation expires on ${expiresLabel}.`,
     '',
     '— The Kinvox team',
-  ]
-  const textBody = textLines.filter((l): l is string => l !== null).join('\n')
+  ].join('\n')
 
-  // ── HTML ────────────────────────────────────────────────────────────────
-  const orgSafe = escapeHtml(orgName)
-  const invitedLineHtml = inviterName
-    ? `<strong>${escapeHtml(inviterName)}</strong> invited you to join <strong>${orgSafe}</strong> on Kinvox.`
-    : `<strong>${orgSafe}</strong> invited you to join their team on Kinvox.`
+  // ── HTML (conversational shell) ──────────────────────────────────────────
+  const orgSafe   = escapeHtml(orgName)
+  const greetSafe = escapeHtml(greetingName)
+  const urlSafe   = escapeHtml(inviteUrl)
+  const invitedSentenceHtml =
+    `${inviterName ? `<strong>${escapeHtml(inviterName)}</strong> has` : `<strong>${orgSafe}</strong> has`} invited you to join <strong>${orgSafe}</strong>${roleName ? ` as ${escapeHtml(roleName)}` : ''} on Kinvox.`
 
-  const roleBlock = roleName
-    ? `<p style="margin:16px 0 0 0;">Your role: <strong>${escapeHtml(roleName)}</strong></p>`
-    : ''
-
+  // Inline link uses the raw URL as its own display text so the visible text
+  // matches the href — eliminates the display-text-≠-href phishing signal.
   const htmlInner = [
-    `<p style="font-size:18px;font-weight:600;margin:0 0 12px 0;">You've been invited</p>`,
-    `<p style="margin:0;">${invitedLineHtml}</p>`,
-    roleBlock,
-    `<p style="margin:24px 0 0 0;">${renderCtaButton('Accept invitation', inviteUrl)}</p>`,
-    `<p style="margin:20px 0 0 0;font-size:13px;color:#6b7280;">If the button doesn't work, paste this URL into your browser:<br><span style="word-break:break-all;color:#374151;">${escapeHtml(inviteUrl)}</span></p>`,
-    `<p style="margin:16px 0 0 0;font-size:13px;color:#6b7280;">This invitation expires ${escapeHtml(expiresLabel)}.</p>`,
-    `<p style="margin:24px 0 0 0;color:#6b7280;">— The Kinvox team</p>`,
-  ].filter(Boolean).join('\n')
+    `<p style="margin:0 0 12px;">Hi ${greetSafe},</p>`,
+    `<p style="margin:0 0 12px;">${invitedSentenceHtml}</p>`,
+    `<p style="margin:0 0 12px;">To accept, please visit: <a href="${urlSafe}">${urlSafe}</a></p>`,
+    `<p style="margin:0 0 12px;">This invitation expires on ${escapeHtml(expiresLabel)}.</p>`,
+    `<p style="margin:24px 0 0;">— The Kinvox team</p>`,
+  ].join('\n')
 
   return { subject, htmlBody: wrapHtmlDocument(subject, htmlInner), textBody }
 }

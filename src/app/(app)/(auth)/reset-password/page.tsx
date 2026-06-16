@@ -3,6 +3,7 @@
 import { Suspense, useState } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
+import PasswordInput from '@/components/PasswordInput'
 
 export default function ResetPasswordPage() {
   // useSearchParams() must live under a Suspense boundary or `next build`
@@ -94,11 +95,11 @@ function ResetPasswordForm() {
       <form action={handleSubmit} className="space-y-4">
         <div>
           <label className="block text-xs font-medium text-gray-400 mb-1.5">New password</label>
-          <input
+          <PasswordInput
             name="password"
-            type="password"
             required
             autoFocus
+            minLength={8}
             placeholder="••••••••"
             className="w-full rounded-lg bg-gray-800 border border-gray-700 text-white placeholder-gray-500 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
           />
@@ -106,10 +107,10 @@ function ResetPasswordForm() {
 
         <div>
           <label className="block text-xs font-medium text-gray-400 mb-1.5">Confirm password</label>
-          <input
+          <PasswordInput
             name="confirm_password"
-            type="password"
             required
+            minLength={8}
             placeholder="••••••••"
             className="w-full rounded-lg bg-gray-800 border border-gray-700 text-white placeholder-gray-500 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
           />

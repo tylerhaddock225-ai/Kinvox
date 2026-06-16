@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from 'react'
 import { createBrowserClient } from '@supabase/ssr'
+import PasswordInput from '@/components/PasswordInput'
 
 const INPUT =
   'w-full rounded-lg bg-gray-800 border border-gray-700 text-white placeholder-gray-500 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent'
@@ -103,10 +104,9 @@ export default function InviteAcceptForm({
 
         <div>
           <label className="block text-xs font-medium text-gray-400 mb-1.5">Password</label>
-          <input
+          <PasswordInput
             value={password}
             onChange={e => setPassword(e.target.value)}
-            type="password"
             required
             minLength={8}
             placeholder="••••••••"
@@ -116,11 +116,11 @@ export default function InviteAcceptForm({
 
         <div>
           <label className="block text-xs font-medium text-gray-400 mb-1.5">Confirm password</label>
-          <input
+          <PasswordInput
             value={confirm}
             onChange={e => setConfirm(e.target.value)}
-            type="password"
             required
+            minLength={8}
             placeholder="••••••••"
             className={INPUT}
           />

@@ -8,6 +8,7 @@ import { PERMISSION_KEYS, type Permissions } from '@/lib/permissions'
 import { mintToken, ttlFromNow, TTL } from '@/lib/auth/tokens'
 import { sendOrgTransactionalEmail } from '@/lib/email/send-org-email'
 import { renderTeamInviteEmail } from '@/lib/email/templates/team-invite'
+import { constructInboundEmailAddress } from '@/lib/email/inbound-address'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -115,21 +116,27 @@ export async function inviteMember(
   const { raw: token, hash: tokenHash } = mintToken()
   const expiresAt = ttlFromNow(TTL.MEMBER_INVITE)
 
-  const { error: insErr } = await admin.from('member_invitations').insert({
-    organization_id: ctx.orgId,
-    email,
-    full_name:       fullName,
-    role_id:         roleId,
-    token_hash:      tokenHash,
-    expires_at:      expiresAt,
-    invited_by:      ctx.userId,
-  })
-  if (insErr) return { status: 'error', error: insErr.message }
+  const { data: insertedInvite, error: insErr } = await admin
+    .from('member_invitations')
+    .insert({
+      organization_id: ctx.orgId,
+      email,
+      full_name:       fullName,
+      role_id:         roleId,
+      token_hash:      tokenHash,
+      expires_at:      expiresAt,
+      invited_by:      ctx.userId,
+    })
+    .select('id')
+    .single()
+  if (insErr || !insertedInvite) {
+    return { status: 'error', error: insErr?.message ?? 'Could not create invitation' }
+  }
 
   // ── Branded dispatch via sendOrgTransactionalEmail ───────────────────────
   const { data: org } = await admin
     .from('organizations')
-    .select('id, name, verified_support_email, verified_support_email_confirmed_at, verified_lead_email, verified_lead_email_confirmed_at')
+    .select('id, name, inbound_email_tag, verified_support_email, verified_support_email_confirmed_at, verified_lead_email, verified_lead_email_confirmed_at')
     .eq('id', ctx.orgId)
     .single()
   if (!org) return { status: 'error', error: 'Organization not found' }
@@ -147,6 +154,12 @@ export async function inviteMember(
     expiresAt:   new Date(expiresAt),
   })
 
+  // Align with the ticket/lead reply wire format: route replies through the
+  // org's plus-addressed support inbox, and carry synthetic threading headers
+  // so the invite presents as a conversation rather than a bare cold message.
+  const replyTo     = constructInboundEmailAddress(org.inbound_email_tag ?? null)
+  const threadingId = `<invite-${insertedInvite.id}@kinvox.com>`
+
   const result = await sendOrgTransactionalEmail({
     org: {
       id:                                  org.id,
@@ -161,6 +174,11 @@ export async function inviteMember(
     htmlBody,
     textBody,
     tag:      'team-invite',
+    replyTo:  replyTo ?? undefined,
+    headers: [
+      { Name: 'References',  Value: threadingId },
+      { Name: 'In-Reply-To', Value: threadingId },
+    ],
   })
   if (!result.ok) {
     // Don't roll back the invitation row — the user can resend; the dead row
