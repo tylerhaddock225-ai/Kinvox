@@ -2,9 +2,10 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { resolveEffectiveOrgId, requireTenantAdmin } from '@/lib/impersonation'
+import { resolveEffectiveOrgId } from '@/lib/impersonation'
 import { revalidatePath } from 'next/cache'
-import { PERMISSION_KEYS, type Permissions } from '@/lib/permissions'
+import { PERMISSION_KEYS, type Permissions, type OrgPermissionKey } from '@/lib/permissions'
+import { orgGate } from '@/lib/permissions/gates'
 import { mintToken, ttlFromNow, TTL } from '@/lib/auth/tokens'
 import { sendOrgTransactionalEmail } from '@/lib/email/send-org-email'
 import { renderTeamInviteEmail } from '@/lib/email/templates/team-invite'
@@ -19,15 +20,12 @@ export type TeamActionState =
 
 // ── Shared auth helper ───────────────────────────────────────────────────────
 
-// Impersonation contract (Hotfix #2 class — mirrors actions/appointments.ts):
-// every write in this file targets the EFFECTIVE org, never the caller's own
-// profile.organization_id. An HQ admin "acting as" a tenant (via the
-// kinvox_impersonate_id cookie → resolveEffectiveOrgId) operates on the
-// impersonated org; requireTenantAdmin() grants access on the impersonating
-// branch and only enforces role === 'admin' when the caller is acting as
-// themselves. Reading profile.organization_id directly here was the bug that
-// misfiled invites/roles into the HQ admin's own org.
-async function requireAdmin() {
+// Impersonation + permission contract: every write in this file targets the
+// EFFECTIVE org, never the caller's own profile.organization_id. orgGate grants
+// an HQ admin "acting as" a tenant (via the kinvox_impersonate_id cookie →
+// resolveEffectiveOrgId), otherwise checks the caller's permission bag for
+// `permissionKey` (with the K2 back-compat role === 'admin' fallback in place).
+async function requireAdmin(permissionKey: OrgPermissionKey) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
@@ -35,11 +33,11 @@ async function requireAdmin() {
   const orgId = await resolveEffectiveOrgId(supabase, user.id)
   if (!orgId) return null
 
-  const gate = await requireTenantAdmin(supabase, user.id, orgId)
+  const gate = await orgGate(supabase, user.id, orgId, permissionKey)
   if (!gate.ok) return null
 
   // Inviter display name for the team-invite email template. Fetched
-  // separately because requireTenantAdmin returns only a pass/fail.
+  // separately because orgGate returns only a pass/fail.
   const { data: profile } = await supabase
     .from('profiles')
     .select('full_name')
@@ -60,7 +58,7 @@ export async function inviteMember(
   _prev: TeamActionState,
   formData: FormData,
 ): Promise<TeamActionState> {
-  const ctx = await requireAdmin()
+  const ctx = await requireAdmin('manage_team')
   if (!ctx) return { status: 'error', error: 'Unauthorized' }
 
   const email    = String(formData.get('email') ?? '').trim().toLowerCase()
@@ -191,7 +189,7 @@ export async function inviteMember(
 }
 
 export async function updateMemberRole(formData: FormData): Promise<void> {
-  const ctx = await requireAdmin()
+  const ctx = await requireAdmin('manage_team')
   if (!ctx) return
 
   const memberId = formData.get('member_id') as string
@@ -218,7 +216,7 @@ export async function createRole(
   _prev: TeamActionState,
   formData: FormData,
 ): Promise<TeamActionState> {
-  const ctx = await requireAdmin()
+  const ctx = await requireAdmin('manage_roles')
   if (!ctx) return { status: 'error', error: 'Unauthorized' }
 
   const name = (formData.get('name') as string).trim()
@@ -240,7 +238,7 @@ export async function updateRole(
   _prev: TeamActionState,
   formData: FormData,
 ): Promise<TeamActionState> {
-  const ctx = await requireAdmin()
+  const ctx = await requireAdmin('manage_roles')
   if (!ctx) return { status: 'error', error: 'Unauthorized' }
 
   const roleId = formData.get('role_id') as string
@@ -264,7 +262,7 @@ export async function updateRole(
 // the delete by returning early rather than surfacing a TeamActionState the
 // form could not consume anyway. See Stage 1c report — spec deviation #1.
 export async function deleteRole(formData: FormData): Promise<void> {
-  const ctx = await requireAdmin()
+  const ctx = await requireAdmin('manage_roles')
   if (!ctx) return
 
   const roleId = formData.get('role_id') as string

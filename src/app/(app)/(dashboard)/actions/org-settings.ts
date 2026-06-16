@@ -1,7 +1,9 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
-import { resolveEffectiveOrgId, resolveImpersonation } from '@/lib/impersonation'
+import { resolveEffectiveOrgId } from '@/lib/impersonation'
+import { orgGate } from '@/lib/permissions/gates'
+import type { OrgPermissionKey } from '@/lib/permissions'
 import { revalidatePath } from 'next/cache'
 import { createSenderSignature, getSenderSignatureByEmail } from '@/lib/postmark-admin'
 import { buildInboundEmailTag } from '@/lib/org-utils'
@@ -25,42 +27,24 @@ export type RefreshLeadEmailResult =
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-// Org Owner OR a system 'admin' role can edit support settings — and an HQ
-// admin in "View as Merchant" mode always can, targeting the impersonated
-// tenant. Returns { ok: true, orgId } or { ok: false, error } so callers
-// can fail uniformly.
-async function requireSettingsAdmin(supabase: Awaited<ReturnType<typeof createClient>>) {
+// Permission gate for org email/inbound settings, routed through orgGate so HQ
+// admins impersonating a tenant pass, and otherwise the caller's permission bag
+// must grant `permissionKey` (K2 back-compat role='admin' fallback still applies
+// inside orgGate). Returns { ok: true, orgId } or { ok: false, error } so
+// callers can fail uniformly.
+async function requireSettingsAdmin(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  permissionKey: OrgPermissionKey,
+) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { ok: false as const, error: 'Not authenticated' }
 
   const orgId = await resolveEffectiveOrgId(supabase, user.id)
   if (!orgId) return { ok: false as const, error: 'No organization' }
 
-  // HQ admin impersonating has already cleared the is_admin_hq gate inside
-  // resolveImpersonation; skip the owner/admin check so they can edit on
-  // the tenant's behalf. Tenant callers still need owner or role='admin'.
-  const impersonation = await resolveImpersonation()
-  if (!impersonation.active) {
-    const [{ data: profile }, { data: org }] = await Promise.all([
-      supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', user.id)
-        .single<{ role: string | null }>(),
-      supabase
-        .from('organizations')
-        .select('owner_id')
-        .eq('id', orgId)
-        .single<{ owner_id: string }>(),
-    ])
-
-    if (!org) return { ok: false as const, error: 'Organization not found' }
-
-    const isOwner      = org.owner_id === user.id
-    const isSuperAdmin = profile?.role === 'admin'
-    if (!isOwner && !isSuperAdmin) {
-      return { ok: false as const, error: 'You do not have permission to change support settings' }
-    }
+  const gate = await orgGate(supabase, user.id, orgId, permissionKey)
+  if (!gate.ok) {
+    return { ok: false as const, error: 'You do not have permission to change these settings' }
   }
 
   return { ok: true as const, userId: user.id, orgId }
@@ -120,7 +104,7 @@ async function mintInboundTagIfMissing(
 export async function updateSupportEmail(_prev: State, formData: FormData): Promise<State> {
   const supabase = await createClient()
 
-  const guard = await requireSettingsAdmin(supabase)
+  const guard = await requireSettingsAdmin(supabase, 'manage_org_support_settings')
   if (!guard.ok) return { status: 'error', error: guard.error }
 
   const email = (formData.get('support_email') as string | null)?.trim() ?? ''
@@ -189,7 +173,7 @@ export async function updateSupportEmail(_prev: State, formData: FormData): Prom
 export async function initializeInboundEmail(_prev: State, _formData: FormData): Promise<State> {
   const supabase = await createClient()
 
-  const guard = await requireSettingsAdmin(supabase)
+  const guard = await requireSettingsAdmin(supabase, 'manage_org_support_settings')
   if (!guard.ok) return { status: 'error', error: guard.error }
 
   await mintInboundTagIfMissing(supabase, guard.orgId, 'support')
@@ -202,7 +186,7 @@ export async function initializeInboundEmail(_prev: State, _formData: FormData):
 export async function initializeLeadInboundEmail(_prev: State, _formData: FormData): Promise<State> {
   const supabase = await createClient()
 
-  const guard = await requireSettingsAdmin(supabase)
+  const guard = await requireSettingsAdmin(supabase, 'manage_lead_settings')
   if (!guard.ok) return { status: 'error', error: guard.error }
 
   await mintInboundTagIfMissing(supabase, guard.orgId, 'lead')
@@ -228,7 +212,7 @@ export async function initializeLeadInboundEmail(_prev: State, _formData: FormDa
 export async function refreshSupportEmailStatus(): Promise<RefreshSupportEmailResult> {
   const supabase = await createClient()
 
-  const guard = await requireSettingsAdmin(supabase)
+  const guard = await requireSettingsAdmin(supabase, 'manage_org_support_settings')
   if (!guard.ok) return { status: 'error', error: guard.error }
 
   const { data: org, error: readErr } = await supabase
@@ -294,7 +278,7 @@ export async function refreshSupportEmailStatus(): Promise<RefreshSupportEmailRe
 export async function updateLeadEmail(_prev: State, formData: FormData): Promise<State> {
   const supabase = await createClient()
 
-  const guard = await requireSettingsAdmin(supabase)
+  const guard = await requireSettingsAdmin(supabase, 'manage_lead_settings')
   if (!guard.ok) return { status: 'error', error: guard.error }
 
   const email = (formData.get('lead_email') as string | null)?.trim() ?? ''
@@ -353,7 +337,7 @@ export async function updateLeadEmail(_prev: State, formData: FormData): Promise
 export async function refreshLeadEmailStatus(): Promise<RefreshLeadEmailResult> {
   const supabase = await createClient()
 
-  const guard = await requireSettingsAdmin(supabase)
+  const guard = await requireSettingsAdmin(supabase, 'manage_lead_settings')
   if (!guard.ok) return { status: 'error', error: guard.error }
 
   const { data: org, error: readErr } = await supabase

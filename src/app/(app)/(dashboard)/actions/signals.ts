@@ -3,7 +3,8 @@
 import { cookies } from 'next/headers'
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
-import { resolveEffectiveOrgId, requireTenantAdmin } from '@/lib/impersonation'
+import { resolveEffectiveOrgId } from '@/lib/impersonation'
+import { orgGate } from '@/lib/permissions/gates'
 import { deductCredit } from '@/lib/credits'
 
 type State =
@@ -195,11 +196,8 @@ export async function saveHuntingProfile(
   const orgId = await resolveEffectiveOrgId(supabase, user.id)
   if (!orgId) return { status: 'error', error: 'No organization' }
 
-  const gate = await requireTenantAdmin(
-    supabase, user.id, orgId,
-    'Only org admins can edit the hunting profile',
-  )
-  if (!gate.ok) return { status: 'error', error: gate.error }
+  const gate = await orgGate(supabase, user.id, orgId, 'edit_signal_settings')
+  if (!gate.ok) return { status: 'error', error: 'Forbidden' }
 
   const officeAddressRaw = String(formData.get('office_address') ?? '').trim()
   const radiusRaw        = String(formData.get('radius_miles')   ?? '').trim()
