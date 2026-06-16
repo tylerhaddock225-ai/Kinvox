@@ -23,6 +23,17 @@ export const ORG_PERMISSION_KEYS = [
   { key: 'edit_customers',    label: 'Edit Customers'    },
   { key: 'view_analytics',    label: 'View Analytics'    },
   { key: 'manage_team',       label: 'Manage Team'       },
+  // ── Workstream K Stage 1 expansion ──────────────────────────────────────
+  { key: 'edit_appointments',           label: 'Edit Appointments'         },
+  { key: 'view_signals',                label: 'View Signals'              },
+  { key: 'manage_signals',              label: 'Act on Signals'            },
+  { key: 'edit_signal_settings',        label: 'Edit Signal Settings'      },
+  { key: 'manage_social_connections',   label: 'Manage Social Connections' },
+  { key: 'manage_lead_settings',        label: 'Manage Lead Settings'      },
+  { key: 'manage_org_support_settings', label: 'Manage Support Settings'   },
+  { key: 'manage_org_settings',         label: 'Manage Org Settings'       },
+  { key: 'manage_billing',              label: 'Manage Billing'            },
+  { key: 'manage_roles',                label: 'Manage Roles'              },
 ] as const
 
 export const HQ_PERMISSION_KEYS = [
@@ -31,6 +42,14 @@ export const HQ_PERMISSION_KEYS = [
   { key: 'manage_global_settings',   label: 'Manage Global Settings'   },
   { key: 'manage_platform_billing',  label: 'Manage Platform Billing'  },
   { key: 'manage_support_settings',  label: 'Manage Support Settings'  },
+  // ── Workstream K Stage 1 expansion ──────────────────────────────────────
+  { key: 'manage_organizations',     label: 'Manage Organizations'     },
+  { key: 'manage_org_integrations',  label: 'Manage Org Integrations'  },
+  { key: 'send_claim_invites',       label: 'Send Claim Invites'       },
+  { key: 'approve_applications',     label: 'Approve Applications'     },
+  { key: 'manage_platform_tickets',  label: 'Manage Platform Tickets'  },
+  { key: 'manage_ai_templates',      label: 'Manage AI Templates'      },
+  { key: 'manage_credits',           label: 'Manage Credits'           },
 ] as const
 
 export type OrgPermissionKey = typeof ORG_PERMISSION_KEYS[number]['key']
@@ -56,6 +75,18 @@ export const DEFAULT_ORG_PERMISSIONS: OrgPermissions = {
   edit_customers:    true,
   view_analytics:    true,
   manage_team:       false,
+  // ── Workstream K Stage 1 expansion (new custom-role defaults: views/edits
+  //    on, management gated — mirrors the manage_team:false convention) ──────
+  edit_appointments:           true,
+  view_signals:                true,
+  manage_signals:              false,
+  edit_signal_settings:        true,
+  manage_social_connections:   false,
+  manage_lead_settings:        false,
+  manage_org_support_settings: false,
+  manage_org_settings:         false,
+  manage_billing:              false,
+  manage_roles:                false,
 }
 
 export const DEFAULT_HQ_PERMISSIONS: HqPermissions = {
@@ -64,6 +95,14 @@ export const DEFAULT_HQ_PERMISSIONS: HqPermissions = {
   manage_global_settings:   false,
   manage_platform_billing:  false,
   manage_support_settings:  false,
+  // ── Workstream K Stage 1 expansion (conservative: all new HQ keys off) ────
+  manage_organizations:     false,
+  manage_org_integrations:  false,
+  send_claim_invites:       false,
+  approve_applications:     false,
+  manage_platform_tickets:  false,
+  manage_ai_templates:      false,
+  manage_credits:           false,
 }
 
 export const DEFAULT_PERMISSIONS = DEFAULT_ORG_PERMISSIONS
