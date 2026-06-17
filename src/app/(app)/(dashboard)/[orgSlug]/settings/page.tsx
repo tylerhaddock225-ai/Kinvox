@@ -19,12 +19,25 @@ export default async function SettingsPage() {
   if (!ctx) redirect('/login')
   if (!ctx.effectiveOrgId) redirect('/onboarding')
 
-  // Mirror /settings/team: HQ admin impersonating passes the is_admin_hq
-  // gate inside resolveImpersonation; a tenant user must have role='admin'.
-  if (!ctx.impersonation.active && ctx.profile.role !== 'admin') redirect('/')
+  const supabase = await createClient()
+
+  // K3 — the settings hub renders multiple tabs; reaching it requires ANY one
+  // of the settings-scoped permissions (tabs self-gate in a later stage).
+  // Preserves: impersonation grant (HQ admin acting as tenant), legacy
+  // role='admin' back-compat (covers platform_owner Tyler with role_id NULL),
+  // AND the new permission-bag check.
+  const { data: prof } = await supabase
+    .from('profiles')
+    .select('role_id, roles(permissions)')
+    .eq('id', ctx.user.id)
+    .maybeSingle<{ role_id: string | null; roles: { permissions: Record<string, boolean> | null } | null }>()
+  const permissions = prof?.roles?.permissions ?? null
+
+  const settingsKeys = ['manage_team','manage_roles','manage_org_support_settings','manage_lead_settings','edit_signal_settings','manage_social_connections','manage_org_settings','manage_billing'] as const
+  const hasAny = !!permissions && settingsKeys.some(k => permissions[k] === true)
+  if (!ctx.impersonation.active && !hasAny && ctx.profile.role !== 'admin') redirect('/')
 
   const effectiveOrgId = ctx.effectiveOrgId
-  const supabase = await createClient()
 
   const { data: org } = await supabase
     .from('organizations')
@@ -43,7 +56,7 @@ export default async function SettingsPage() {
       <div>
         <h1 className="text-2xl font-bold text-white">Organization Settings</h1>
         <p className="text-sm text-gray-400 mt-1">
-          Configure your organization's branding and where it listens for signals.
+          Configure your organization&apos;s branding and where it listens for signals.
         </p>
       </div>
 

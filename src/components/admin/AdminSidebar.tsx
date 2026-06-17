@@ -9,6 +9,9 @@ import { getRoleLabel, type SystemRole } from "@/lib/types/auth";
 
 interface AdminSidebarProps {
   systemRole: SystemRole;
+  /** Server-computed per-item flags (K3). Billing/Roles render only when set. */
+  canManageBilling: boolean;
+  canManageRoles: boolean;
 }
 
 type NavItem = {
@@ -27,18 +30,22 @@ const baseNav: NavItem[] = [
   { href: "/hq/ai-templates",  label: "AI Templates",  icon: Sparkles },
 ];
 
-const ownerOnlyNav: NavItem[] = [
-  { href: "/hq/billing",        label: "Billing", icon: CreditCard },
-  { href: "/hq/settings/roles", label: "Roles",   icon: ShieldCheck },
-];
+// K3: each of these gates on its own HQ permission key (flag computed
+// server-side in the HQ layout) instead of the prior platform_owner-only
+// branch. The other nav items stay open to any HQ staffer for now.
+const billingNav: NavItem = { href: "/hq/billing",        label: "Billing", icon: CreditCard };
+const rolesNav:   NavItem = { href: "/hq/settings/roles", label: "Roles",   icon: ShieldCheck };
 
 const ORG_DETAIL_RE = /^\/hq\/organizations\/([^/]+)\/?$/;
 
-export default function AdminSidebar({ systemRole }: AdminSidebarProps) {
+export default function AdminSidebar({ systemRole, canManageBilling, canManageRoles }: AdminSidebarProps) {
   const pathname = usePathname();
 
-  const navItems =
-    systemRole === "platform_owner" ? [...baseNav, ...ownerOnlyNav] : baseNav;
+  const navItems: NavItem[] = [
+    ...baseNav,
+    ...(canManageBilling ? [billingNav] : []),
+    ...(canManageRoles   ? [rolesNav]   : []),
+  ];
 
   const managingOrgId = pathname.match(ORG_DETAIL_RE)?.[1] ?? null;
 

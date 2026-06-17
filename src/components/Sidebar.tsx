@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { Users, UserCircle, CalendarCheck, Ticket, LayoutDashboard, Settings, Shield, LifeBuoy, LogOut, Sparkles } from "lucide-react";
 import Logo from "./Logo";
 import { logout } from "@/app/(app)/(auth)/actions";
+import { stopImpersonation } from "@/app/(app)/actions/impersonation";
 
 // Leads and Signals now live under the [orgSlug] route segment; their
 // hrefs are built at render time once we know the current slug. The
@@ -115,16 +116,21 @@ export default function Sidebar({
         )}
       </div>
 
-      {/* HQ return — only rendered for platform admins */}
+      {/* HQ return — only rendered for platform admins. Routed through the
+          stopImpersonation server action so it clears the impersonation cookie
+          (and redirects to /hq) instead of just navigating, which would leave
+          the cookie set and keep the HQ admin in the merchant's lens. */}
       {isHqAdmin && (
         <div className="px-3 pt-3">
-          <Link
-            href="/hq"
-            className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold uppercase tracking-wider text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 hover:bg-emerald-500/20 hover:text-emerald-200 hover:border-emerald-400 transition-colors"
-          >
-            <Shield className="w-3.5 h-3.5 shrink-0" />
-            Return to HQ
-          </Link>
+          <form action={stopImpersonation}>
+            <button
+              type="submit"
+              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold uppercase tracking-wider text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 hover:bg-emerald-500/20 hover:text-emerald-200 hover:border-emerald-400 transition-colors"
+            >
+              <Shield className="w-3.5 h-3.5 shrink-0" />
+              Return to HQ
+            </button>
+          </form>
         </div>
       )}
 

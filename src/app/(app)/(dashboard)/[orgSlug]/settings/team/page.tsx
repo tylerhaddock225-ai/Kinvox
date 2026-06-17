@@ -48,14 +48,22 @@ export default async function TeamSettingsPage({
   if (!ctx) redirect('/login')
   if (!ctx.effectiveOrgId) redirect('/onboarding')
 
-  // An HQ admin who has passed resolveImpersonation's is_admin_hq gate
-  // is treated as a tenant admin on the impersonated org for read
-  // access; tenant role is only enforced when the caller is acting as
-  // themselves.
-  if (!ctx.impersonation.active && ctx.profile.role !== 'admin') redirect('/')
+  const supabase = await createClient()
+
+  // K3 — the Team tab specifically requires manage_team OR manage_roles.
+  // An HQ admin who passed resolveImpersonation's is_admin_hq gate is treated
+  // as a tenant admin on the impersonated org; legacy role='admin' tenants
+  // (incl. platform_owner Tyler, role_id NULL) still pass via back-compat.
+  const { data: prof } = await supabase
+    .from('profiles')
+    .select('role_id, roles(permissions)')
+    .eq('id', ctx.user.id)
+    .maybeSingle<{ role_id: string | null; roles: { permissions: Record<string, boolean> | null } | null }>()
+  const permissions = prof?.roles?.permissions ?? null
+  const hasTeamAccess = !!permissions && (permissions.manage_team === true || permissions.manage_roles === true)
+  if (!ctx.impersonation.active && !hasTeamAccess && ctx.profile.role !== 'admin') redirect('/')
 
   const orgId    = ctx.effectiveOrgId
-  const supabase = await createClient()
 
   // Fetch members, roles, the org settings row, primary signal_configs,
   // and the social credentials in parallel. signal_configs backs the
