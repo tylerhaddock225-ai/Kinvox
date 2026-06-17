@@ -3,13 +3,21 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { hqGate } from '@/lib/permissions/gates'
+import type { HqPermissionKey } from '@/lib/permissions'
 
 type Plan = 'free' | 'pro' | 'enterprise'
 
-async function requireAdmin() {
+// K2b: routed through hqGate. The helper returns the Supabase client to all
+// six call sites (one of which — updateCaptureStatus — returns a discriminated
+// union), so on gate failure we preserve the helper's existing redirect
+// contract rather than returning a Forbidden object that callers can't consume.
+async function requireAdmin(permissionKey: HqPermissionKey) {
   const supabase = await createClient()
-  const { data: isAdmin } = await supabase.rpc('is_admin_hq')
-  if (!isAdmin) redirect('/login')
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
+  const gate = await hqGate(supabase, user.id, permissionKey)
+  if (!gate.ok) redirect('/login')
   return supabase
 }
 
@@ -20,7 +28,7 @@ export async function updateOrganization(formData: FormData) {
   const plan     = String(formData.get('plan')     ?? '').trim() as Plan
   if (!id || !name) redirect('/hq/organizations')
 
-  const supabase = await requireAdmin()
+  const supabase = await requireAdmin('manage_organizations')
   await supabase
     .from('organizations')
     .update({
@@ -40,7 +48,7 @@ export async function setOrgStatus(formData: FormData) {
   const status = String(formData.get('status') ?? '').trim()
   if (!id || !status) return
 
-  const supabase = await requireAdmin()
+  const supabase = await requireAdmin('manage_organizations')
   await supabase.from('organizations').update({ status }).eq('id', id)
 
   revalidatePath(`/hq/organizations/${id}`)
@@ -51,7 +59,7 @@ export async function archiveOrganization(formData: FormData) {
   const id = String(formData.get('id') ?? '').trim()
   if (!id) return
 
-  const supabase = await requireAdmin()
+  const supabase = await requireAdmin('manage_organizations')
   await supabase
     .from('organizations')
     .update({ deleted_at: new Date().toISOString() })
@@ -65,7 +73,7 @@ export async function restoreOrganization(formData: FormData) {
   const id = String(formData.get('id') ?? '').trim()
   if (!id) return
 
-  const supabase = await requireAdmin()
+  const supabase = await requireAdmin('manage_organizations')
   await supabase
     .from('organizations')
     .update({ deleted_at: null })
@@ -94,7 +102,7 @@ export async function updateCaptureStatus(
     return { ok: false, error: 'Invalid toggle state' }
   }
 
-  const supabase = await requireAdmin()
+  const supabase = await requireAdmin('manage_organizations')
 
   const { error } = await supabase
     .from('organizations')
@@ -113,9 +121,9 @@ export async function updateCaptureStatus(
 const MAX_RADIUS_MILES = 500
 
 // HQ-gated geofence write. Target org comes from the hidden form field; the
-// is_admin_hq() RPC in requireAdmin is the scope check. Redirects back to
-// the org detail page with an error query string when validation fails so
-// the form can surface it without needing its own action state plumbing.
+// hqGate('manage_organizations') check in requireAdmin is the scope check.
+// Redirects back to the org detail page with an error query string when
+// validation fails so the form can surface it without its own state plumbing.
 export async function setOrgGeofence(formData: FormData) {
   const id        = String(formData.get('id')            ?? '').trim()
   const latRaw    = String(formData.get('latitude')      ?? '').trim()
@@ -123,7 +131,7 @@ export async function setOrgGeofence(formData: FormData) {
   const radiusRaw = String(formData.get('signal_radius') ?? '').trim()
   if (!id) redirect('/hq/organizations')
 
-  const supabase = await requireAdmin()
+  const supabase = await requireAdmin('manage_organizations')
 
   const latitude  = latRaw    === '' ? null : Number(latRaw)
   const longitude = lngRaw    === '' ? null : Number(lngRaw)

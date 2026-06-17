@@ -13,6 +13,7 @@
 
 import { NextResponse, type NextRequest } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { hqGate } from '@/lib/permissions/gates'
 import { resolveImpersonation } from '@/lib/impersonation'
 import { generateClaim } from '@/lib/claims'
 
@@ -35,8 +36,8 @@ export async function POST(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return bad('unauthenticated', 401)
 
-  const { data: isAdmin } = await supabase.rpc('is_admin_hq')
-  if (!isAdmin) return bad('forbidden', 403)
+  const gate = await hqGate(supabase, user.id, 'send_claim_invites')
+  if (!gate.ok) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   let body: Body
   try {

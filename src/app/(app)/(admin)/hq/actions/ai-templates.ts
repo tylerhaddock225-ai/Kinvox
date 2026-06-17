@@ -3,32 +3,26 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { hqGate } from '@/lib/permissions/gates'
 import {
   resolveEnabledFeatures,
   type AiTemplate,
 } from '@/lib/ai-templates'
-
-async function requirePlatformOwner() {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/login')
-
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('system_role')
-    .eq('id', user.id)
-    .single<{ system_role: string | null }>()
-
-  if (profile?.system_role !== 'platform_owner') redirect('/login')
-  return supabase
-}
 
 export async function setOrgAiStrategy(formData: FormData) {
   const orgId      = String(formData.get('org_id')      ?? '').trim()
   const templateId = String(formData.get('template_id') ?? '').trim()
   if (!orgId) redirect('/hq/organizations')
 
-  const supabase = await requirePlatformOwner()
+  // K2b intentional widening: this action was previously platform_owner-only
+  // (the old requirePlatformOwner helper). It now opens to any HQ role granted
+  // `manage_ai_templates`; platform_owner still bypasses every check via
+  // isSuperAdmin inside hqGate, so the prior caller set is preserved.
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
+  const gate = await hqGate(supabase, user.id, 'manage_ai_templates')
+  if (!gate.ok) redirect('/login')
 
   // "" from the dropdown means "no template assigned" — clear both fields
   // so a stale toggle map doesn't outlive the template that defined it.

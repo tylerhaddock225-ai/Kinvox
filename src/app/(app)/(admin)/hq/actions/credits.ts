@@ -3,16 +3,10 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { hqGate } from '@/lib/permissions/gates'
 
 type LedgerType = 'purchase' | 'refund' | 'adjustment'
 const LEDGER_TYPES: readonly LedgerType[] = ['purchase', 'refund', 'adjustment']
-
-async function requireHqAdmin() {
-  const supabase = await createClient()
-  const { data: isAdmin } = await supabase.rpc('is_admin_hq')
-  if (!isAdmin) redirect('/login')
-  return supabase
-}
 
 function integrationsTab(orgId: string, extra = ''): string {
   const base = `/hq/organizations/${orgId}?tab=integrations-billing`
@@ -25,7 +19,11 @@ function integrationsTab(orgId: string, extra = ''): string {
  * stamped in credit_ledger for audit parity with deduct_credit().
  */
 export async function addCredits(formData: FormData) {
-  const supabase = await requireHqAdmin()
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
+  const gate = await hqGate(supabase, user.id, 'manage_credits')
+  if (!gate.ok) redirect('/login')
 
   const orgId  = String(formData.get('org_id') ?? '').trim()
   const amount = parseInt(String(formData.get('amount') ?? ''), 10)
@@ -90,7 +88,11 @@ export async function addCredits(formData: FormData) {
  * disables the feature regardless of the boolean.
  */
 export async function updateAutoTopUp(formData: FormData) {
-  const supabase = await requireHqAdmin()
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
+  const gate = await hqGate(supabase, user.id, 'manage_credits')
+  if (!gate.ok) redirect('/login')
 
   const orgId     = String(formData.get('org_id') ?? '').trim()
   const enabled   = String(formData.get('enabled') ?? '') === 'on'

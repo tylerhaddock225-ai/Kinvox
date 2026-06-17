@@ -1,6 +1,7 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
+import { hqGate } from '@/lib/permissions/gates'
 import { revalidatePath } from 'next/cache'
 
 type State = { status: 'success' } | { status: 'error'; error: string } | null
@@ -15,13 +16,8 @@ export async function sendHQTicketMessage(_prev: State, formData: FormData): Pro
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { status: 'error', error: 'Not authenticated' }
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('system_role')
-    .eq('id', user.id)
-    .single()
-
-  if (!profile?.system_role) return { status: 'error', error: 'Not authorized' }
+  const gate = await hqGate(supabase, user.id, 'manage_platform_tickets')
+  if (!gate.ok) return { status: 'error', error: 'Forbidden' }
 
   const ticket_id = formData.get('ticket_id') as string
   const body      = formData.get('body')      as string
@@ -65,13 +61,8 @@ export async function closeHQTicket(formData: FormData): Promise<void> {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('system_role')
-    .eq('id', user.id)
-    .single()
-
-  if (!profile?.system_role) return
+  const gate = await hqGate(supabase, user.id, 'manage_platform_tickets')
+  if (!gate.ok) return
 
   const ticket_id = formData.get('ticket_id') as string
   if (!ticket_id) return
@@ -98,13 +89,8 @@ export async function updateHQTicketCategory(formData: FormData): Promise<void> 
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('system_role')
-    .eq('id', user.id)
-    .single()
-
-  if (!profile?.system_role) return
+  const gate = await hqGate(supabase, user.id, 'manage_platform_tickets')
+  if (!gate.ok) return
 
   const ticket_id = formData.get('ticket_id')  as string
   const category  = formData.get('hq_category') as string

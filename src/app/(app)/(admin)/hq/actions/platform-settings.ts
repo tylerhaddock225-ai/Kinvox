@@ -1,6 +1,7 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
+import { hqGate } from '@/lib/permissions/gates'
 import { revalidatePath } from 'next/cache'
 
 type State = { status: 'success'; message?: string } | { status: 'error'; error: string } | null
@@ -18,13 +19,8 @@ export async function updateTicketIdPrefix(_prev: State, formData: FormData): Pr
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { status: 'error', error: 'Not authenticated' }
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('system_role')
-    .eq('id', user.id)
-    .single()
-
-  if (!profile?.system_role) return { status: 'error', error: 'Not authorized' }
+  const gate = await hqGate(supabase, user.id, 'manage_global_settings')
+  if (!gate.ok) return { status: 'error', error: 'Forbidden' }
 
   const rawPrefix = (formData.get('ticket_id_prefix') as string | null) ?? ''
   const prefix = rawPrefix.trim()
@@ -57,13 +53,8 @@ export async function updatePlatformToggle(formData: FormData): Promise<void> {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('system_role')
-    .eq('id', user.id)
-    .single()
-
-  if (!profile?.system_role) return
+  const gate = await hqGate(supabase, user.id, 'manage_global_settings')
+  if (!gate.ok) return
 
   const key = formData.get('key') as string | null
   if (!key || !TOGGLE_KEYS.includes(key as ToggleKey)) return
