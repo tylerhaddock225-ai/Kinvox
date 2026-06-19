@@ -38,6 +38,22 @@ export type RoleRow = {
   is_system_role: boolean
 }
 
+export type PendingInviteRow = {
+  id: string
+  email: string
+  full_name: string | null
+  role_id: string | null
+  expires_at: string
+  created_at: string
+  expired: boolean
+}
+
+// Expiry resolved server-side (authoritative server clock, no client-time
+// impurity). Module scope so it isn't subject to the React render-purity rules.
+function isInviteExpired(expiresAt: string): boolean {
+  return new Date(expiresAt).getTime() < Date.now()
+}
+
 export default async function TeamSettingsPage({
   searchParams,
 }: {
@@ -120,6 +136,17 @@ export default async function TeamSettingsPage({
       if (data?.user?.email) emailMap[m.id] = data.user.email
     })
   )
+
+  // Outstanding (unaccepted) member invitations for this org. Read via the admin
+  // client: member_invitations SELECT RLS still keys on legacy auth_user_role()=
+  // 'admin', so a permission-bag Org Admin (role='agent') couldn't see these via
+  // the authenticated client. orgId is the impersonation-aware effective org.
+  const { data: pendingInvites } = await admin
+    .from('member_invitations')
+    .select('id, email, full_name, role_id, expires_at, created_at')
+    .eq('organization_id', orgId)
+    .is('accepted_at', null)
+    .order('created_at', { ascending: false })
 
   const members: MemberRow[] = (membersRes.data ?? []).map((m) => ({
     id: m.id,
@@ -207,6 +234,10 @@ export default async function TeamSettingsPage({
       <TeamTabs
         members={members}
         roles={roles}
+        pendingInvites={(pendingInvites ?? []).map((inv) => ({
+          ...inv,
+          expired: isInviteExpired(inv.expires_at),
+        }))}
         orgSettings={orgSettings}
         leadSupport={leadSupport}
         signalSettings={signalSettings}

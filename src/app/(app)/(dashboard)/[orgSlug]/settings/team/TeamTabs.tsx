@@ -23,7 +23,7 @@ import SocialConnectionsTab, {
   type SocialBannerState,
 } from './SocialConnectionsTab'
 import { PERMISSION_KEYS, DEFAULT_PERMISSIONS, type Permissions } from '@/lib/permissions'
-import type { MemberRow, RoleRow } from './page'
+import type { MemberRow, RoleRow, PendingInviteRow } from './page'
 
 export type OrgSettings = {
   // Pre-constructed full plus-addressed email (server side via
@@ -221,6 +221,76 @@ function MembersPanel({ members, roles }: { members: MemberRow[]; roles: RoleRow
           </tbody>
         </table>
       </div>
+    </div>
+  )
+}
+
+// ── Pending invitations panel ────────────────────────────────────────────────
+
+function formatInviteDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+function PendingInvitesPanel({
+  invites,
+  roles,
+}: {
+  invites: PendingInviteRow[]
+  roles: RoleRow[]
+}) {
+  // Map role_id → name from the roles already loaded for this tab (no extra query).
+  const roleName = (id: string | null): string | null =>
+    id ? (roles.find(r => r.id === id)?.name ?? null) : null
+
+  if (invites.length === 0) {
+    return (
+      <div className="rounded-xl border border-dashed border-pvx-border bg-pvx-surface p-10 text-center text-gray-500 text-sm">
+        No outstanding invitations.
+      </div>
+    )
+  }
+
+  return (
+    <div className="rounded-xl border border-pvx-border bg-pvx-surface overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-pvx-border text-xs text-gray-500">
+            <th className="px-5 py-3 text-left font-medium">Email</th>
+            <th className="px-5 py-3 text-left font-medium">Assigned Role</th>
+            <th className="px-5 py-3 text-left font-medium">Status</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-pvx-border">
+          {invites.map(inv => {
+            const expired = inv.expired
+            return (
+              <tr key={inv.id} className="hover:bg-violet-400/[0.07] transition-colors">
+                <td className="px-5 py-3">
+                  <div className="text-gray-200 font-medium">{inv.email}</div>
+                  {inv.full_name && (
+                    <div className="text-xs text-gray-500">{inv.full_name}</div>
+                  )}
+                </td>
+                <td className="px-5 py-3 text-gray-400">{roleName(inv.role_id) ?? 'No role'}</td>
+                <td className="px-5 py-3">
+                  <div className="flex items-center gap-2">
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${
+                      expired
+                        ? 'bg-red-500/10 text-red-400 border-red-500/20'
+                        : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                    }`}>
+                      {expired ? 'Expired' : 'Pending'}
+                    </span>
+                    <span className="text-xs text-gray-500">
+                      expires {formatInviteDate(inv.expires_at)}
+                    </span>
+                  </div>
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
     </div>
   )
 }
@@ -507,6 +577,7 @@ export type { SignalSettingsState }
 export default function TeamTabs({
   members,
   roles,
+  pendingInvites,
   orgSettings,
   leadSupport,
   signalSettings,
@@ -516,6 +587,7 @@ export default function TeamTabs({
 }: {
   members:        MemberRow[]
   roles:          RoleRow[]
+  pendingInvites: PendingInviteRow[]
   orgSettings:    OrgSettings
   leadSupport:    LeadSupportState
   signalSettings: SignalSettingsState
@@ -558,6 +630,15 @@ export default function TeamTabs({
               </h3>
             </div>
             <MembersPanel members={members} roles={roles} />
+          </section>
+
+          <section className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-white">
+                Pending Invitations <span className="text-xs text-gray-500 font-normal">({pendingInvites.length})</span>
+              </h3>
+            </div>
+            <PendingInvitesPanel invites={pendingInvites} roles={roles} />
           </section>
 
           <section className="space-y-3">
