@@ -4,16 +4,11 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { ServerClient } from 'postmark'
 import { createClient } from '@/lib/supabase/server'
+import { hqGate } from '@/lib/permissions/gates'
 import { generateClaim } from '@/lib/claims'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const LOG = '[send-claim-invite]'
-
-async function requireHqAdmin() {
-  const supabase = await createClient()
-  const { data: isAdmin } = await supabase.rpc('is_admin_hq')
-  if (!isAdmin) redirect('/login')
-}
 
 function buildEmail(orgName: string, claimUrl: string): { text: string; html: string } {
   const text = [
@@ -90,7 +85,11 @@ function escapeHtml(s: string): string {
 }
 
 export async function sendOrganizationClaimInvite(formData: FormData) {
-  await requireHqAdmin()
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
+  const gate = await hqGate(supabase, user.id, 'send_claim_invites')
+  if (!gate.ok) redirect('/login')
 
   const orgId = String(formData.get('org_id') ?? '').trim()
   const email = String(formData.get('email')  ?? '').trim().toLowerCase()

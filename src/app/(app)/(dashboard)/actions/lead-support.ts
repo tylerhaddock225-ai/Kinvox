@@ -3,6 +3,8 @@
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { getOrgContext } from '@/lib/auth-context'
+import { orgGate } from '@/lib/permissions/gates'
+import type { OrgPermissionKey } from '@/lib/permissions'
 import { normalizeLeadQuestions, MAX_QUESTIONS } from '@/lib/lead-questions'
 
 type State =
@@ -17,28 +19,19 @@ type State =
 // because features + custom questions are owned by the Organization (not
 // HQ) post-Sprint-3 and have no /hq mutation path. Real tenants must be
 // owner OR have role='admin' on their effective org, same as before.
-async function requireOrgAdmin(supabase: Awaited<ReturnType<typeof createClient>>) {
+async function requireOrgAdmin(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  permissionKey: OrgPermissionKey,
+) {
   const ctx = await getOrgContext()
   if (!ctx)                  return { ok: false as const, error: 'Not authenticated' }
   if (!ctx.effectiveOrgId)   return { ok: false as const, error: 'No organization' }
 
-  // Impersonation cookie is gated on is_admin_hq() inside resolveImpersonation,
-  // so reaching here under impersonation means HQ access is established.
-  // Skip the owner/role check; the impersonated org is the write target.
-  if (ctx.impersonation.active) {
-    return { ok: true as const, userId: ctx.user.id, orgId: ctx.effectiveOrgId }
-  }
-
-  const { data: org } = await supabase
-    .from('organizations')
-    .select('owner_id')
-    .eq('id', ctx.effectiveOrgId)
-    .single<{ owner_id: string }>()
-  if (!org) return { ok: false as const, error: 'Organization not found' }
-
-  const isOwner = org.owner_id === ctx.user.id
-  const isAdmin = ctx.profile.role === 'admin'
-  if (!isOwner && !isAdmin) {
+  // orgGate handles both paths: an HQ admin impersonating the tenant passes,
+  // otherwise the caller's permission bag must grant `permissionKey` (K2
+  // back-compat role='admin' fallback still applies inside orgGate).
+  const gate = await orgGate(supabase, ctx.user.id, ctx.effectiveOrgId, permissionKey)
+  if (!gate.ok) {
     return { ok: false as const, error: 'You do not have permission to change these settings' }
   }
 
@@ -47,7 +40,7 @@ async function requireOrgAdmin(supabase: Awaited<ReturnType<typeof createClient>
 
 export async function setEngagementMode(_prev: State, formData: FormData): Promise<State> {
   const supabase = await createClient()
-  const guard = await requireOrgAdmin(supabase)
+  const guard = await requireOrgAdmin(supabase, 'edit_signal_settings')
   if (!guard.ok) return { status: 'error', error: guard.error }
 
   const mode = String(formData.get('mode') ?? '').trim()
@@ -74,7 +67,7 @@ export async function setEngagementMode(_prev: State, formData: FormData): Promi
 
 export async function setAiListeningEnabled(_prev: State, formData: FormData): Promise<State> {
   const supabase = await createClient()
-  const guard = await requireOrgAdmin(supabase)
+  const guard = await requireOrgAdmin(supabase, 'edit_signal_settings')
   if (!guard.ok) return { status: 'error', error: guard.error }
 
   const enabled = formData.get('enabled') === 'on'
@@ -105,7 +98,7 @@ const MAX_PACKAGE = 10_000
  */
 export async function requestTopUp(_prev: State, formData: FormData): Promise<State> {
   const supabase = await createClient()
-  const guard = await requireOrgAdmin(supabase)
+  const guard = await requireOrgAdmin(supabase, 'manage_billing')
   if (!guard.ok) return { status: 'error', error: guard.error }
 
   const packageCredits = parseInt(String(formData.get('package_credits') ?? ''), 10)
@@ -148,7 +141,7 @@ export async function requestTopUp(_prev: State, formData: FormData): Promise<St
  */
 export async function updateLeadQuestions(_prev: State, formData: FormData): Promise<State> {
   const supabase = await createClient()
-  const guard = await requireOrgAdmin(supabase)
+  const guard = await requireOrgAdmin(supabase, 'manage_lead_settings')
   if (!guard.ok) return { status: 'error', error: guard.error }
 
   const rawJson = String(formData.get('questions_json') ?? '').trim()
@@ -211,7 +204,7 @@ export async function updateLeadMagnetFeatures(
   formData: FormData,
 ): Promise<FeaturesUpdateResult> {
   const supabase = await createClient()
-  const guard = await requireOrgAdmin(supabase)
+  const guard = await requireOrgAdmin(supabase, 'manage_lead_settings')
   if (!guard.ok) return { status: 'error', error: guard.error }
 
   const raw = String(formData.get('features') ?? '')

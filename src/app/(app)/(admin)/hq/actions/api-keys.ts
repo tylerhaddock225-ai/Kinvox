@@ -4,14 +4,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-
-async function requireHqAdmin() {
-  const supabase = await createClient()
-  const { data: auth } = await supabase.auth.getUser()
-  const { data: isAdmin } = await supabase.rpc('is_admin_hq')
-  if (!isAdmin || !auth.user) redirect('/login')
-  return { supabase, userId: auth.user.id }
-}
+import { hqGate } from '@/lib/permissions/gates'
 
 function integrationsTab(orgId: string, extra = ''): string {
   const base = `/hq/organizations/${orgId}?tab=integrations-billing`
@@ -39,7 +32,11 @@ function sha256Hex(raw: string): string {
  * server action returns, only the hash survives in the database.
  */
 export async function generateApiKey(formData: FormData) {
-  const { supabase, userId } = await requireHqAdmin()
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
+  const gate = await hqGate(supabase, user.id, 'manage_org_integrations')
+  if (!gate.ok) redirect('/login')
 
   const orgId = String(formData.get('org_id') ?? '').trim()
   const label = String(formData.get('label')  ?? '').trim() || null
@@ -54,7 +51,7 @@ export async function generateApiKey(formData: FormData) {
       organization_id: orgId,
       key_hash,
       label,
-      created_by: userId,
+      created_by: user.id,
     })
 
   if (error) {
@@ -68,7 +65,11 @@ export async function generateApiKey(formData: FormData) {
 }
 
 export async function revokeApiKey(formData: FormData) {
-  const { supabase } = await requireHqAdmin()
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
+  const gate = await hqGate(supabase, user.id, 'manage_org_integrations')
+  if (!gate.ok) redirect('/login')
 
   const orgId = String(formData.get('org_id') ?? '').trim()
   const keyId = String(formData.get('key_id') ?? '').trim()

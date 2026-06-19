@@ -1,4 +1,6 @@
+import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { hqGate } from '@/lib/permissions/gates'
 import { DollarSign, TrendingUp, Users, Wallet } from 'lucide-react'
 
 export const dynamic = 'force-dynamic'
@@ -14,6 +16,13 @@ const PLAN_PRICE: Record<PlanKey, number> = {
 
 export default async function AdminBillingPage() {
   const supabase = await createClient()
+
+  // K3 — page-level gate closes the URL-leak: the sidebar hides Billing, but
+  // the route was directly reachable. platform_owner bypasses inside hqGate.
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
+  const gate = await hqGate(supabase, user.id, 'manage_platform_billing')
+  if (!gate.ok) redirect('/hq')
 
   const { data: orgs } = await supabase
     .from('organizations')

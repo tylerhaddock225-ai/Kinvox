@@ -3,11 +3,17 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { hqGate } from '@/lib/permissions/gates'
 
+// All three signal-config mutations share the same key, so the gate lives in
+// the file-local helper (K2b). Retains the redirect contract callers rely on
+// to receive the Supabase client.
 async function requireHqAdmin() {
   const supabase = await createClient()
-  const { data: isAdmin } = await supabase.rpc('is_admin_hq')
-  if (!isAdmin) redirect('/login')
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
+  const gate = await hqGate(supabase, user.id, 'manage_org_integrations')
+  if (!gate.ok) redirect('/login')
   return supabase
 }
 

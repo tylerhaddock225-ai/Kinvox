@@ -38,6 +38,22 @@ export type RoleRow = {
   is_system_role: boolean
 }
 
+export type PendingInviteRow = {
+  id: string
+  email: string
+  full_name: string | null
+  role_id: string | null
+  expires_at: string
+  created_at: string
+  expired: boolean
+}
+
+// Expiry resolved server-side (authoritative server clock, no client-time
+// impurity). Module scope so it isn't subject to the React render-purity rules.
+function isInviteExpired(expiresAt: string): boolean {
+  return new Date(expiresAt).getTime() < Date.now()
+}
+
 export default async function TeamSettingsPage({
   searchParams,
 }: {
@@ -48,14 +64,22 @@ export default async function TeamSettingsPage({
   if (!ctx) redirect('/login')
   if (!ctx.effectiveOrgId) redirect('/onboarding')
 
-  // An HQ admin who has passed resolveImpersonation's is_admin_hq gate
-  // is treated as a tenant admin on the impersonated org for read
-  // access; tenant role is only enforced when the caller is acting as
-  // themselves.
-  if (!ctx.impersonation.active && ctx.profile.role !== 'admin') redirect('/')
+  const supabase = await createClient()
+
+  // K3 — the Team tab specifically requires manage_team OR manage_roles.
+  // An HQ admin who passed resolveImpersonation's is_admin_hq gate is treated
+  // as a tenant admin on the impersonated org; legacy role='admin' tenants
+  // (incl. platform_owner Tyler, role_id NULL) still pass via back-compat.
+  const { data: prof } = await supabase
+    .from('profiles')
+    .select('role_id, roles(permissions)')
+    .eq('id', ctx.user.id)
+    .maybeSingle<{ role_id: string | null; roles: { permissions: Record<string, boolean> | null } | null }>()
+  const permissions = prof?.roles?.permissions ?? null
+  const hasTeamAccess = !!permissions && (permissions.manage_team === true || permissions.manage_roles === true)
+  if (!ctx.impersonation.active && !hasTeamAccess && ctx.profile.role !== 'admin') redirect('/')
 
   const orgId    = ctx.effectiveOrgId
-  const supabase = await createClient()
 
   // Fetch members, roles, the org settings row, primary signal_configs,
   // and the social credentials in parallel. signal_configs backs the
@@ -75,7 +99,7 @@ export default async function TeamSettingsPage({
       .order('name'),
     supabase
       .from('organizations')
-      .select('inbound_email_tag, inbound_lead_email_tag, verified_support_email, verified_support_email_confirmed_at, verified_lead_email, verified_lead_email_confirmed_at, ai_listening_enabled, custom_lead_questions, signal_engagement_mode, vertical, lead_magnet_settings, lead_magnet_slug')
+      .select('owner_id, inbound_email_tag, inbound_lead_email_tag, verified_support_email, verified_support_email_confirmed_at, verified_lead_email, verified_lead_email_confirmed_at, ai_listening_enabled, custom_lead_questions, signal_engagement_mode, vertical, lead_magnet_settings, lead_magnet_slug')
       .eq('id', orgId)
       .single(),
     supabase
@@ -112,6 +136,17 @@ export default async function TeamSettingsPage({
       if (data?.user?.email) emailMap[m.id] = data.user.email
     })
   )
+
+  // Outstanding (unaccepted) member invitations for this org. Read via the admin
+  // client: member_invitations SELECT RLS still keys on legacy auth_user_role()=
+  // 'admin', so a permission-bag Org Admin (role='agent') couldn't see these via
+  // the authenticated client. orgId is the impersonation-aware effective org.
+  const { data: pendingInvites } = await admin
+    .from('member_invitations')
+    .select('id, email, full_name, role_id, expires_at, created_at')
+    .eq('organization_id', orgId)
+    .is('accepted_at', null)
+    .order('created_at', { ascending: false })
 
   const members: MemberRow[] = (membersRes.data ?? []).map((m) => ({
     id: m.id,
@@ -199,6 +234,12 @@ export default async function TeamSettingsPage({
       <TeamTabs
         members={members}
         roles={roles}
+        callerId={ctx.user.id}
+        ownerId={orgRes.data?.owner_id ?? null}
+        pendingInvites={(pendingInvites ?? []).map((inv) => ({
+          ...inv,
+          expired: isInviteExpired(inv.expires_at),
+        }))}
         orgSettings={orgSettings}
         leadSupport={leadSupport}
         signalSettings={signalSettings}

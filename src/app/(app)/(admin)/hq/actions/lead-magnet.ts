@@ -3,17 +3,11 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { hqGate } from '@/lib/permissions/gates'
 
 // Lowercase letters, digits, hyphens. Must start and end with alnum so we
 // can always interpolate it into a URL path without weird edge cases.
 const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/
-
-async function requireAdmin() {
-  const supabase = await createClient()
-  const { data: isAdmin } = await supabase.rpc('is_admin_hq')
-  if (!isAdmin) redirect('/login')
-  return supabase
-}
 
 export async function updateLeadMagnet(formData: FormData) {
   const orgId       = String(formData.get('org_id')       ?? '').trim()
@@ -52,7 +46,11 @@ export async function updateLeadMagnet(formData: FormData) {
     }
   }
 
-  const supabase = await requireAdmin()
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
+  const gate = await hqGate(supabase, user.id, 'manage_org_integrations')
+  if (!gate.ok) redirect('/login')
 
   // Sprint 3 split: HQ owns slug/enabled/headline; the Organization owns
   // `features` via their own Lead Support editor. The jsonb merge happens

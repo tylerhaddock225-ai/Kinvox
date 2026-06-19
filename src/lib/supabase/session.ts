@@ -24,6 +24,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 import { isTeamEmail } from '@/lib/auth/is-team'
+import type { SystemRole } from '@/lib/types/auth'
 
 // Tag every response with no-store + no-cache so the browser (and
 // BFCache in most browsers) won't replay a rendered dashboard after
@@ -105,7 +106,10 @@ export async function updateSession(request: NextRequest) {
   // Claim landing is public-facing: unauthenticated visitors see a
   // "Sign in to claim" CTA, signed-in users see the confirmation UI.
   const isClaim      = pathname.startsWith('/claim/')
-  const isPublic     = isAuthRoute || isWebhook || isAuthApi || isLeadMagnet || isPublicApi || isClaim || pathname.startsWith('/_next') || pathname === '/favicon.ico'
+  // Invite landing is public-facing: an unauthenticated invitee resolves the
+  // token, sets a password, and is auto-signed-in (mirrors /claim/).
+  const isInvite     = pathname.startsWith('/invite/')
+  const isPublic     = isAuthRoute || isWebhook || isAuthApi || isLeadMagnet || isPublicApi || isClaim || isInvite || pathname.startsWith('/_next') || pathname === '/favicon.ico'
 
   // ── Gate 0: login-first ────────────────────────────────────
   // Every protected route bounces unauthenticated requests to /login.
@@ -124,24 +128,41 @@ export async function updateSession(request: NextRequest) {
   // page?" decision points. Everything else is trusted (subject to
   // the orphan guard below).
   if (user && isSortingHatPath(pathname)) {
-    // Force a token refresh so the downstream profile read + any
-    // redirect lands with the freshest cookies possible.
-    await supabase.auth.refreshSession().catch(() => null)
-
+    // Hotfix-B: do NOT call refreshSession() here. Concurrent requests (document +
+    // RSC prefetches) racing on a single-use refresh token caused losing racers to
+    // null their session, then read profiles as anon → RLS returned 0 rows →
+    // hasOrg=false → /pending-invite. The @supabase/ssr client auto-refreshes
+    // lazily on actual 401s; pre-refreshing here is both unnecessary and harmful.
+    // Hotfix-C: dropped the embedded organizations slug select. profiles ↔ organizations has
+    // two foreign keys (profiles.organization_id → orgs, organizations.owner_id →
+    // profiles), so the PostgREST embed was ambiguous (PGRST201), silently failed the
+    // whole .single() query, and returned profile=null for every tenant user, sending
+    // them to /pending-invite. Fix: fetch profile without embed, then resolve slug in
+    // a separate query.
     const { data: profile } = await supabase
       .from('profiles')
-      .select('system_role, organization_id, organizations(slug)')
+      .select('system_role, organization_id')
       .eq('id', user.id)
-      .single<{
-        system_role: string | null
-        organization_id: string | null
-        organizations: { slug: string | null } | null
-      }>()
+      .single<{ system_role: SystemRole | null; organization_id: string | null }>()
+
+    // Resolve slug separately when org_id is set. Safe to fail — orgSlug stays null
+    // and Hotfix-A's '/' fallback covers it as defense in depth (should not fire in
+    // normal operation, but kept as a safety net).
+    let orgSlug: string | null = null
+    if (profile?.organization_id) {
+      const { data: org } = await supabase
+        .from('organizations')
+        .select('slug')
+        .eq('id', profile.organization_id)
+        .maybeSingle<{ slug: string | null }>()
+      orgSlug = org?.slug ?? null
+    }
 
     const role       = profile?.system_role ?? null
     const isPlatform = typeof role === 'string' && role.startsWith('platform_')
-    const orgSlug    = profile?.organizations?.slug ?? null
-    const hasOrg     = Boolean(profile?.organization_id && orgSlug)
+    // Hotfix-A: organization_id alone determines tenant status; slug is for URL only.
+    // Pre-redesign safety net (Workstream M will replace this with the three-state model).
+    const hasOrg     = Boolean(profile?.organization_id)
     const hasInvite  = Boolean(
       (user.user_metadata as { invited_to_org?: string } | null)?.invited_to_org
     )
@@ -162,7 +183,11 @@ export async function updateSession(request: NextRequest) {
     if (isTeam || isPlatform) {
       destination = '/hq'
     } else if (hasOrg) {
-      destination = `/${orgSlug}`
+      // Hotfix-A: organization_id alone determines tenant status; slug is for URL only.
+      // Pre-redesign safety net (Workstream M will replace this with the three-state model).
+      // When org_id is set but the embed couldn't resolve the slug, route to '/'; the
+      // dashboard layout re-resolves the org context so the user lands without bouncing.
+      destination = orgSlug ? `/${orgSlug}` : '/'
     } else if (hasInvite) {
       destination = '/onboarding'
     } else {
@@ -191,7 +216,9 @@ export async function updateSession(request: NextRequest) {
 
     const isPlatform = typeof profile?.system_role === 'string'
                     && profile.system_role.startsWith('platform_')
-    const hasOrg     = !!profile?.organization_id
+    // Hotfix-A: organization_id alone determines tenant status; slug is for URL only.
+    // Pre-redesign safety net (Workstream M will replace this with the three-state model).
+    const hasOrg     = Boolean(profile?.organization_id)
 
     if (!isTeamEmail(user.email) && !isPlatform && !hasOrg) {
       return noStore(redirectOnHost(request, '/pending-invite'))

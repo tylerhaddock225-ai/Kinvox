@@ -86,7 +86,7 @@ export default async function AdminHqOverviewPage() {
           label="Pending HQ Support"
           value={pendingHQSupportCount.toLocaleString()}
           icon={LifeBuoy}
-          href="/hq/tickets?scope=platform"
+          href="/hq/tickets"
           cta="Triage queue"
           hint="open requests"
         />

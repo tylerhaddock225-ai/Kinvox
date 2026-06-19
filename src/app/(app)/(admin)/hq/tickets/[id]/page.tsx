@@ -8,9 +8,24 @@ import EditableSubject from '@/components/EditableSubject'
 import TicketStatusSelect from '@/components/TicketStatusSelect'
 import TicketPrioritySelect from '@/components/TicketPrioritySelect'
 import HQReplyBox from '@/components/admin/HQReplyBox'
+import TicketRecipientsSection, { type RecipientRow } from '@/components/TicketRecipientsSection'
 
 type MessageRow = Pick<TicketMessage, 'id' | 'body' | 'type' | 'created_at' | 'sender_id'> & {
   profiles: { full_name: string | null } | null
+}
+
+type RecipientQueryRow = {
+  id:       string
+  kind:     'to' | 'cc'
+  user_id:  string | null
+  email:    string | null
+  added_at: string
+  profiles: { full_name: string | null } | null
+}
+
+type OrgMemberRow = {
+  id:        string
+  full_name: string | null
 }
 
 type HQCategory  = 'bug' | 'billing' | 'feature_request' | 'question'
@@ -50,27 +65,56 @@ export default async function HQTicketDetailPage({ params }: { params: Promise<{
     .is('deleted_at', null)
     .maybeSingle()
 
-  if (!ticketData) notFound()
+  if (!ticketData || ticketData.is_platform_support !== true) notFound()
 
   const ticket = ticketData as unknown as Pick<
     Ticket,
     'id' | 'display_id' | 'subject' | 'description' | 'status' | 'priority' | 'created_at' | 'organization_id' | 'is_platform_support' | 'hq_category' | 'screenshot_url' | 'affected_tab' | 'record_id'
   > & { organizations: { name: string } | null }
 
-  const { data: messagesData } = await supabase
-    .from('ticket_messages')
-    .select('id, body, type, created_at, sender_id, profiles!ticket_messages_sender_id_fkey(full_name)')
-    .eq('ticket_id', id)
-    .order('created_at', { ascending: true })
+  const [messagesRes, recipientsRes, membersRes] = await Promise.all([
+    supabase
+      .from('ticket_messages')
+      .select('id, body, type, created_at, sender_id, profiles!ticket_messages_sender_id_fkey(full_name)')
+      .eq('ticket_id', id)
+      .order('created_at', { ascending: true }),
+    supabase
+      .from('ticket_recipients')
+      .select('id, kind, user_id, email, added_at, profiles!ticket_recipients_user_id_fkey(full_name)')
+      .eq('ticket_id', ticket.id)
+      .order('added_at', { ascending: true }),
+    supabase
+      .from('profiles')
+      .select('id, full_name')
+      .eq('organization_id', ticket.organization_id)
+      .eq('is_org_inbox', false)
+      .is('system_role', null)
+      .order('full_name', { ascending: true }),
+  ])
 
-  const messages = (messagesData ?? []) as unknown as MessageRow[]
+  const messages = (messagesRes.data ?? []) as unknown as MessageRow[]
+
+  const rawRecipients = (recipientsRes.data ?? []) as unknown as RecipientQueryRow[]
+  const recipients: RecipientRow[] = rawRecipients.map(r => ({
+    id:           r.id,
+    kind:         r.kind,
+    user_id:      r.user_id,
+    email:        r.email,
+    display_name: r.profiles?.full_name ?? null,
+  }))
+
+  const orgMembers = ((membersRes.data ?? []) as unknown as OrgMemberRow[]).map(m => ({
+    id:        m.id,
+    full_name: m.full_name,
+  }))
+
   const isPlatform = !!ticket.is_platform_support
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       <div>
         <Link
-          href={isPlatform ? '/hq/tickets?scope=platform' : '/hq/tickets'}
+          href="/hq/tickets"
           className="inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-300 transition-colors"
         >
           <ArrowLeft className="w-3.5 h-3.5" />
@@ -156,6 +200,13 @@ export default async function HQTicketDetailPage({ params }: { params: Promise<{
           )}
         </div>
       )}
+
+      <TicketRecipientsSection
+        ticketId={ticket.id}
+        recipients={recipients}
+        orgMembers={orgMembers}
+        mode="hq"
+      />
 
       <section className="space-y-3">
         <h2 className="text-sm font-semibold text-gray-300">Conversation</h2>

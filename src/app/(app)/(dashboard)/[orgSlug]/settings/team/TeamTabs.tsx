@@ -1,10 +1,12 @@
 'use client'
 
 import { useState, useRef, useEffect, useActionState, useTransition } from 'react'
-import { Plus, X, UserPlus, Pencil, Trash2, ShieldCheck, CheckCircle2 } from 'lucide-react'
+import { Plus, X, UserPlus, Pencil, Trash2, ShieldCheck, CheckCircle2, Send } from 'lucide-react'
 import {
   inviteMember,
   updateMemberRole,
+  removeMember,
+  resendInvite,
   createRole,
   updateRole,
   deleteRole,
@@ -23,7 +25,7 @@ import SocialConnectionsTab, {
   type SocialBannerState,
 } from './SocialConnectionsTab'
 import { PERMISSION_KEYS, DEFAULT_PERMISSIONS, type Permissions } from '@/lib/permissions'
-import type { MemberRow, RoleRow } from './page'
+import type { MemberRow, RoleRow, PendingInviteRow } from './page'
 
 export type OrgSettings = {
   // Pre-constructed full plus-addressed email (server side via
@@ -168,7 +170,17 @@ function MemberRoleSelect({
 
 // ── Members panel ────────────────────────────────────────────────────────────
 
-function MembersPanel({ members, roles }: { members: MemberRow[]; roles: RoleRow[] }) {
+function MembersPanel({
+  members,
+  roles,
+  callerId,
+  ownerId,
+}: {
+  members: MemberRow[]
+  roles: RoleRow[]
+  callerId: string
+  ownerId: string | null
+}) {
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
@@ -183,44 +195,160 @@ function MembersPanel({ members, roles }: { members: MemberRow[]; roles: RoleRow
               <th className="px-5 py-3 text-left font-medium">Email</th>
               <th className="px-5 py-3 text-left font-medium">System Role</th>
               <th className="px-5 py-3 text-left font-medium">Custom Role</th>
+              <th className="px-5 py-3 text-right font-medium sr-only">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-pvx-border">
             {members.length === 0 ? (
               <tr>
-                <td colSpan={4} className="px-5 py-10 text-center text-gray-500 text-sm">
+                <td colSpan={5} className="px-5 py-10 text-center text-gray-500 text-sm">
                   No team members yet.
                 </td>
               </tr>
             ) : (
-              members.map(m => (
-                <tr key={m.id} className="hover:bg-violet-400/[0.07] transition-colors">
-                  <td className="px-5 py-3 text-gray-200 font-medium">
-                    {m.full_name ?? '—'}
-                  </td>
-                  <td className="px-5 py-3 text-gray-400">{m.email ?? '—'}</td>
-                  <td className="px-5 py-3">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border capitalize ${
-                      m.system_role === 'admin'
-                        ? 'bg-purple-500/10 text-purple-400 border-purple-500/20'
-                        : 'bg-gray-500/10 text-gray-400 border-gray-500/20'
-                    }`}>
-                      {m.system_role}
-                    </span>
-                  </td>
-                  <td className="px-5 py-3">
-                    <MemberRoleSelect
-                      memberId={m.id}
-                      currentRoleId={m.role_id}
-                      roles={roles}
-                    />
-                  </td>
-                </tr>
-              ))
+              members.map(m => {
+                const isProtected = m.id === callerId || m.id === ownerId
+                return (
+                  <tr key={m.id} className="hover:bg-violet-400/[0.07] transition-colors">
+                    <td className="px-5 py-3 text-gray-200 font-medium">
+                      {m.full_name ?? '—'}
+                    </td>
+                    <td className="px-5 py-3 text-gray-400">{m.email ?? '—'}</td>
+                    <td className="px-5 py-3">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border capitalize ${
+                        m.system_role === 'admin'
+                          ? 'bg-purple-500/10 text-purple-400 border-purple-500/20'
+                          : 'bg-gray-500/10 text-gray-400 border-gray-500/20'
+                      }`}>
+                        {m.system_role}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3">
+                      <MemberRoleSelect
+                        memberId={m.id}
+                        currentRoleId={m.role_id}
+                        roles={roles}
+                      />
+                    </td>
+                    <td className="px-5 py-3 text-right">
+                      {isProtected ? (
+                        <span className="text-xs text-gray-600">—</span>
+                      ) : (
+                        <form action={removeMember} className="inline">
+                          <input type="hidden" name="member_id" value={m.id} />
+                          <button
+                            type="submit"
+                            className="p-1.5 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-400/10 transition-colors"
+                            title="Remove member"
+                            onClick={e => {
+                              if (!confirm(`Remove ${m.full_name ?? m.email ?? 'this member'} from the organization? They'll lose access immediately.`)) {
+                                e.preventDefault()
+                              }
+                            }}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </form>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })
             )}
           </tbody>
         </table>
       </div>
+    </div>
+  )
+}
+
+// ── Pending invitations panel ────────────────────────────────────────────────
+
+function formatInviteDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+function ResendInviteButton({ inviteId }: { inviteId: string }) {
+  const [pending, startTransition] = useTransition()
+  return (
+    <form action={(fd: FormData) => startTransition(() => resendInvite(fd))} className="inline">
+      <input type="hidden" name="invite_id" value={inviteId} />
+      <button
+        type="submit"
+        disabled={pending}
+        className="inline-flex items-center gap-1.5 rounded-lg border border-pvx-border px-3 py-1.5 text-xs font-medium text-gray-300 hover:text-white hover:bg-white/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        <Send className="w-3.5 h-3.5" />
+        {pending ? 'Sending…' : 'Resend'}
+      </button>
+    </form>
+  )
+}
+
+function PendingInvitesPanel({
+  invites,
+  roles,
+}: {
+  invites: PendingInviteRow[]
+  roles: RoleRow[]
+}) {
+  // Map role_id → name from the roles already loaded for this tab (no extra query).
+  const roleName = (id: string | null): string | null =>
+    id ? (roles.find(r => r.id === id)?.name ?? null) : null
+
+  if (invites.length === 0) {
+    return (
+      <div className="rounded-xl border border-dashed border-pvx-border bg-pvx-surface p-10 text-center text-gray-500 text-sm">
+        No outstanding invitations.
+      </div>
+    )
+  }
+
+  return (
+    <div className="rounded-xl border border-pvx-border bg-pvx-surface overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-pvx-border text-xs text-gray-500">
+            <th className="px-5 py-3 text-left font-medium">Email</th>
+            <th className="px-5 py-3 text-left font-medium">Assigned Role</th>
+            <th className="px-5 py-3 text-left font-medium">Status</th>
+            <th className="px-5 py-3 text-right font-medium sr-only">Actions</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-pvx-border">
+          {invites.map(inv => {
+            const expired = inv.expired
+            return (
+              <tr key={inv.id} className="hover:bg-violet-400/[0.07] transition-colors">
+                <td className="px-5 py-3">
+                  <div className="text-gray-200 font-medium">{inv.email}</div>
+                  {inv.full_name && (
+                    <div className="text-xs text-gray-500">{inv.full_name}</div>
+                  )}
+                </td>
+                <td className="px-5 py-3 text-gray-400">{roleName(inv.role_id) ?? 'No role'}</td>
+                <td className="px-5 py-3">
+                  <div className="flex items-center gap-2">
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${
+                      expired
+                        ? 'bg-red-500/10 text-red-400 border-red-500/20'
+                        : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                    }`}>
+                      {expired ? 'Expired' : 'Pending'}
+                    </span>
+                    <span className="text-xs text-gray-500">
+                      expires {formatInviteDate(inv.expires_at)}
+                    </span>
+                  </div>
+                </td>
+                <td className="px-5 py-3 text-right">
+                  <ResendInviteButton inviteId={inv.id} />
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
     </div>
   )
 }
@@ -507,6 +635,9 @@ export type { SignalSettingsState }
 export default function TeamTabs({
   members,
   roles,
+  callerId,
+  ownerId,
+  pendingInvites,
   orgSettings,
   leadSupport,
   signalSettings,
@@ -516,6 +647,9 @@ export default function TeamTabs({
 }: {
   members:        MemberRow[]
   roles:          RoleRow[]
+  callerId:       string
+  ownerId:        string | null
+  pendingInvites: PendingInviteRow[]
   orgSettings:    OrgSettings
   leadSupport:    LeadSupportState
   signalSettings: SignalSettingsState
@@ -557,7 +691,16 @@ export default function TeamTabs({
                 Members <span className="text-xs text-gray-500 font-normal">({members.length})</span>
               </h3>
             </div>
-            <MembersPanel members={members} roles={roles} />
+            <MembersPanel members={members} roles={roles} callerId={callerId} ownerId={ownerId} />
+          </section>
+
+          <section className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-white">
+                Pending Invitations <span className="text-xs text-gray-500 font-normal">({pendingInvites.length})</span>
+              </h3>
+            </div>
+            <PendingInvitesPanel invites={pendingInvites} roles={roles} />
           </section>
 
           <section className="space-y-3">

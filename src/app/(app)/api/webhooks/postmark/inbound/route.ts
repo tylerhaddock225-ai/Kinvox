@@ -639,6 +639,7 @@ export async function POST(request: NextRequest) {
     })
 
     const threadingId = `<${ticketDisplayId}@kinvox.com>`
+    const replyTo     = constructInboundEmailAddress(org.inbound_email_tag ?? null)
 
     const sendResult = await sendOrgTransactionalEmail({
       org: {
@@ -655,6 +656,7 @@ export async function POST(request: NextRequest) {
       textBody,
       fromAddressSource: 'support',
       tag:               'ticket-confirmation',
+      replyTo:           replyTo ?? undefined,
       // Message-ID (not References/In-Reply-To) — this is the start of the
       // thread, not a reply. Future inbound replies match by the bracketed
       // [tk_…] subject tag, but a Message-ID on the seed mail lets mail

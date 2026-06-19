@@ -6,8 +6,18 @@ import EditableSubject from '@/components/EditableSubject'
 import ReplyBox from '@/components/ReplyBox'
 import TicketStatusSelect from '@/components/TicketStatusSelect'
 import TicketPrioritySelect from '@/components/TicketPrioritySelect'
+import TicketRecipientsSection, { type RecipientRow } from '@/components/TicketRecipientsSection'
 
 type MessageRow = Pick<TicketMessage, 'id' | 'body' | 'type' | 'created_at' | 'sender_id'> & {
+  profiles: { full_name: string | null } | null
+}
+
+type RecipientQueryRow = {
+  id:       string
+  kind:     'to' | 'cc'
+  user_id:  string | null
+  email:    string | null
+  added_at: string
   profiles: { full_name: string | null } | null
 }
 
@@ -48,13 +58,29 @@ export default async function TicketDetailPage({ params }: { params: Promise<{ o
 
   const ticket = ticketData as Pick<Ticket, 'id' | 'display_id' | 'subject' | 'description' | 'status' | 'priority' | 'created_at' | 'organization_id'>
 
-  const { data: messagesData } = await supabase
-    .from('ticket_messages')
-    .select('id, body, type, created_at, sender_id, profiles!ticket_messages_sender_id_fkey(full_name)')
-    .eq('ticket_id', id)
-    .order('created_at', { ascending: true })
+  const [messagesRes, recipientsRes] = await Promise.all([
+    supabase
+      .from('ticket_messages')
+      .select('id, body, type, created_at, sender_id, profiles!ticket_messages_sender_id_fkey(full_name)')
+      .eq('ticket_id', id)
+      .order('created_at', { ascending: true }),
+    supabase
+      .from('ticket_recipients')
+      .select('id, kind, user_id, email, added_at, profiles!ticket_recipients_user_id_fkey(full_name)')
+      .eq('ticket_id', ticket.id)
+      .order('added_at', { ascending: true }),
+  ])
 
-  const messages = (messagesData ?? []) as unknown as MessageRow[]
+  const messages = (messagesRes.data ?? []) as unknown as MessageRow[]
+
+  const rawRecipients = (recipientsRes.data ?? []) as unknown as RecipientQueryRow[]
+  const recipients: RecipientRow[] = rawRecipients.map(r => ({
+    id:           r.id,
+    kind:         r.kind,
+    user_id:      r.user_id,
+    email:        r.email,
+    display_name: r.profiles?.full_name ?? null,
+  }))
 
   return (
     <div className="px-8 py-8 max-w-4xl mx-auto space-y-6">
@@ -83,6 +109,8 @@ export default async function TicketDetailPage({ params }: { params: Promise<{ o
           </div>
         </div>
       )}
+
+      <TicketRecipientsSection ticketId={ticket.id} recipients={recipients} mode="org" />
 
       <section className="space-y-3">
         <h2 className="text-sm font-semibold text-gray-300">Conversation</h2>

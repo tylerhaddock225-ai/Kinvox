@@ -3,7 +3,8 @@
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { resolveEffectiveOrgId, resolveImpersonation } from '@/lib/impersonation'
+import { resolveEffectiveOrgId } from '@/lib/impersonation'
+import { orgGate } from '@/lib/permissions/gates'
 
 export type SaveGeofenceState =
   | { status: 'success' }
@@ -38,25 +39,9 @@ export async function saveGeofence(
   const orgId = await resolveEffectiveOrgId(supabase, user.id)
   if (!orgId) return { status: 'error', error: 'No organization' }
 
-  const impersonation = await resolveImpersonation()
-  if (!impersonation.active) {
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', user.id)
-      .single<{ role: string | null }>()
-
-    const { data: org } = await supabase
-      .from('organizations')
-      .select('owner_id')
-      .eq('id', orgId)
-      .single<{ owner_id: string }>()
-
-    const isOwner = org?.owner_id === user.id
-    const isAdmin = profile?.role === 'admin'
-    if (!isOwner && !isAdmin) {
-      return { status: 'error', error: 'You do not have permission to change the geofence' }
-    }
+  const gate = await orgGate(supabase, user.id, orgId, 'manage_org_settings')
+  if (!gate.ok) {
+    return { status: 'error', error: 'You do not have permission to change the geofence' }
   }
 
   const latRaw    = String(formData.get('latitude')      ?? '').trim()
@@ -112,25 +97,9 @@ export async function uploadOrgLogo(
   const orgId = await resolveEffectiveOrgId(supabase, user.id)
   if (!orgId) return { status: 'error', error: 'No organization' }
 
-  const impersonation = await resolveImpersonation()
-  if (!impersonation.active) {
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', user.id)
-      .single<{ role: string | null }>()
-
-    const { data: org } = await supabase
-      .from('organizations')
-      .select('owner_id')
-      .eq('id', orgId)
-      .single<{ owner_id: string }>()
-
-    const isOwner = org?.owner_id === user.id
-    const isAdmin = profile?.role === 'admin'
-    if (!isOwner && !isAdmin) {
-      return { status: 'error', error: 'You do not have permission to change branding' }
-    }
+  const gate = await orgGate(supabase, user.id, orgId, 'manage_org_settings')
+  if (!gate.ok) {
+    return { status: 'error', error: 'You do not have permission to change branding' }
   }
 
   const file = formData.get('logo')
