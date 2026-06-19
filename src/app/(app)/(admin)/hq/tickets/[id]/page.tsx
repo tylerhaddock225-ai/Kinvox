@@ -111,7 +111,7 @@ export default async function HQTicketDetailPage({ params }: { params: Promise<{
   const isPlatform = !!ticket.is_platform_support
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
+    <div className="max-w-6xl mx-auto space-y-6">
       <div>
         <Link
           href="/hq/tickets"
@@ -177,87 +177,93 @@ export default async function HQTicketDetailPage({ params }: { params: Promise<{
         </div>
       )}
 
-      {ticket.description && (
-        <div className="bg-pvx-surface/50 border border-pvx-border rounded-lg p-6">
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-2">
-            Original Message
-          </div>
-          <div className="text-sm text-gray-200 whitespace-pre-wrap leading-relaxed">
-            {ticket.description}
-          </div>
-          {isPlatform && ticket.screenshot_url && (
-            <div className="mt-4 text-xs">
-              <span className="text-gray-500">Screenshot: </span>
-              <a
-                href={ticket.screenshot_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-violet-400 hover:text-violet-300 underline decoration-dotted underline-offset-4 break-all"
-              >
-                {ticket.screenshot_url}
-              </a>
+      <div className="grid grid-cols-1 md:grid-cols-[340px_1fr] gap-6">
+        <aside className="md:sticky md:top-6 self-start">
+          <TicketRecipientsSection
+            ticketId={ticket.id}
+            recipients={recipients}
+            orgMembers={orgMembers}
+            mode="hq"
+          />
+        </aside>
+
+        <div className="space-y-6">
+          {ticket.description && (
+            <div className="bg-pvx-surface/50 border border-pvx-border rounded-lg p-6">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-2">
+                Original Message
+              </div>
+              <div className="text-sm text-gray-200 whitespace-pre-wrap leading-relaxed">
+                {ticket.description}
+              </div>
+              {isPlatform && ticket.screenshot_url && (
+                <div className="mt-4 text-xs">
+                  <span className="text-gray-500">Screenshot: </span>
+                  <a
+                    href={ticket.screenshot_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-violet-400 hover:text-violet-300 underline decoration-dotted underline-offset-4 break-all"
+                  >
+                    {ticket.screenshot_url}
+                  </a>
+                </div>
+              )}
             </div>
           )}
+
+          <section className="space-y-3">
+            <h2 className="text-sm font-semibold text-gray-300">Conversation</h2>
+
+            {messages.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-pvx-border bg-pvx-surface/30 px-6 py-10 text-center text-sm text-gray-500">
+                No messages yet. Start the conversation below.
+              </div>
+            ) : (
+              <ul className="space-y-3">
+                {messages.map(m => {
+                  const isInternal = m.type === 'internal'
+                  // Inbound customer emails have sender_id = null (no profile); fall back to
+                  // the inbound From address so the thread shows the real sender, not 'Unknown'.
+                  const author = m.profiles?.full_name ?? m.inbound_email_from ?? 'Unknown'
+                  return (
+                    <li
+                      key={m.id}
+                      className={`rounded-xl border px-4 py-3 ${
+                        isInternal
+                          ? 'border-yellow-500/30 bg-yellow-500/10'
+                          : 'border-pvx-border bg-pvx-surface'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-3 mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-violet-600/20 text-violet-300 text-[11px] font-semibold">
+                            {initials(author)}
+                          </span>
+                          <span className="text-sm font-medium text-white">{author}</span>
+                          {isInternal && (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-yellow-500/20 text-yellow-300 border border-yellow-500/30">
+                              Private Note
+                            </span>
+                          )}
+                        </div>
+                        <time className="text-xs text-gray-500">
+                          {new Date(m.created_at).toLocaleString()}
+                        </time>
+                      </div>
+                      <div className="text-sm text-gray-200 whitespace-pre-wrap">{m.body}</div>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </section>
+
+          <section className="rounded-xl border border-pvx-border bg-pvx-surface p-4">
+            <HQReplyBox ticketId={ticket.id} />
+          </section>
         </div>
-      )}
-
-      <TicketRecipientsSection
-        ticketId={ticket.id}
-        recipients={recipients}
-        orgMembers={orgMembers}
-        mode="hq"
-      />
-
-      <section className="space-y-3">
-        <h2 className="text-sm font-semibold text-gray-300">Conversation</h2>
-
-        {messages.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-pvx-border bg-pvx-surface/30 px-6 py-10 text-center text-sm text-gray-500">
-            No messages yet. Start the conversation below.
-          </div>
-        ) : (
-          <ul className="space-y-3">
-            {messages.map(m => {
-              const isInternal = m.type === 'internal'
-              // Inbound customer emails have sender_id = null (no profile); fall back to
-              // the inbound From address so the thread shows the real sender, not 'Unknown'.
-              const author = m.profiles?.full_name ?? m.inbound_email_from ?? 'Unknown'
-              return (
-                <li
-                  key={m.id}
-                  className={`rounded-xl border px-4 py-3 ${
-                    isInternal
-                      ? 'border-yellow-500/30 bg-yellow-500/10'
-                      : 'border-pvx-border bg-pvx-surface'
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-3 mb-2">
-                    <div className="flex items-center gap-2">
-                      <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-violet-600/20 text-violet-300 text-[11px] font-semibold">
-                        {initials(author)}
-                      </span>
-                      <span className="text-sm font-medium text-white">{author}</span>
-                      {isInternal && (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-yellow-500/20 text-yellow-300 border border-yellow-500/30">
-                          Private Note
-                        </span>
-                      )}
-                    </div>
-                    <time className="text-xs text-gray-500">
-                      {new Date(m.created_at).toLocaleString()}
-                    </time>
-                  </div>
-                  <div className="text-sm text-gray-200 whitespace-pre-wrap">{m.body}</div>
-                </li>
-              )
-            })}
-          </ul>
-        )}
-      </section>
-
-      <section className="rounded-xl border border-pvx-border bg-pvx-surface p-4">
-        <HQReplyBox ticketId={ticket.id} />
-      </section>
+      </div>
     </div>
   )
 }

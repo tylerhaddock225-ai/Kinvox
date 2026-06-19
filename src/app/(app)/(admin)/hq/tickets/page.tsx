@@ -51,7 +51,7 @@ export default async function AdminTicketsPage({
 
   let listingQ = supabase
     .from('tickets')
-    .select('id, display_id, subject, status, priority, created_at, organization_id, is_platform_support, hq_category, organizations(name)')
+    .select('id, display_id, subject, status, priority, created_at, organization_id, is_platform_support, hq_category, organizations(name), reporter:profiles!tickets_created_by_fkey(full_name)')
     .eq('is_platform_support', true)
     .is('deleted_at', null)
     .order('created_at', { ascending: false })
@@ -74,6 +74,7 @@ export default async function AdminTicketsPage({
         is_platform_support:  boolean
         hq_category:          HQCategory | null
         organizations:        { name: string } | null
+        reporter:             { full_name: string | null } | null
       }>
     >(),
     supabase.from('tickets').select('id', { count: 'exact', head: true }).eq('is_platform_support', true).is('deleted_at', null).in('status', ACTIVE_STATUSES),
@@ -118,6 +119,7 @@ export default async function AdminTicketsPage({
               <th className="px-5 py-3 w-32">ID</th>
               <th className="px-5 py-3">Organization</th>
               <th className="px-5 py-3">Subject</th>
+              <th className="px-5 py-3">From</th>
               <th className="px-5 py-3">Category</th>
               <th className="px-5 py-3">Priority</th>
               <th className="px-5 py-3">Status</th>
@@ -142,6 +144,9 @@ export default async function AdminTicketsPage({
                       <span className="truncate">{t.subject}</span>
                     </span>
                   </td>
+                  <td className="px-5 py-4 text-gray-400 max-w-[14rem] truncate" title={t.reporter?.full_name ?? '—'}>
+                    {t.reporter?.full_name ?? '—'}
+                  </td>
                   <td className="px-5 py-4">
                     {t.is_platform_support && t.hq_category ? (
                       <HQCategorySelect ticketId={t.id} value={t.hq_category} />
@@ -164,7 +169,7 @@ export default async function AdminTicketsPage({
               ))
             ) : (
               <tr>
-                <td colSpan={7} className="px-5 py-10 text-center text-sm text-gray-500">
+                <td colSpan={8} className="px-5 py-10 text-center text-sm text-gray-500">
                   {queue === 'closed' ? 'No closed tickets.' : 'No active tickets.'}
                 </td>
               </tr>
