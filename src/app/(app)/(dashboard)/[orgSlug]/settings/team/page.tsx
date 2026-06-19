@@ -99,7 +99,7 @@ export default async function TeamSettingsPage({
       .order('name'),
     supabase
       .from('organizations')
-      .select('inbound_email_tag, inbound_lead_email_tag, verified_support_email, verified_support_email_confirmed_at, verified_lead_email, verified_lead_email_confirmed_at, ai_listening_enabled, custom_lead_questions, signal_engagement_mode, vertical, lead_magnet_settings, lead_magnet_slug')
+      .select('owner_id, inbound_email_tag, inbound_lead_email_tag, verified_support_email, verified_support_email_confirmed_at, verified_lead_email, verified_lead_email_confirmed_at, ai_listening_enabled, custom_lead_questions, signal_engagement_mode, vertical, lead_magnet_settings, lead_magnet_slug')
       .eq('id', orgId)
       .single(),
     supabase
@@ -234,6 +234,8 @@ export default async function TeamSettingsPage({
       <TeamTabs
         members={members}
         roles={roles}
+        callerId={ctx.user.id}
+        ownerId={orgRes.data?.owner_id ?? null}
         pendingInvites={(pendingInvites ?? []).map((inv) => ({
           ...inv,
           expired: isInviteExpired(inv.expires_at),
