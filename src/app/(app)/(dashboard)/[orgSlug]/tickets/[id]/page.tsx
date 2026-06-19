@@ -8,7 +8,7 @@ import TicketStatusSelect from '@/components/TicketStatusSelect'
 import TicketPrioritySelect from '@/components/TicketPrioritySelect'
 import TicketRecipientsSection, { type RecipientRow } from '@/components/TicketRecipientsSection'
 
-type MessageRow = Pick<TicketMessage, 'id' | 'body' | 'type' | 'created_at' | 'sender_id'> & {
+type MessageRow = Pick<TicketMessage, 'id' | 'body' | 'type' | 'created_at' | 'sender_id' | 'inbound_email_from'> & {
   profiles: { full_name: string | null } | null
 }
 
@@ -61,7 +61,7 @@ export default async function TicketDetailPage({ params }: { params: Promise<{ o
   const [messagesRes, recipientsRes] = await Promise.all([
     supabase
       .from('ticket_messages')
-      .select('id, body, type, created_at, sender_id, profiles!ticket_messages_sender_id_fkey(full_name)')
+      .select('id, body, type, created_at, sender_id, inbound_email_from, profiles!ticket_messages_sender_id_fkey(full_name)')
       .eq('ticket_id', id)
       .order('created_at', { ascending: true }),
     supabase
@@ -123,7 +123,9 @@ export default async function TicketDetailPage({ params }: { params: Promise<{ o
           <ul className="space-y-3">
             {messages.map(m => {
               const isInternal = m.type === 'internal'
-              const author = m.profiles?.full_name ?? 'Unknown'
+              // Inbound customer emails have sender_id = null (no profile); fall back to
+              // the inbound From address so the thread shows the real sender, not 'Unknown'.
+              const author = m.profiles?.full_name ?? m.inbound_email_from ?? 'Unknown'
               return (
                 <li
                   key={m.id}
