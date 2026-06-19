@@ -1,4 +1,6 @@
+import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
+import { ArrowLeft } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import type { Ticket, TicketMessage } from '@/lib/types/database.types'
 import CopyId from '@/components/CopyId'
@@ -27,7 +29,7 @@ function initials(name: string | null | undefined) {
 }
 
 export default async function TicketDetailPage({ params }: { params: Promise<{ orgSlug: string; id: string }> }) {
-  const { id } = await params
+  const { orgSlug, id } = await params
   const supabase = await createClient()
 
   const { data: { user } } = await supabase.auth.getUser()
@@ -83,28 +85,35 @@ export default async function TicketDetailPage({ params }: { params: Promise<{ o
   }))
 
   return (
-    <div className="px-8 py-8">
-      <div className="mx-auto max-w-6xl grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-8">
-        <aside className="lg:sticky lg:top-6 self-start">
+    <div className="px-8 py-8 space-y-6">
+      <div>
+        <Link
+          href={`/${orgSlug}/tickets`}
+          className="inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-300 transition-colors"
+        >
+          <ArrowLeft className="w-3.5 h-3.5" />
+          Back to Tickets
+        </Link>
+        <div className="mt-2 flex items-start justify-between gap-4">
+          <div className="flex-1 min-w-0">
+            <EditableSubject ticketId={ticket.id} initial={ticket.subject} />
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <TicketPrioritySelect ticketId={ticket.id} value={ticket.priority} size="md" />
+            <TicketStatusSelect   ticketId={ticket.id} value={ticket.status}   size="md" />
+          </div>
+        </div>
+        <div className="mt-0.5 text-xs">
+          <CopyId id={ticket.display_id} />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <aside className="lg:col-span-1 space-y-6">
           <TicketRecipientsSection ticketId={ticket.id} recipients={recipients} mode="org" />
         </aside>
 
-        <div className="w-full space-y-6">
-          <div className="space-y-3">
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex-1 min-w-0">
-                <EditableSubject ticketId={ticket.id} initial={ticket.subject} />
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <TicketPrioritySelect ticketId={ticket.id} value={ticket.priority} size="md" />
-                <TicketStatusSelect   ticketId={ticket.id} value={ticket.status}   size="md" />
-              </div>
-            </div>
-            <div className="text-xs">
-              <CopyId id={ticket.display_id} />
-            </div>
-          </div>
-
+        <div className="lg:col-span-2 space-y-6">
           {ticket.description && (
             <div className="bg-pvx-surface/50 border border-pvx-border rounded-lg p-6">
               <div className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-2">
