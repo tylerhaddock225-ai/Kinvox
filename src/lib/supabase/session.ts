@@ -127,10 +127,11 @@ export async function updateSession(request: NextRequest) {
   // page?" decision points. Everything else is trusted (subject to
   // the orphan guard below).
   if (user && isSortingHatPath(pathname)) {
-    // Force a token refresh so the downstream profile read + any
-    // redirect lands with the freshest cookies possible.
-    await supabase.auth.refreshSession().catch(() => null)
-
+    // Hotfix-B: do NOT call refreshSession() here. Concurrent requests (document +
+    // RSC prefetches) racing on a single-use refresh token caused losing racers to
+    // null their session, then read profiles as anon → RLS returned 0 rows →
+    // hasOrg=false → /pending-invite. The @supabase/ssr client auto-refreshes
+    // lazily on actual 401s; pre-refreshing here is both unnecessary and harmful.
     const { data: profile } = await supabase
       .from('profiles')
       .select('system_role, organization_id, organizations(slug)')
