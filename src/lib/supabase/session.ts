@@ -144,7 +144,9 @@ export async function updateSession(request: NextRequest) {
     const role       = profile?.system_role ?? null
     const isPlatform = typeof role === 'string' && role.startsWith('platform_')
     const orgSlug    = profile?.organizations?.slug ?? null
-    const hasOrg     = Boolean(profile?.organization_id && orgSlug)
+    // Hotfix-A: organization_id alone determines tenant status; slug is for URL only.
+    // Pre-redesign safety net (Workstream M will replace this with the three-state model).
+    const hasOrg     = Boolean(profile?.organization_id)
     const hasInvite  = Boolean(
       (user.user_metadata as { invited_to_org?: string } | null)?.invited_to_org
     )
@@ -165,7 +167,11 @@ export async function updateSession(request: NextRequest) {
     if (isTeam || isPlatform) {
       destination = '/hq'
     } else if (hasOrg) {
-      destination = `/${orgSlug}`
+      // Hotfix-A: organization_id alone determines tenant status; slug is for URL only.
+      // Pre-redesign safety net (Workstream M will replace this with the three-state model).
+      // When org_id is set but the embed couldn't resolve the slug, route to '/'; the
+      // dashboard layout re-resolves the org context so the user lands without bouncing.
+      destination = orgSlug ? `/${orgSlug}` : '/'
     } else if (hasInvite) {
       destination = '/onboarding'
     } else {
@@ -194,7 +200,9 @@ export async function updateSession(request: NextRequest) {
 
     const isPlatform = typeof profile?.system_role === 'string'
                     && profile.system_role.startsWith('platform_')
-    const hasOrg     = !!profile?.organization_id
+    // Hotfix-A: organization_id alone determines tenant status; slug is for URL only.
+    // Pre-redesign safety net (Workstream M will replace this with the three-state model).
+    const hasOrg     = Boolean(profile?.organization_id)
 
     if (!isTeamEmail(user.email) && !isPlatform && !hasOrg) {
       return noStore(redirectOnHost(request, '/pending-invite'))
