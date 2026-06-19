@@ -84,12 +84,12 @@ export default async function TicketDetailPage({ params }: { params: Promise<{ o
 
   return (
     <div className="px-8 py-8">
-      <div className="grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-8">
+      <div className="mx-auto max-w-6xl grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-8">
         <aside className="lg:sticky lg:top-6 self-start">
           <TicketRecipientsSection ticketId={ticket.id} recipients={recipients} mode="org" />
         </aside>
 
-        <div className="max-w-3xl mx-auto w-full space-y-6">
+        <div className="w-full space-y-6">
           <div className="space-y-3">
             <div className="flex items-start justify-between gap-4">
               <div className="flex-1 min-w-0">

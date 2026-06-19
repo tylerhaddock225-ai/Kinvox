@@ -111,7 +111,7 @@ export default async function HQTicketDetailPage({ params }: { params: Promise<{
   const isPlatform = !!ticket.is_platform_support
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto max-w-6xl space-y-6">
       <div>
         <Link
           href="/hq/tickets"
@@ -132,7 +132,7 @@ export default async function HQTicketDetailPage({ params }: { params: Promise<{
           />
         </aside>
 
-        <div className="max-w-3xl mx-auto w-full space-y-6">
+        <div className="w-full space-y-6">
           <div className="space-y-3">
             <div className="flex items-start justify-between gap-4">
               <div className="flex-1 min-w-0 flex items-start gap-3">
