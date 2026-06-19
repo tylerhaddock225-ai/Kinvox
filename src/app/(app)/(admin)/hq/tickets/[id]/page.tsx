@@ -111,7 +111,7 @@ export default async function HQTicketDetailPage({ params }: { params: Promise<{
   const isPlatform = !!ticket.is_platform_support
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
+    <div className="space-y-6">
       <div>
         <Link
           href="/hq/tickets"
@@ -122,63 +122,8 @@ export default async function HQTicketDetailPage({ params }: { params: Promise<{
         </Link>
       </div>
 
-      <div className="space-y-3">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex-1 min-w-0 flex items-start gap-3">
-            {isPlatform && (
-              <LifeBuoy className="w-5 h-5 text-violet-400 mt-1 shrink-0" aria-label="Platform support" />
-            )}
-            <div className="flex-1 min-w-0">
-              <EditableSubject ticketId={ticket.id} initial={ticket.subject} />
-            </div>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <TicketPrioritySelect ticketId={ticket.id} value={ticket.priority} size="md" />
-            <TicketStatusSelect   ticketId={ticket.id} value={ticket.status}   size="md" />
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3 text-xs">
-          <CopyId id={ticket.display_id} />
-          <span className="text-gray-600">·</span>
-          <span className="text-gray-400">
-            {ticket.organizations?.name ?? <span className="text-gray-600">Unknown org</span>}
-          </span>
-          {isPlatform && ticket.hq_category && (
-            <>
-              <span className="text-gray-600">·</span>
-              <span className="inline-flex items-center rounded-md border border-violet-700/60 bg-violet-950/40 px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-violet-300">
-                {CATEGORY_LABEL[ticket.hq_category as HQCategory]}
-              </span>
-            </>
-          )}
-        </div>
-      </div>
-
-      {isPlatform && (ticket.affected_tab || ticket.record_id) && (
-        <div className="rounded-lg border border-violet-500/20 bg-violet-500/5 px-5 py-4">
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-violet-300 mb-3">
-            Organization Context
-          </div>
-          <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
-            {ticket.affected_tab && (
-              <div>
-                <dt className="text-xs text-gray-500">Affected Tab</dt>
-                <dd className="text-gray-200 mt-0.5">{TAB_LABEL[ticket.affected_tab as AffectedTab]}</dd>
-              </div>
-            )}
-            {ticket.record_id && (
-              <div>
-                <dt className="text-xs text-gray-500">Record ID</dt>
-                <dd className="text-gray-200 mt-0.5 font-mono text-xs break-all">{ticket.record_id}</dd>
-              </div>
-            )}
-          </dl>
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 md:grid-cols-[340px_1fr] gap-6">
-        <aside className="md:sticky md:top-6 self-start">
+      <div className="grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-8">
+        <aside className="lg:sticky lg:top-6 self-start">
           <TicketRecipientsSection
             ticketId={ticket.id}
             recipients={recipients}
@@ -187,7 +132,62 @@ export default async function HQTicketDetailPage({ params }: { params: Promise<{
           />
         </aside>
 
-        <div className="space-y-6">
+        <div className="max-w-3xl mx-auto w-full space-y-6">
+          <div className="space-y-3">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex-1 min-w-0 flex items-start gap-3">
+                {isPlatform && (
+                  <LifeBuoy className="w-5 h-5 text-violet-400 mt-1 shrink-0" aria-label="Platform support" />
+                )}
+                <div className="flex-1 min-w-0">
+                  <EditableSubject ticketId={ticket.id} initial={ticket.subject} />
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <TicketPrioritySelect ticketId={ticket.id} value={ticket.priority} size="md" />
+                <TicketStatusSelect   ticketId={ticket.id} value={ticket.status}   size="md" />
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 text-xs">
+              <CopyId id={ticket.display_id} />
+              <span className="text-gray-600">·</span>
+              <span className="text-gray-400">
+                {ticket.organizations?.name ?? <span className="text-gray-600">Unknown org</span>}
+              </span>
+              {isPlatform && ticket.hq_category && (
+                <>
+                  <span className="text-gray-600">·</span>
+                  <span className="inline-flex items-center rounded-md border border-violet-700/60 bg-violet-950/40 px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-violet-300">
+                    {CATEGORY_LABEL[ticket.hq_category as HQCategory]}
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
+
+          {isPlatform && (ticket.affected_tab || ticket.record_id) && (
+            <div className="rounded-lg border border-violet-500/20 bg-violet-500/5 px-5 py-4">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-violet-300 mb-3">
+                Organization Context
+              </div>
+              <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
+                {ticket.affected_tab && (
+                  <div>
+                    <dt className="text-xs text-gray-500">Affected Tab</dt>
+                    <dd className="text-gray-200 mt-0.5">{TAB_LABEL[ticket.affected_tab as AffectedTab]}</dd>
+                  </div>
+                )}
+                {ticket.record_id && (
+                  <div>
+                    <dt className="text-xs text-gray-500">Record ID</dt>
+                    <dd className="text-gray-200 mt-0.5 font-mono text-xs break-all">{ticket.record_id}</dd>
+                  </div>
+                )}
+              </dl>
+            </div>
+          )}
+
           {ticket.description && (
             <div className="bg-pvx-surface/50 border border-pvx-border rounded-lg p-6">
               <div className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-2">

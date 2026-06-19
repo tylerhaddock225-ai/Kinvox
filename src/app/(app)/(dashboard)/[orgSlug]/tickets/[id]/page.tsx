@@ -83,28 +83,28 @@ export default async function TicketDetailPage({ params }: { params: Promise<{ o
   }))
 
   return (
-    <div className="px-8 py-8 max-w-6xl mx-auto space-y-6">
-      <div className="space-y-3">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex-1 min-w-0">
-            <EditableSubject ticketId={ticket.id} initial={ticket.subject} />
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <TicketPrioritySelect ticketId={ticket.id} value={ticket.priority} size="md" />
-            <TicketStatusSelect   ticketId={ticket.id} value={ticket.status}   size="md" />
-          </div>
-        </div>
-        <div className="text-xs">
-          <CopyId id={ticket.display_id} />
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-[340px_1fr] gap-6">
-        <aside className="md:sticky md:top-6 self-start">
+    <div className="px-8 py-8">
+      <div className="grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-8">
+        <aside className="lg:sticky lg:top-6 self-start">
           <TicketRecipientsSection ticketId={ticket.id} recipients={recipients} mode="org" />
         </aside>
 
-        <div className="space-y-6">
+        <div className="max-w-3xl mx-auto w-full space-y-6">
+          <div className="space-y-3">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex-1 min-w-0">
+                <EditableSubject ticketId={ticket.id} initial={ticket.subject} />
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <TicketPrioritySelect ticketId={ticket.id} value={ticket.priority} size="md" />
+                <TicketStatusSelect   ticketId={ticket.id} value={ticket.status}   size="md" />
+              </div>
+            </div>
+            <div className="text-xs">
+              <CopyId id={ticket.display_id} />
+            </div>
+          </div>
+
           {ticket.description && (
             <div className="bg-pvx-surface/50 border border-pvx-border rounded-lg p-6">
               <div className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-2">
