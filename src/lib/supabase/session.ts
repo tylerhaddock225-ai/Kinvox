@@ -24,6 +24,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 import { isTeamEmail } from '@/lib/auth/is-team'
+import type { SystemRole } from '@/lib/types/auth'
 
 // Tag every response with no-store + no-cache so the browser (and
 // BFCache in most browsers) won't replay a rendered dashboard after
@@ -132,19 +133,33 @@ export async function updateSession(request: NextRequest) {
     // null their session, then read profiles as anon → RLS returned 0 rows →
     // hasOrg=false → /pending-invite. The @supabase/ssr client auto-refreshes
     // lazily on actual 401s; pre-refreshing here is both unnecessary and harmful.
+    // Hotfix-C: dropped the embedded organizations slug select. profiles ↔ organizations has
+    // two foreign keys (profiles.organization_id → orgs, organizations.owner_id →
+    // profiles), so the PostgREST embed was ambiguous (PGRST201), silently failed the
+    // whole .single() query, and returned profile=null for every tenant user, sending
+    // them to /pending-invite. Fix: fetch profile without embed, then resolve slug in
+    // a separate query.
     const { data: profile } = await supabase
       .from('profiles')
-      .select('system_role, organization_id, organizations(slug)')
+      .select('system_role, organization_id')
       .eq('id', user.id)
-      .single<{
-        system_role: string | null
-        organization_id: string | null
-        organizations: { slug: string | null } | null
-      }>()
+      .single<{ system_role: SystemRole | null; organization_id: string | null }>()
+
+    // Resolve slug separately when org_id is set. Safe to fail — orgSlug stays null
+    // and Hotfix-A's '/' fallback covers it as defense in depth (should not fire in
+    // normal operation, but kept as a safety net).
+    let orgSlug: string | null = null
+    if (profile?.organization_id) {
+      const { data: org } = await supabase
+        .from('organizations')
+        .select('slug')
+        .eq('id', profile.organization_id)
+        .maybeSingle<{ slug: string | null }>()
+      orgSlug = org?.slug ?? null
+    }
 
     const role       = profile?.system_role ?? null
     const isPlatform = typeof role === 'string' && role.startsWith('platform_')
-    const orgSlug    = profile?.organizations?.slug ?? null
     // Hotfix-A: organization_id alone determines tenant status; slug is for URL only.
     // Pre-redesign safety net (Workstream M will replace this with the three-state model).
     const hasOrg     = Boolean(profile?.organization_id)
@@ -179,22 +194,6 @@ export async function updateSession(request: NextRequest) {
       destination = '/pending-invite'
     }
 
-    // TEMP-DIAG (Hotfix-B-DIAG) — surface what the middleware actually sees so we
-    // can identify why a healthy-data user still hits /pending-invite. REVERT
-    // immediately after the root cause is identified.
-    console.error('[SortingHatDiag]', JSON.stringify({
-      userId: user.id,
-      userEmail: user.email,
-      pathname,
-      profileRaw: profile ?? null,
-      orgSlug,
-      hasOrg,
-      isPlatform,
-      isTeam,
-      hasInvite,
-      destination_will_be: destination,
-    }))
-
     if (pathname !== destination) {
       return noStore(redirectOnHost(request, destination))
     }
@@ -220,17 +219,6 @@ export async function updateSession(request: NextRequest) {
     // Hotfix-A: organization_id alone determines tenant status; slug is for URL only.
     // Pre-redesign safety net (Workstream M will replace this with the three-state model).
     const hasOrg     = Boolean(profile?.organization_id)
-
-    // TEMP-DIAG (Hotfix-B-DIAG) — Gate 3 visibility (orphan guard).
-    console.error('[SortingHatDiag-Gate3]', JSON.stringify({
-      userId: user.id,
-      userEmail: user.email,
-      pathname,
-      profileRaw: profile ?? null,
-      hasOrg,
-      isPlatform,
-      guard_will_redirect_to_pending: !isTeamEmail(user.email) && !isPlatform && !hasOrg,
-    }))
 
     if (!isTeamEmail(user.email) && !isPlatform && !hasOrg) {
       return noStore(redirectOnHost(request, '/pending-invite'))
