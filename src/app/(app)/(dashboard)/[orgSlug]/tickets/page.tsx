@@ -14,8 +14,11 @@ import SortableHeader from '@/components/SortableHeader'
 
 type TicketRow = Pick<
   Ticket,
-  'id' | 'display_id' | 'subject' | 'status' | 'priority' | 'created_at' | 'updated_at' | 'assigned_to'
-> & { profiles: { full_name: string | null } | null }
+  'id' | 'display_id' | 'subject' | 'status' | 'priority' | 'created_at' | 'updated_at' | 'assigned_to' | 'customer_id'
+> & {
+  profiles: { full_name: string | null } | null
+  customer: { first_name: string | null; last_name: string | null; email: string | null } | null
+}
 
 const STATUSES   = ['open', 'pending', 'closed'] as const
 const PRIORITIES = ['low', 'medium', 'high'] as const
@@ -86,6 +89,14 @@ function formatRelative(iso: string): string {
   const day = Math.round(hr / 24)
   if (day < 30)   return `${day}d ago`
   return new Date(iso).toLocaleDateString()
+}
+
+// "From" / contact for a ticket: linked customer name → customer email →
+// batched inbound sender (for customer-less tickets) → em dash.
+function ticketFrom(t: TicketRow, inboundMap: Map<string, string>): string {
+  const c = t.customer
+  const name = [c?.first_name, c?.last_name].filter(Boolean).join(' ').trim()
+  return name || c?.email || inboundMap.get(t.id) || '—'
 }
 
 type Queue = 'active' | 'closed'
@@ -169,7 +180,7 @@ export default async function TicketsPage({
 
   let ticketsQ = supabase
     .from('tickets')
-    .select('id, display_id, subject, status, priority, created_at, updated_at, assigned_to, profiles!tickets_assigned_to_fkey(full_name)')
+    .select('id, display_id, subject, status, priority, created_at, updated_at, assigned_to, customer_id, profiles!tickets_assigned_to_fkey(full_name), customer:customers(first_name, last_name, email)')
     .eq('organization_id', orgId)
     .eq('is_platform_support', false)
     .is('deleted_at', null)
@@ -239,6 +250,25 @@ export default async function TicketsPage({
   const members = (membersRes.data ?? []) as { id: string; full_name: string | null }[]
   const verifiedSupportEmail = orgRes.data?.verified_support_email ?? null
 
+  // Batched inbound-sender fallback for tickets with no linked customer — ONE
+  // query, keyed to the visible rows, keeping the earliest inbound sender per
+  // ticket. Avoids any per-row resolution (no N+1).
+  const customerlessIds = rawRows.filter(t => !t.customer_id).map(t => t.id)
+  const inboundMap = new Map<string, string>()
+  if (customerlessIds.length > 0) {
+    const { data: inboundRows } = await supabase
+      .from('ticket_messages')
+      .select('ticket_id, inbound_email_from')
+      .in('ticket_id', customerlessIds)
+      .not('inbound_email_from', 'is', null)
+      .order('created_at', { ascending: true })
+    for (const r of (inboundRows ?? []) as { ticket_id: string; inbound_email_from: string | null }[]) {
+      if (r.inbound_email_from && !inboundMap.has(r.ticket_id)) {
+        inboundMap.set(r.ticket_id, r.inbound_email_from)
+      }
+    }
+  }
+
   return (
     <div className="px-8 py-8 space-y-6">
       <div className="flex items-start justify-between gap-4">
@@ -289,6 +319,7 @@ export default async function TicketsPage({
                   <SortableHeader label="ID" sortKey="id" defaultOrder="asc" />
                 </th>
                 <th className="px-3 py-3 text-left font-medium">Subject</th>
+                <th className="px-3 py-3 text-left font-medium">From</th>
                 <th className="px-3 py-3 text-left font-medium">
                   <SortableHeader label="Priority" sortKey="priority" defaultOrder="asc" />
                 </th>
@@ -314,6 +345,9 @@ export default async function TicketsPage({
                     <Link href={`/${orgSlug}/tickets/${t.id}`} className="hover:text-violet-400 transition-colors">
                       {t.subject}
                     </Link>
+                  </td>
+                  <td className="px-3 py-3 text-gray-400 max-w-[14rem] truncate" title={ticketFrom(t, inboundMap)}>
+                    {ticketFrom(t, inboundMap)}
                   </td>
                   <td className="px-3 py-3">
                     <TicketPrioritySelect ticketId={t.id} value={t.priority} />

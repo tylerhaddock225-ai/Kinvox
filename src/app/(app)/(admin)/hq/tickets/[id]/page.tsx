@@ -10,7 +10,7 @@ import TicketPrioritySelect from '@/components/TicketPrioritySelect'
 import HQReplyBox from '@/components/admin/HQReplyBox'
 import TicketRecipientsSection, { type RecipientRow } from '@/components/TicketRecipientsSection'
 
-type MessageRow = Pick<TicketMessage, 'id' | 'body' | 'type' | 'created_at' | 'sender_id'> & {
+type MessageRow = Pick<TicketMessage, 'id' | 'body' | 'type' | 'created_at' | 'sender_id' | 'inbound_email_from'> & {
   profiles: { full_name: string | null } | null
 }
 
@@ -75,7 +75,7 @@ export default async function HQTicketDetailPage({ params }: { params: Promise<{
   const [messagesRes, recipientsRes, membersRes] = await Promise.all([
     supabase
       .from('ticket_messages')
-      .select('id, body, type, created_at, sender_id, profiles!ticket_messages_sender_id_fkey(full_name)')
+      .select('id, body, type, created_at, sender_id, inbound_email_from, profiles!ticket_messages_sender_id_fkey(full_name)')
       .eq('ticket_id', id)
       .order('created_at', { ascending: true }),
     supabase
@@ -111,7 +111,7 @@ export default async function HQTicketDetailPage({ params }: { params: Promise<{
   const isPlatform = !!ticket.is_platform_support
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
+    <div className="space-y-6">
       <div>
         <Link
           href="/hq/tickets"
@@ -120,10 +120,7 @@ export default async function HQTicketDetailPage({ params }: { params: Promise<{
           <ArrowLeft className="w-3.5 h-3.5" />
           Back to Tickets
         </Link>
-      </div>
-
-      <div className="space-y-3">
-        <div className="flex items-start justify-between gap-4">
+        <div className="mt-2 flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0 flex items-start gap-3">
             {isPlatform && (
               <LifeBuoy className="w-5 h-5 text-violet-400 mt-1 shrink-0" aria-label="Platform support" />
@@ -137,8 +134,7 @@ export default async function HQTicketDetailPage({ params }: { params: Promise<{
             <TicketStatusSelect   ticketId={ticket.id} value={ticket.status}   size="md" />
           </div>
         </div>
-
-        <div className="flex items-center gap-3 text-xs">
+        <div className="mt-1 flex items-center gap-3 text-xs">
           <CopyId id={ticket.display_id} />
           <span className="text-gray-600">·</span>
           <span className="text-gray-400">
@@ -155,107 +151,115 @@ export default async function HQTicketDetailPage({ params }: { params: Promise<{
         </div>
       </div>
 
-      {isPlatform && (ticket.affected_tab || ticket.record_id) && (
-        <div className="rounded-lg border border-violet-500/20 bg-violet-500/5 px-5 py-4">
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-violet-300 mb-3">
-            Organization Context
-          </div>
-          <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
-            {ticket.affected_tab && (
-              <div>
-                <dt className="text-xs text-gray-500">Affected Tab</dt>
-                <dd className="text-gray-200 mt-0.5">{TAB_LABEL[ticket.affected_tab as AffectedTab]}</dd>
-              </div>
-            )}
-            {ticket.record_id && (
-              <div>
-                <dt className="text-xs text-gray-500">Record ID</dt>
-                <dd className="text-gray-200 mt-0.5 font-mono text-xs break-all">{ticket.record_id}</dd>
-              </div>
-            )}
-          </dl>
-        </div>
-      )}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <aside className="lg:col-span-1 space-y-6">
+          <TicketRecipientsSection
+            ticketId={ticket.id}
+            recipients={recipients}
+            orgMembers={orgMembers}
+            mode="hq"
+          />
 
-      {ticket.description && (
-        <div className="bg-pvx-surface/50 border border-pvx-border rounded-lg p-6">
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-2">
-            Original Message
-          </div>
-          <div className="text-sm text-gray-200 whitespace-pre-wrap leading-relaxed">
-            {ticket.description}
-          </div>
-          {isPlatform && ticket.screenshot_url && (
-            <div className="mt-4 text-xs">
-              <span className="text-gray-500">Screenshot: </span>
-              <a
-                href={ticket.screenshot_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-violet-400 hover:text-violet-300 underline decoration-dotted underline-offset-4 break-all"
-              >
-                {ticket.screenshot_url}
-              </a>
+          {isPlatform && (ticket.affected_tab || ticket.record_id) && (
+            <div className="rounded-lg border border-violet-500/20 bg-violet-500/5 px-5 py-4">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-violet-300 mb-3">
+                Organization Context
+              </div>
+              <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
+                {ticket.affected_tab && (
+                  <div>
+                    <dt className="text-xs text-gray-500">Affected Tab</dt>
+                    <dd className="text-gray-200 mt-0.5">{TAB_LABEL[ticket.affected_tab as AffectedTab]}</dd>
+                  </div>
+                )}
+                {ticket.record_id && (
+                  <div>
+                    <dt className="text-xs text-gray-500">Record ID</dt>
+                    <dd className="text-gray-200 mt-0.5 font-mono text-xs break-all">{ticket.record_id}</dd>
+                  </div>
+                )}
+              </dl>
             </div>
           )}
+        </aside>
+
+        <div className="lg:col-span-2 space-y-6">
+          {ticket.description && (
+            <div className="bg-pvx-surface/50 border border-pvx-border rounded-lg p-6">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-2">
+                Original Message
+              </div>
+              <div className="text-sm text-gray-200 whitespace-pre-wrap leading-relaxed">
+                {ticket.description}
+              </div>
+              {isPlatform && ticket.screenshot_url && (
+                <div className="mt-4 text-xs">
+                  <span className="text-gray-500">Screenshot: </span>
+                  <a
+                    href={ticket.screenshot_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-violet-400 hover:text-violet-300 underline decoration-dotted underline-offset-4 break-all"
+                  >
+                    {ticket.screenshot_url}
+                  </a>
+                </div>
+              )}
+            </div>
+          )}
+
+          <section className="space-y-3">
+            <h2 className="text-sm font-semibold text-gray-300">Conversation</h2>
+
+            {messages.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-pvx-border bg-pvx-surface/30 px-6 py-10 text-center text-sm text-gray-500">
+                No messages yet. Start the conversation below.
+              </div>
+            ) : (
+              <ul className="space-y-3">
+                {messages.map(m => {
+                  const isInternal = m.type === 'internal'
+                  // Inbound customer emails have sender_id = null (no profile); fall back to
+                  // the inbound From address so the thread shows the real sender, not 'Unknown'.
+                  const author = m.profiles?.full_name ?? m.inbound_email_from ?? 'Unknown'
+                  return (
+                    <li
+                      key={m.id}
+                      className={`rounded-xl border px-4 py-3 ${
+                        isInternal
+                          ? 'border-yellow-500/30 bg-yellow-500/10'
+                          : 'border-pvx-border bg-pvx-surface'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-3 mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-violet-600/20 text-violet-300 text-[11px] font-semibold">
+                            {initials(author)}
+                          </span>
+                          <span className="text-sm font-medium text-white">{author}</span>
+                          {isInternal && (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-yellow-500/20 text-yellow-300 border border-yellow-500/30">
+                              Private Note
+                            </span>
+                          )}
+                        </div>
+                        <time className="text-xs text-gray-500">
+                          {new Date(m.created_at).toLocaleString()}
+                        </time>
+                      </div>
+                      <div className="text-sm text-gray-200 whitespace-pre-wrap">{m.body}</div>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </section>
+
+          <section className="rounded-xl border border-pvx-border bg-pvx-surface p-4">
+            <HQReplyBox ticketId={ticket.id} />
+          </section>
         </div>
-      )}
-
-      <TicketRecipientsSection
-        ticketId={ticket.id}
-        recipients={recipients}
-        orgMembers={orgMembers}
-        mode="hq"
-      />
-
-      <section className="space-y-3">
-        <h2 className="text-sm font-semibold text-gray-300">Conversation</h2>
-
-        {messages.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-pvx-border bg-pvx-surface/30 px-6 py-10 text-center text-sm text-gray-500">
-            No messages yet. Start the conversation below.
-          </div>
-        ) : (
-          <ul className="space-y-3">
-            {messages.map(m => {
-              const isInternal = m.type === 'internal'
-              const author = m.profiles?.full_name ?? 'Unknown'
-              return (
-                <li
-                  key={m.id}
-                  className={`rounded-xl border px-4 py-3 ${
-                    isInternal
-                      ? 'border-yellow-500/30 bg-yellow-500/10'
-                      : 'border-pvx-border bg-pvx-surface'
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-3 mb-2">
-                    <div className="flex items-center gap-2">
-                      <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-violet-600/20 text-violet-300 text-[11px] font-semibold">
-                        {initials(author)}
-                      </span>
-                      <span className="text-sm font-medium text-white">{author}</span>
-                      {isInternal && (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-yellow-500/20 text-yellow-300 border border-yellow-500/30">
-                          Private Note
-                        </span>
-                      )}
-                    </div>
-                    <time className="text-xs text-gray-500">
-                      {new Date(m.created_at).toLocaleString()}
-                    </time>
-                  </div>
-                  <div className="text-sm text-gray-200 whitespace-pre-wrap">{m.body}</div>
-                </li>
-              )
-            })}
-          </ul>
-        )}
-      </section>
-
-      <section className="rounded-xl border border-pvx-border bg-pvx-surface p-4">
-        <HQReplyBox ticketId={ticket.id} />
-      </section>
+      </div>
     </div>
   )
 }
