@@ -179,6 +179,22 @@ export async function updateSession(request: NextRequest) {
       destination = '/pending-invite'
     }
 
+    // TEMP-DIAG (Hotfix-B-DIAG) — surface what the middleware actually sees so we
+    // can identify why a healthy-data user still hits /pending-invite. REVERT
+    // immediately after the root cause is identified.
+    console.error('[SortingHatDiag]', JSON.stringify({
+      userId: user.id,
+      userEmail: user.email,
+      pathname,
+      profileRaw: profile ?? null,
+      orgSlug,
+      hasOrg,
+      isPlatform,
+      isTeam,
+      hasInvite,
+      destination_will_be: destination,
+    }))
+
     if (pathname !== destination) {
       return noStore(redirectOnHost(request, destination))
     }
@@ -204,6 +220,17 @@ export async function updateSession(request: NextRequest) {
     // Hotfix-A: organization_id alone determines tenant status; slug is for URL only.
     // Pre-redesign safety net (Workstream M will replace this with the three-state model).
     const hasOrg     = Boolean(profile?.organization_id)
+
+    // TEMP-DIAG (Hotfix-B-DIAG) — Gate 3 visibility (orphan guard).
+    console.error('[SortingHatDiag-Gate3]', JSON.stringify({
+      userId: user.id,
+      userEmail: user.email,
+      pathname,
+      profileRaw: profile ?? null,
+      hasOrg,
+      isPlatform,
+      guard_will_redirect_to_pending: !isTeamEmail(user.email) && !isPlatform && !hasOrg,
+    }))
 
     if (!isTeamEmail(user.email) && !isPlatform && !hasOrg) {
       return noStore(redirectOnHost(request, '/pending-invite'))
