@@ -30,16 +30,23 @@ export default async function HQSupportDetailPage({
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('organization_id')
-    .eq('id', user.id)
-    .single()
+  // Guard on the impersonation-aware effective org (not the raw profile org)
+  // so an org-less HQ admin impersonating a tenant isn't bounced to /onboarding.
+  const [{ data: profile }, impersonation] = await Promise.all([
+    supabase
+      .from('profiles')
+      .select('organization_id')
+      .eq('id', user.id)
+      .single<{ organization_id: string | null }>(),
+    resolveImpersonation(),
+  ])
 
-  if (!profile?.organization_id) redirect('/onboarding')
+  const effectiveOrgId = impersonation.active
+    ? impersonation.orgId
+    : profile?.organization_id ?? null
+  if (!effectiveOrgId) redirect('/onboarding')
 
-  const impersonation = await resolveImpersonation()
-  const orgId = impersonation.active ? impersonation.orgId : profile.organization_id
+  const orgId = effectiveOrgId
 
   const [ticketRes, orgRes] = await Promise.all([
     supabase

@@ -165,16 +165,6 @@ export async function updateSession(request: NextRequest) {
     const hasInvite  = Boolean(
       (user.user_metadata as { invited_to_org?: string } | null)?.invited_to_org
     )
-    // TEMP-DIAG (revert after capture): Gate 2 entry snapshot. Cookie read via
-    // request.cookies (middleware) — literal must match IMPERSONATION_COOKIE.
-    console.error('[IMP-DIAG] session Gate2', {
-      pathname,
-      isPlatform,
-      hasOrg,
-      systemRole: profile?.system_role,
-      orgId: profile?.organization_id,
-      impersonateCookie: request.cookies.get('kinvox_impersonate_id')?.value ?? null,
-    })
     // Compute the ONE destination this user belongs at. Priority
     // matches the manifest: HQ staff (platform_*) → /hq,
     // tenant members → /{slug} (the merchant dashboard lives at /{slug},
@@ -196,8 +186,6 @@ export async function updateSession(request: NextRequest) {
     }
 
     if (pathname !== destination) {
-      // TEMP-DIAG (revert after capture)
-      console.error('[IMP-DIAG] session redirect ->', { to: destination, reason: `Gate2 sorting-hat (isPlatform=${isPlatform}, hasOrg=${hasOrg})` })
       return noStore(redirectOnHost(request, destination))
     }
     // else the user is already where they belong — fall through.
@@ -222,19 +210,7 @@ export async function updateSession(request: NextRequest) {
     // Pre-redesign safety net (Workstream M will replace this with the three-state model).
     const hasOrg     = Boolean(profile?.organization_id)
 
-    // TEMP-DIAG (revert after capture): Gate 3 entry snapshot.
-    console.error('[IMP-DIAG] session Gate3', {
-      pathname,
-      isPlatform,
-      hasOrg,
-      systemRole: profile?.system_role,
-      orgId: profile?.organization_id,
-      impersonateCookie: request.cookies.get('kinvox_impersonate_id')?.value ?? null,
-    })
-
     if (!isPlatform && !hasOrg) {
-      // TEMP-DIAG (revert after capture)
-      console.error('[IMP-DIAG] session redirect ->', { to: '/pending-invite', reason: 'Gate3 orphan guard (!isPlatform && !hasOrg)' })
       return noStore(redirectOnHost(request, '/pending-invite'))
     }
 
@@ -242,8 +218,6 @@ export async function updateSession(request: NextRequest) {
     if (pathname.startsWith('/leads')) {
       const { data: canView } = await supabase.rpc('auth_user_view_leads')
       if (canView === false) {
-        // TEMP-DIAG (revert after capture)
-        console.error('[IMP-DIAG] session redirect ->', { to: '/', reason: 'Gate3 /leads view_leads=false' })
         return noStore(redirectOnHost(request, '/'))
       }
     }
