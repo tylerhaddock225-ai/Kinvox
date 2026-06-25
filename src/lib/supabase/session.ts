@@ -23,7 +23,6 @@
  */
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
-import { isTeamEmail } from '@/lib/auth/is-team'
 import type { SystemRole } from '@/lib/types/auth'
 
 // Tag every response with no-store + no-cache so the browser (and
@@ -166,21 +165,13 @@ export async function updateSession(request: NextRequest) {
     const hasInvite  = Boolean(
       (user.user_metadata as { invited_to_org?: string } | null)?.invited_to_org
     )
-    // Internal-Team shortcut: anyone signed in with a @kinvoxtech.com
-    // email is on the Kinvox team. They route to /hq even before their
-    // profiles.system_role is provisioned — so a brand-new hire who
-    // logged in for the first time still lands on the HQ surface
-    // instead of /pending-invite. The predicate is shared with the HQ
-    // layout's gate via isTeamEmail() so both stay in lockstep.
-    const isTeam = isTeamEmail(user.email)
-
     // Compute the ONE destination this user belongs at. Priority
-    // matches the manifest: HQ staff (Team email OR platform_*) → /hq,
+    // matches the manifest: HQ staff (platform_*) → /hq,
     // tenant members → /{slug} (the merchant dashboard lives at /{slug},
     // not /{slug}/dashboard — see src/app/(dashboard)/[orgSlug]/page.tsx),
     // invitees → /onboarding, everyone else → /pending-invite.
     let destination: string
-    if (isTeam || isPlatform) {
+    if (isPlatform) {
       destination = '/hq'
     } else if (hasOrg) {
       // Hotfix-A: organization_id alone determines tenant status; slug is for URL only.
@@ -206,7 +197,6 @@ export async function updateSession(request: NextRequest) {
   // get sent to /pending-invite. This stops direct URL navigation
   // from bypassing the sorting hat. Does not fire on /hq/*,
   // /api/admin/*, the sorting-hat paths themselves, or public routes.
-  // Internal Team email is also exempt — see the Gate 2 comment.
   if (user && !isAdmin && !isPublic && !isSortingHatPath(pathname)) {
     const { data: profile } = await supabase
       .from('profiles')
@@ -220,7 +210,7 @@ export async function updateSession(request: NextRequest) {
     // Pre-redesign safety net (Workstream M will replace this with the three-state model).
     const hasOrg     = Boolean(profile?.organization_id)
 
-    if (!isTeamEmail(user.email) && !isPlatform && !hasOrg) {
+    if (!isPlatform && !hasOrg) {
       return noStore(redirectOnHost(request, '/pending-invite'))
     }
 

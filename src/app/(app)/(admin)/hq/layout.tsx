@@ -2,7 +2,6 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import AdminSidebar from '@/components/admin/AdminSidebar'
 import AdminGlobalSearch from '@/components/admin/AdminGlobalSearch'
-import { isTeamEmail } from '@/lib/auth/is-team'
 import { isSuperAdmin, hasHqPermission } from '@/lib/permissions'
 import type { SystemRole } from '@/lib/types/auth'
 
@@ -18,14 +17,12 @@ export default async function AdminHqLayout({ children }: { children: React.Reac
     .single<{ system_role: SystemRole | null; role_id: string | null }>()
 
   // Gate has to stay symmetric with the sorting hat in
-  // src/lib/supabase/session.ts. The hat sends @kinvoxtech.com users
-  // to /hq even before profiles.system_role is provisioned. If we
-  // redirect them out on null role, the hat sends them right back —
-  // infinite loop, browser eventually shows ERR_TOO_MANY_REDIRECTS,
-  // and the user manually backs out to the marketing landing page.
-  // The shared isTeamEmail() helper makes both gates read the same
-  // predicate from one place.
-  if (!profile?.system_role && !isTeamEmail(user.email)) redirect('/')
+  // src/lib/supabase/session.ts. Both gate HQ access on system_role
+  // alone: the hat routes platform_* users to /hq, and this layout
+  // admits the same set. Keeping the predicate identical avoids the
+  // redirect loop that a mismatch (one gate admitting, the other
+  // rejecting) would otherwise cause.
+  if (!profile?.system_role) redirect('/')
 
   // AdminSidebar's permission-gated nav assumes one of two roles. For
   // a Team member without a provisioned system_role we render the
