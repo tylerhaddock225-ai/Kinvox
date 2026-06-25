@@ -144,17 +144,17 @@ export async function updateSession(request: NextRequest) {
       .eq('id', user.id)
       .single<{ system_role: SystemRole | null; organization_id: string | null }>()
 
-    // Resolve slug separately when org_id is set. Safe to fail — orgSlug stays null
-    // and Hotfix-A's '/' fallback covers it as defense in depth (should not fire in
-    // normal operation, but kept as a safety net).
+    // Resolve slug via the resolve_org_slug SECURITY DEFINER RPC (Workstream M
+    // Stage 3) — a single unambiguous id lookup that retires the Hotfix-C separate
+    // organizations.slug query (itself a workaround for the PostgREST dual-FK embed
+    // ambiguity, PGRST201). Safe to fail — orgSlug stays null and Hotfix-A's '/'
+    // fallback covers it as defense in depth (should not fire in normal operation,
+    // but kept as a safety net).
     let orgSlug: string | null = null
     if (profile?.organization_id) {
-      const { data: org } = await supabase
-        .from('organizations')
-        .select('slug')
-        .eq('id', profile.organization_id)
-        .maybeSingle<{ slug: string | null }>()
-      orgSlug = org?.slug ?? null
+      const { data: slug } = await supabase
+        .rpc('resolve_org_slug', { p_org_id: profile.organization_id })
+      orgSlug = slug ?? null
     }
 
     const role       = profile?.system_role ?? null
