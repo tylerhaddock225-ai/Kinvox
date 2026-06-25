@@ -15,7 +15,7 @@ export default async function OrgSlugLayout({
   // zero extra round-trips. The org slug check is the layout-only piece.
   const ctx = await getOrgContext()
   if (!ctx) redirect('/login')
-  if (!ctx.profile.organization_id) redirect('/onboarding')
+  if (!ctx.effectiveOrgId) redirect('/onboarding')
 
   const supabase = await createClient()
   const { data: effectiveOrg } = await supabase
