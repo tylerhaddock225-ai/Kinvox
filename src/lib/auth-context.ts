@@ -53,6 +53,14 @@ export const getOrgContext = cache(async (): Promise<OrgContext | null> => {
     ? impersonation.orgId
     : profile?.organization_id ?? null
 
+  // TEMP-DIAG (revert after capture): resolved org context snapshot.
+  console.error('[IMP-DIAG] getOrgContext', {
+    rawOrgId: profile?.organization_id,
+    impersonationActive: impersonation.active,
+    impersonationOrgId: impersonation.orgId,
+    effectiveOrgId,
+  })
+
   return {
     user,
     profile:        profile ?? { organization_id: null, role: null },

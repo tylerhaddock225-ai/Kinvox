@@ -88,6 +88,8 @@ export async function proxy(request: NextRequest) {
     // rendering the (marketing) tree on an app host.
     const isRedirect = response.status >= 300 && response.status < 400
     if (!isRedirect && isMarketingPath(pathname)) {
+      // TEMP-DIAG (revert after capture)
+      console.error('[IMP-DIAG] proxy redirect ->', { pathname, to: '/login', reason: 'marketing path on app host (post-hoc assertion)' })
       return new NextResponse(null, { status: 307, headers: { Location: '/login' } })
     }
     return response
@@ -97,7 +99,10 @@ export async function proxy(request: NextRequest) {
   // route that landed on the wrong subdomain — bounce to the app host
   // (preserving path + query so invite/?token=… links survive).
   if (!isMarketingPath(pathname)) {
-    return hostRedirect(buildUrlOnHost(request, appHostFor(request)))
+    const dest = buildUrlOnHost(request, appHostFor(request))
+    // TEMP-DIAG (revert after capture)
+    console.error('[IMP-DIAG] proxy redirect ->', { pathname, to: dest, reason: 'app route on marketing host' })
+    return hostRedirect(dest)
   }
   return NextResponse.next()
 }
