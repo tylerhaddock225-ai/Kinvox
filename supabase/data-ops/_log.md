@@ -28,3 +28,14 @@ Append-only. Each row records a single `scripts/run-data-op.mjs` execution.
 > ON DELETE CASCADE on `profiles.organization_id` did not remove the platform_owner profile. All transaction guards passed;
 > post-op verification confirmed org gone, Tyler HQ intact + decoupled, zero dual-positive profiles, bot auth row gone,
 > Niko's org untouched. **PROD IS NOT YET SYNCED** — this op has only been applied to sandbox.
+| 2026-06-25 19:31:57Z | prod | 20260625140000_m_stage1_decouple_hq_prod.sql | ahjab | ok |
+
+> **2026-06-25 — M prod Stage 1 (PRODUCTION, decouple-only).** File: `prod/20260625140000_m_stage1_decouple_hq_prod.sql`.
+> Purpose: null the HQ account's (`tyler@kinvoxtech.com`, `2ef26c2e-…`, platform_owner) `organization_id` so prod's
+> dual_positive_count goes 1 → 0 (required before the Stage 3 `profiles_no_dual_positive` constraint can VALIDATE in Turn 3).
+> **DIVERGES from sandbox:** prod's only org, `Kinvox Demo Org` (`aaaaaaaa-…0001`, slug `kinvox-demo`), is **intentionally
+> RETAINED** — it is a populated demo org (8 customers, 9 leads, 9 tickets, 2 demo users + lead-inbox bot), NOT empty litter
+> like the sandbox `kinvox-sandbox-hq` org that was deleted. No deletes, no bot cleanup, no org deletion on prod. All
+> transaction guards passed; post-op verified: dual_positive=0, Tyler intact + decoupled (org_id NULL), demo org present
+> with customers=8/leads=9 unchanged. Linked to prod for the op, then **relinked back to sandbox**.
+> **STILL PENDING for prod:** migrations `20260625120000` + `20260625130000` (Turn 3) and code merge to `main` (Turn 4).
