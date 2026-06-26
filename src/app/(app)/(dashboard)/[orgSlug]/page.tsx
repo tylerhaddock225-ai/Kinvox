@@ -79,11 +79,13 @@ export default async function DashboardPage({
     roles:           unknown
   } | null
 
-  if (profileRes.error || !profileData?.organization_id) redirect('/onboarding')
-
   // When a verified HQ admin is impersonating, queries target the impersonated org.
-  // Otherwise fall back to the caller's real org — RLS enforces both sides.
-  const orgId = impersonation.active ? impersonation.orgId : profileData.organization_id
+  // Otherwise fall back to the caller's real org — RLS enforces both sides. Guard on the
+  // effective org (not the raw profile org): an org-less HQ admin impersonating a tenant
+  // has a null profile org but a valid impersonated org, and must NOT be bounced to
+  // /onboarding (which the sorting hat would then route on to /hq).
+  const orgId = impersonation.active ? impersonation.orgId : (profileData?.organization_id ?? null)
+  if (profileRes.error || !profileData || !orgId) redirect('/onboarding')
 
   // URL-slug verification: the `/:orgSlug` segment must match the effective org.
   // If it doesn't, redirect to the correct slug rather than render misleading

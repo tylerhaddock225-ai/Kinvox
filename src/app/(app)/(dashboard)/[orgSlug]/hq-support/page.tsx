@@ -87,19 +87,25 @@ export default async function HQSupportPage({
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('organization_id')
-    .eq('id', user.id)
-    .single()
-
-  if (!profile?.organization_id) redirect('/onboarding')
-
   // The [orgSlug] layout has already verified the URL slug matches the
-  // caller's effective org (real or impersonated) — so we can trust the
-  // impersonation-aware orgId here without reverifying the slug.
-  const impersonation = await resolveImpersonation()
-  const orgId = impersonation.active ? impersonation.orgId : profile.organization_id
+  // caller's effective org (real or impersonated) — so we trust the
+  // impersonation-aware effective org here. Guard on it (not the raw profile
+  // org) so an org-less HQ admin impersonating a tenant isn't bounced.
+  const [{ data: profile }, impersonation] = await Promise.all([
+    supabase
+      .from('profiles')
+      .select('organization_id')
+      .eq('id', user.id)
+      .single<{ organization_id: string | null }>(),
+    resolveImpersonation(),
+  ])
+
+  const effectiveOrgId = impersonation.active
+    ? impersonation.orgId
+    : profile?.organization_id ?? null
+  if (!effectiveOrgId) redirect('/onboarding')
+
+  const orgId = effectiveOrgId
 
   const { orgSlug } = await params
   const sp = await searchParams
