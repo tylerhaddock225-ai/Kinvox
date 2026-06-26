@@ -2,16 +2,17 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Building2, Ticket, Sparkles, CreditCard, Zap, Eye, Inbox, LayoutDashboard, Settings, LogOut, ShieldCheck } from "lucide-react";
+import { Building2, Ticket, Sparkles, CreditCard, Zap, Eye, Inbox, LayoutDashboard, Settings, LogOut, ShieldCheck, Users } from "lucide-react";
 import { startImpersonation } from "@/app/(app)/actions/impersonation";
 import { logout } from "@/app/(app)/(auth)/actions";
 import { getRoleLabel, type SystemRole } from "@/lib/types/auth";
 
 interface AdminSidebarProps {
   systemRole: SystemRole;
-  /** Server-computed per-item flags (K3). Billing/Roles render only when set. */
+  /** Server-computed per-item flags (K3). Billing/Users/Roles render only when set. */
   canManageBilling: boolean;
   canManageRoles: boolean;
+  canManageUsers: boolean;
 }
 
 type NavItem = {
@@ -34,16 +35,18 @@ const baseNav: NavItem[] = [
 // server-side in the HQ layout) instead of the prior platform_owner-only
 // branch. The other nav items stay open to any HQ staffer for now.
 const billingNav: NavItem = { href: "/hq/billing",        label: "Billing", icon: CreditCard };
+const usersNav:   NavItem = { href: "/hq/settings/users", label: "Users",   icon: Users };
 const rolesNav:   NavItem = { href: "/hq/settings/roles", label: "Roles",   icon: ShieldCheck };
 
 const ORG_DETAIL_RE = /^\/hq\/organizations\/([^/]+)\/?$/;
 
-export default function AdminSidebar({ systemRole, canManageBilling, canManageRoles }: AdminSidebarProps) {
+export default function AdminSidebar({ systemRole, canManageBilling, canManageRoles, canManageUsers }: AdminSidebarProps) {
   const pathname = usePathname();
 
   const navItems: NavItem[] = [
     ...baseNav,
     ...(canManageBilling ? [billingNav] : []),
+    ...(canManageUsers   ? [usersNav]   : []),
     ...(canManageRoles   ? [rolesNav]   : []),
   ];
 

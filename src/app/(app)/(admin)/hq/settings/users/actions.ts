@@ -7,22 +7,14 @@ import { hqGate } from '@/lib/permissions/gates'
 import { mintToken, ttlFromNow, TTL } from '@/lib/auth/tokens'
 import { sendPlatformEmail } from '@/lib/email/send-platform-email'
 import { renderHqInviteEmail } from '@/lib/email/templates/hq-invite'
-import type { SystemRole } from '@/lib/types/auth'
+import { SYSTEM_ROLES, type SystemRole } from '@/lib/types/auth'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-// The five internal_role enum values. Mirrors @/lib/types/auth SystemRole — the
-// single source of truth for what profiles.system_role can hold. Used to reject
-// arbitrary strings before they reach the hq_invitations.system_role enum column.
-const INTERNAL_ROLES: readonly SystemRole[] = [
-  'platform_owner',
-  'platform_support',
-  'platform_admin',
-  'platform_sales',
-  'platform_accounting',
-]
+// Reject arbitrary strings before they reach the hq_invitations.system_role enum
+// column. SYSTEM_ROLES is the single source of truth (@/lib/types/auth).
 function isInternalRole(v: string): v is SystemRole {
-  return (INTERNAL_ROLES as readonly string[]).includes(v)
+  return (SYSTEM_ROLES as readonly string[]).includes(v)
 }
 
 export type HqInviteState =

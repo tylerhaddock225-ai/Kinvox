@@ -16,6 +16,18 @@ export type SystemRole =
   | 'platform_sales'
   | 'platform_accounting'
 
+// Ordered list of every internal_role enum value — single source of truth for
+// dropdowns (HQ Users invite form) and runtime validation. Keep in sync with the
+// SystemRole union above (the Record<SystemRole, …> below already forces label
+// exhaustiveness; this array forces the value list to stay complete too).
+export const SYSTEM_ROLES: readonly SystemRole[] = [
+  'platform_owner',
+  'platform_support',
+  'platform_admin',
+  'platform_sales',
+  'platform_accounting',
+]
+
 // Human-readable labels for each role. Typed as Record<SystemRole, string>
 // so adding a new value to SystemRole forces an exhaustiveness error here
 // — the next person extending the ENUM can't ship a UI that silently
