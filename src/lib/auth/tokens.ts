@@ -41,4 +41,5 @@ export const TTL = {
   PASSWORD_RESET:    60 * 60 * 1000,          // 1h
   ORGANIZATION_CLAIM: 7 * 24 * 60 * 60 * 1000, // 7d
   MEMBER_INVITE:      7 * 24 * 60 * 60 * 1000, // 7d
+  HQ_INVITE:          7 * 24 * 60 * 60 * 1000, // 7d — HQ user invitations (Workstream J Stage 2)
 } as const

@@ -108,7 +108,11 @@ export async function updateSession(request: NextRequest) {
   // Invite landing is public-facing: an unauthenticated invitee resolves the
   // token, sets a password, and is auto-signed-in (mirrors /claim/).
   const isInvite     = pathname.startsWith('/invite/')
-  const isPublic     = isAuthRoute || isWebhook || isAuthApi || isLeadMagnet || isPublicApi || isClaim || isInvite || pathname.startsWith('/_next') || pathname === '/favicon.ico'
+  // HQ invite landing — the platform-staff parallel of /invite/ (Workstream J
+  // Stage 2). Same public-facing redeem flow; the redeem API itself lives under
+  // /api/auth/hq-invite and is already covered by isAuthApi above.
+  const isHqInvite   = pathname.startsWith('/hq-invite/')
+  const isPublic     = isAuthRoute || isWebhook || isAuthApi || isLeadMagnet || isPublicApi || isClaim || isInvite || isHqInvite || pathname.startsWith('/_next') || pathname === '/favicon.ico'
 
   // ── Gate 0: login-first ────────────────────────────────────
   // Every protected route bounces unauthenticated requests to /login.
