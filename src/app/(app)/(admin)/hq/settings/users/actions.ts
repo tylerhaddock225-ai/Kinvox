@@ -186,7 +186,7 @@ export async function inviteHqUser(input: {
     return { status: 'error', error: result.error }
   }
 
-  revalidatePath('/hq/settings/users', 'page')
+  revalidatePath('/hq/settings', 'page')
   return { status: 'success' }
 }
 
@@ -227,5 +227,5 @@ export async function resendHqInvite(invitationId: string): Promise<void> {
     expiresAt,
   })
 
-  revalidatePath('/hq/settings/users', 'page')
+  revalidatePath('/hq/settings', 'page')
 }
