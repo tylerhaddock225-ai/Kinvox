@@ -49,9 +49,11 @@ function formatInviteDate(iso: string): string {
 function InviteHqUserModal({
   roleOptions,
   systemRoleOptions,
+  defaultRoleId,
 }: {
   roleOptions:       RoleOption[]
   systemRoleOptions: SystemRoleOption[]
+  defaultRoleId?:    string
 }) {
   const router    = useRouter()
   const dialogRef = useRef<HTMLDialogElement>(null)
@@ -121,7 +123,7 @@ function InviteHqUserModal({
           </div>
           <div>
             <label className={LABEL} htmlFor="hq-invite-role">HQ Role</label>
-            <select id="hq-invite-role" name="role_id" defaultValue="" className={INPUT}>
+            <select id="hq-invite-role" name="role_id" defaultValue={defaultRoleId ?? ''} className={INPUT}>
               <option value="">No role</option>
               {roleOptions.map(r => (
                 <option key={r.id} value={r.id}>{r.name}</option>
@@ -174,11 +176,13 @@ export default function HqUsersClient({
   invites,
   roleOptions,
   systemRoleOptions,
+  defaultRoleId,
 }: {
   users:             HqUserRow[]
   invites:           HqInviteRow[]
   roleOptions:       RoleOption[]
   systemRoleOptions: SystemRoleOption[]
+  defaultRoleId?:    string
 }) {
   return (
     <div className="space-y-8">
@@ -188,7 +192,7 @@ export default function HqUsersClient({
           <h3 className="text-sm font-semibold text-white">
             HQ Users <span className="text-xs text-gray-500 font-normal">({users.length})</span>
           </h3>
-          <InviteHqUserModal roleOptions={roleOptions} systemRoleOptions={systemRoleOptions} />
+          <InviteHqUserModal roleOptions={roleOptions} systemRoleOptions={systemRoleOptions} defaultRoleId={defaultRoleId} />
         </div>
 
         <div className="rounded-xl border border-pvx-border bg-pvx-surface overflow-x-auto">
