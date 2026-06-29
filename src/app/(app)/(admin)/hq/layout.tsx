@@ -44,15 +44,15 @@ export default async function AdminHqLayout({ children }: { children: React.Reac
     permissions = role?.permissions ?? null
   }
   const permProfile = { system_role: profile?.system_role ?? null, role: { permissions } }
+  // Users/Roles management moved into the /hq/settings hub (J4), which computes
+  // its own per-section gating. The sidebar only needs the Billing flag now.
   const canManageBilling = isSuperAdmin(permProfile) || hasHqPermission(permProfile, 'manage_platform_billing')
-  const canManageRoles   = isSuperAdmin(permProfile) || hasHqPermission(permProfile, 'manage_global_roles')
 
   return (
     <div className="flex h-full min-h-screen bg-pvx-bg text-slate-100">
       <AdminSidebar
         systemRole={sidebarRole}
         canManageBilling={canManageBilling}
-        canManageRoles={canManageRoles}
       />
       <main className="flex-1 overflow-y-auto flex flex-col">
         <header className="sticky top-0 z-30 flex items-center justify-center border-b border-pvx-border bg-pvx-bg/80 backdrop-blur px-8 py-3">

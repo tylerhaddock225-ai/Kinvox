@@ -64,7 +64,7 @@ export async function createHqRole(
   })
   if (error) return { status: 'error', error: error.message }
 
-  revalidatePath('/hq/settings/roles')
+  revalidatePath('/hq/settings')
   return { status: 'success' }
 }
 
@@ -86,7 +86,7 @@ export async function updateHqRole(
     .is('organization_id', null)
   if (error) return { status: 'error', error: error.message }
 
-  revalidatePath('/hq/settings/roles')
+  revalidatePath('/hq/settings')
   return { status: 'success' }
 }
 
@@ -107,5 +107,5 @@ export async function deleteHqRole(formData: FormData): Promise<void> {
     .eq('id', roleId)
     .is('organization_id', null)
 
-  revalidatePath('/hq/settings/roles')
+  revalidatePath('/hq/settings')
 }
