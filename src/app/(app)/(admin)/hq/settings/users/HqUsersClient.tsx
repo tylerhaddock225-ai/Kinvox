@@ -187,14 +187,13 @@ export default function HqUsersClient({
               <tr className="border-b border-pvx-border text-xs text-gray-500">
                 <th className="px-5 py-3 text-left font-medium">Name</th>
                 <th className="px-5 py-3 text-left font-medium">Email</th>
-                <th className="px-5 py-3 text-left font-medium">Platform Role</th>
-                <th className="px-5 py-3 text-left font-medium">HQ Role</th>
+                <th className="px-5 py-3 text-left font-medium">Role</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-pvx-border">
               {users.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="px-5 py-10 text-center text-gray-500 text-sm">
+                  <td colSpan={3} className="px-5 py-10 text-center text-gray-500 text-sm">
                     No HQ users yet.
                   </td>
                 </tr>
@@ -203,12 +202,14 @@ export default function HqUsersClient({
                   <tr key={u.id} className="hover:bg-violet-400/[0.07] transition-colors">
                     <td className="px-5 py-3 text-gray-200 font-medium">{u.full_name ?? '—'}</td>
                     <td className="px-5 py-3 text-gray-400">{u.email ?? '—'}</td>
+                    {/* Single Role column: assigned HQ Role name if present, else
+                        the stamped Platform Role label (e.g. Tyler, role_id NULL →
+                        "Platform Owner"). Mirrors org's one-role-per-row grammar. */}
                     <td className="px-5 py-3">
                       <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border bg-purple-500/10 text-purple-400 border-purple-500/20">
-                        {u.system_role_label}
+                        {u.role_name ?? u.system_role_label}
                       </span>
                     </td>
-                    <td className="px-5 py-3 text-gray-400">{u.role_name ?? 'No role'}</td>
                   </tr>
                 ))
               )}
