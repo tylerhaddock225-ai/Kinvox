@@ -7,15 +7,13 @@ import { hqGate } from '@/lib/permissions/gates'
 import { mintToken, ttlFromNow, TTL } from '@/lib/auth/tokens'
 import { sendPlatformEmail } from '@/lib/email/send-platform-email'
 import { renderHqInviteEmail } from '@/lib/email/templates/hq-invite'
-import { SYSTEM_ROLES, type SystemRole } from '@/lib/types/auth'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-// Reject arbitrary strings before they reach the hq_invitations.system_role enum
-// column. SYSTEM_ROLES is the single source of truth (@/lib/types/auth).
-function isInternalRole(v: string): v is SystemRole {
-  return (SYSTEM_ROLES as readonly string[]).includes(v)
-}
+// HQ users get a uniform non-owner platform identifier stamped server-side —
+// mirrors org stamping role='agent'. Real authority is the assigned HQ Role
+// permission bag. platform_owner stays a manual break-glass, never stamped.
+const HQ_DEFAULT_SYSTEM_ROLE = 'platform_admin'
 
 export type HqInviteState =
   | { status: 'success' }
@@ -98,7 +96,6 @@ async function dispatchHqInviteEmail(params: {
 export async function inviteHqUser(input: {
   email:       string
   full_name?:  string | null
-  system_role: string
   role_id?:    string | null
 }): Promise<HqInviteState> {
   const ctx = await requireHqAdmin()
@@ -107,12 +104,8 @@ export async function inviteHqUser(input: {
   const email = input.email.trim().toLowerCase()
   if (!EMAIL_RE.test(email)) return { status: 'error', error: 'Invalid email address' }
 
-  if (!isInternalRole(input.system_role)) {
-    return { status: 'error', error: 'Invalid HQ role' }
-  }
-  const systemRole = input.system_role
-  const fullName   = input.full_name?.trim() || null
-  const roleId     = input.role_id || null
+  const fullName = input.full_name?.trim() || null
+  const roleId   = input.role_id || null
 
   const admin = createAdminClient()
 
@@ -159,7 +152,7 @@ export async function inviteHqUser(input: {
     .insert({
       email,
       full_name:   fullName,
-      system_role: systemRole,
+      system_role: HQ_DEFAULT_SYSTEM_ROLE,
       role_id:     roleId,
       token_hash:  tokenHash,
       expires_at:  expiresAt,

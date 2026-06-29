@@ -31,8 +31,7 @@ export type HqInviteRow = {
   expires_at:        string
 }
 
-export type RoleOption       = { id: string; name: string }
-export type SystemRoleOption = { value: string; label: string }
+export type RoleOption = { id: string; name: string }
 
 const INPUT = 'w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-violet-500'
 const LABEL = 'block text-xs font-medium text-gray-400 mb-1'
@@ -48,12 +47,10 @@ function formatInviteDate(iso: string): string {
 
 function InviteHqUserModal({
   roleOptions,
-  systemRoleOptions,
   defaultRoleId,
 }: {
-  roleOptions:       RoleOption[]
-  systemRoleOptions: SystemRoleOption[]
-  defaultRoleId?:    string
+  roleOptions:    RoleOption[]
+  defaultRoleId?: string
 }) {
   const router    = useRouter()
   const dialogRef = useRef<HTMLDialogElement>(null)
@@ -66,10 +63,9 @@ function InviteHqUserModal({
     setError(null)
     const fd = new FormData(e.currentTarget)
     const input = {
-      email:       String(fd.get('email') ?? ''),
-      full_name:   String(fd.get('full_name') ?? ''),
-      system_role: String(fd.get('system_role') ?? ''),
-      role_id:     String(fd.get('role_id') ?? '') || null,
+      email:     String(fd.get('email') ?? ''),
+      full_name: String(fd.get('full_name') ?? ''),
+      role_id:   String(fd.get('role_id') ?? '') || null,
     }
     startTransition(async () => {
       const res = await inviteHqUser(input)
@@ -112,14 +108,6 @@ function InviteHqUserModal({
           <div>
             <label className={LABEL} htmlFor="hq-invite-name">Full Name</label>
             <input id="hq-invite-name" name="full_name" type="text" placeholder="Jane Smith" className={INPUT} />
-          </div>
-          <div>
-            <label className={LABEL} htmlFor="hq-invite-system-role">Platform Role <span className="text-red-400">*</span></label>
-            <select id="hq-invite-system-role" name="system_role" required defaultValue="platform_support" className={INPUT}>
-              {systemRoleOptions.map(r => (
-                <option key={r.value} value={r.value}>{r.label}</option>
-              ))}
-            </select>
           </div>
           <div>
             <label className={LABEL} htmlFor="hq-invite-role">HQ Role</label>
@@ -175,14 +163,12 @@ export default function HqUsersClient({
   users,
   invites,
   roleOptions,
-  systemRoleOptions,
   defaultRoleId,
 }: {
-  users:             HqUserRow[]
-  invites:           HqInviteRow[]
-  roleOptions:       RoleOption[]
-  systemRoleOptions: SystemRoleOption[]
-  defaultRoleId?:    string
+  users:          HqUserRow[]
+  invites:        HqInviteRow[]
+  roleOptions:    RoleOption[]
+  defaultRoleId?: string
 }) {
   return (
     <div className="space-y-8">
@@ -192,7 +178,7 @@ export default function HqUsersClient({
           <h3 className="text-sm font-semibold text-white">
             HQ Users <span className="text-xs text-gray-500 font-normal">({users.length})</span>
           </h3>
-          <InviteHqUserModal roleOptions={roleOptions} systemRoleOptions={systemRoleOptions} defaultRoleId={defaultRoleId} />
+          <InviteHqUserModal roleOptions={roleOptions} defaultRoleId={defaultRoleId} />
         </div>
 
         <div className="rounded-xl border border-pvx-border bg-pvx-surface overflow-x-auto">

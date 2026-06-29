@@ -8,7 +8,6 @@ import HqUsersClient, {
   type HqUserRow,
   type HqInviteRow,
   type RoleOption,
-  type SystemRoleOption,
 } from './users/HqUsersClient'
 import HqRolesTable from './roles/HqRolesTable'
 import CreateHqRoleForm from './roles/CreateHqRoleForm'
@@ -172,20 +171,18 @@ function UserAdminPanel({
   users,
   invites,
   roleOptions,
-  systemRoleOptions,
   defaultRoleId,
   hqRoles,
   canManageUsers,
   canManageRoles,
 }: {
-  users:             HqUserRow[]
-  invites:           HqInviteRow[]
-  roleOptions:       RoleOption[]
-  systemRoleOptions: SystemRoleOption[]
-  defaultRoleId?:    string
-  hqRoles:           HqRoleRow[]
-  canManageUsers:    boolean
-  canManageRoles:    boolean
+  users:          HqUserRow[]
+  invites:        HqInviteRow[]
+  roleOptions:    RoleOption[]
+  defaultRoleId?: string
+  hqRoles:        HqRoleRow[]
+  canManageUsers: boolean
+  canManageRoles: boolean
 }) {
   return (
     <div className="space-y-10">
@@ -194,7 +191,6 @@ function UserAdminPanel({
           users={users}
           invites={invites}
           roleOptions={roleOptions}
-          systemRoleOptions={systemRoleOptions}
           defaultRoleId={defaultRoleId}
         />
       )}
@@ -239,23 +235,21 @@ export default function SettingsTabs({
   users,
   invites,
   roleOptions,
-  systemRoleOptions,
   defaultRoleId,
   hqRoles,
   canManageUsers,
   canManageRoles,
 }: {
-  currentPrefix:     string
-  showAffectedTab:   boolean
-  showRecordId:      boolean
-  users:             HqUserRow[]
-  invites:           HqInviteRow[]
-  roleOptions:       RoleOption[]
-  systemRoleOptions: SystemRoleOption[]
-  defaultRoleId?:    string
-  hqRoles:           HqRoleRow[]
-  canManageUsers:    boolean
-  canManageRoles:    boolean
+  currentPrefix:   string
+  showAffectedTab: boolean
+  showRecordId:    boolean
+  users:           HqUserRow[]
+  invites:         HqInviteRow[]
+  roleOptions:     RoleOption[]
+  defaultRoleId?:  string
+  hqRoles:         HqRoleRow[]
+  canManageUsers:  boolean
+  canManageRoles:  boolean
 }) {
   const showUserAdmin = canManageUsers || canManageRoles
 
@@ -289,7 +283,6 @@ export default function SettingsTabs({
           users={users}
           invites={invites}
           roleOptions={roleOptions}
-          systemRoleOptions={systemRoleOptions}
           defaultRoleId={defaultRoleId}
           hqRoles={hqRoles}
           canManageUsers={canManageUsers}

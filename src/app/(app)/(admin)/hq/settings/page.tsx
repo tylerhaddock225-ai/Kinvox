@@ -2,13 +2,12 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { isSuperAdmin, hasHqPermission, type HqPermissions } from '@/lib/permissions'
-import { SYSTEM_ROLES, getRoleLabel } from '@/lib/types/auth'
+import { getRoleLabel } from '@/lib/types/auth'
 import SettingsTabs from './SettingsTabs'
 import type {
   HqUserRow,
   HqInviteRow,
   RoleOption,
-  SystemRoleOption,
 } from './users/HqUsersClient'
 import type { HqRoleRow } from './roles/page'
 
@@ -129,11 +128,9 @@ export default async function AdminSettingsPage() {
     expires_at:        i.expires_at,
   }))
 
-  // B5a — platform_owner is a break-glass role, never assignable via the UI.
-  const systemRoleOptions: SystemRoleOption[] = SYSTEM_ROLES
-    .filter((r) => r !== 'platform_owner')
-    .map((r) => ({ value: r, label: getRoleLabel(r) }))
-
+  // J5 — system_role is no longer human-selected: inviteHqUser stamps a fixed
+  // non-owner identifier server-side (mirrors org stamping role='agent'). The
+  // invite form now collects only the HQ Role (permission bag).
   // B5b — pre-select the lone organization_id IS NULL role (HQ Admin).
   const defaultRoleId = roleOptions[0]?.id
 
@@ -156,7 +153,6 @@ export default async function AdminSettingsPage() {
         users={users}
         invites={invites}
         roleOptions={roleOptions}
-        systemRoleOptions={systemRoleOptions}
         defaultRoleId={defaultRoleId}
         hqRoles={hqRoles}
         canManageUsers={canManageUsers}
