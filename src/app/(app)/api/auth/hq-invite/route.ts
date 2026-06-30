@@ -15,12 +15,12 @@ const LOG = '[hq-invite]'
 //
 // CONSTRAINT-CRITICAL: organization_id MUST be NULL. profiles_no_dual_positive
 // — CHECK (NOT (system_role IS NOT NULL AND organization_id IS NOT NULL)) —
-// rejects any row carrying system_role alongside a non-null org. The legacy
-// profiles.role column is NOT NULL and constrained by profiles_role_check to
-// ('admin','agent','viewer'); a bespoke 'hq' value is therefore illegal, so HQ
-// users get role='admin' (the value the existing HQ user already carries, and
-// inert for tenant access since every tenant RLS path also requires a matching
-// org which an org-null HQ user never has).
+// rejects any row carrying system_role alongside a non-null org. profiles.role is
+// NOT NULL; K2c-C added a dedicated 'hq' value to profiles_role_check, so HQ users
+// now carry the honest role='hq' (a borrowed 'admin' from J2 until K2c-C). It is
+// inert for tenant access either way — every tenant RLS path also requires a
+// matching org, which an org-null HQ user never has — and nothing reads
+// profiles.role for HQ rows (HQ gating keys on system_role).
 export async function PATCH(request: NextRequest) {
   let body: { token?: unknown; password?: unknown; full_name?: unknown }
   try {
@@ -66,12 +66,12 @@ export async function PATCH(request: NextRequest) {
   const email: string = row.email
 
   // The HQ profile shape. organization_id MUST be null (profiles_no_dual_positive);
-  // role is the constraint-legal legacy sentinel (see header).
+  // role is the honest 'hq' sentinel (K2c-C; see header).
   const hqProfile = {
     system_role:     row.system_role,
     organization_id: null,
     role_id:         row.role_id,
-    role:            'admin',
+    role:            'hq',
   }
 
   // auth.users isn't reachable via PostgREST — resolve email → user through the
