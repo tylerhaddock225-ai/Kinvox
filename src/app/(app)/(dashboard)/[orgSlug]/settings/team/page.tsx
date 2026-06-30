@@ -68,8 +68,8 @@ export default async function TeamSettingsPage({
 
   // K3 — the Team tab specifically requires manage_team OR manage_roles.
   // An HQ admin who passed resolveImpersonation's is_admin_hq gate is treated
-  // as a tenant admin on the impersonated org; legacy role='admin' tenants
-  // (incl. platform_owner Tyler, role_id NULL) still pass via back-compat.
+  // as a tenant admin on the impersonated org. The legacy role='admin' back-compat
+  // was dropped in K2c-A; platform_owner Tyler reaches tenant pages via impersonation.
   const { data: prof } = await supabase
     .from('profiles')
     .select('role_id, roles(permissions)')
@@ -77,7 +77,7 @@ export default async function TeamSettingsPage({
     .maybeSingle<{ role_id: string | null; roles: { permissions: Record<string, boolean> | null } | null }>()
   const permissions = prof?.roles?.permissions ?? null
   const hasTeamAccess = !!permissions && (permissions.manage_team === true || permissions.manage_roles === true)
-  if (!ctx.impersonation.active && !hasTeamAccess && ctx.profile.role !== 'admin') redirect('/')
+  if (!ctx.impersonation.active && !hasTeamAccess) redirect('/')
 
   const orgId    = ctx.effectiveOrgId
 

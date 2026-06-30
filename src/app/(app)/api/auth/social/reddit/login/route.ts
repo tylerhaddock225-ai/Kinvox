@@ -12,6 +12,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { resolveEffectiveOrgId } from '@/lib/impersonation'
+import { orgGate } from '@/lib/permissions/gates'
 import {
   createSignedState,
   OAUTH_STATE_COOKIE,
@@ -44,17 +45,12 @@ export async function GET(request: NextRequest) {
   const orgId = await resolveEffectiveOrgId(supabase, user.id)
   if (!orgId) return new NextResponse('no_organization', { status: 403 })
 
-  // Tenant role gate mirrors the settings page itself — if the tenant
-  // user isn't an admin, they shouldn't be able to bind credentials for
-  // the org. HQ admins skip this via the impersonation path.
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role, organization_id')
-    .eq('id', user.id)
-    .single<{ role: string | null; organization_id: string | null }>()
-
-  const impersonating = profile?.organization_id !== orgId
-  if (!impersonating && profile?.role !== 'admin') {
+  // Binding Reddit credentials for the org is the manage_social_connections
+  // capability — the same gate the connect/disconnect server actions use
+  // (K2c-A, replacing the legacy role==='admin' check). orgGate also grants HQ
+  // admins via the impersonation (is_admin_hq) path.
+  const gate = await orgGate(supabase, user.id, orgId, 'manage_social_connections')
+  if (!gate.ok) {
     return new NextResponse('forbidden', { status: 403 })
   }
 

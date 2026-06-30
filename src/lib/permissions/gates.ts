@@ -8,8 +8,10 @@
 // Both gates resolve the caller's role permissions bag through the existing
 // hasOrgPermission / hasHqPermission helpers (their signatures are left intact —
 // we hand them a ProfileWithRole shaped object carrying the fetched role's bag).
-// Each ends in a clearly-marked BACK-COMPAT branch removed in K2 once every
-// admin has been assigned the corresponding system role.
+// The legacy BACK-COMPAT branches (tenant role==='admin' / any non-null
+// system_role) were removed in K2c-A now that every admin holds the
+// corresponding permission-bag role; only the bag + isSuperAdmin (platform_owner)
+// paths remain.
 
 import type { createClient } from '@/lib/supabase/server'
 import {
@@ -33,7 +35,6 @@ export type GateResult = { ok: true } | { ok: false; reason: string }
  *      caller is a verified HQ admin (RLS-backed is_admin_hq()).
  *   2. Permission bag — the caller's role grants `permissionKey`
  *      (platform_owner short-circuits inside hasOrgPermission).
- *   3. BACK-COMPAT — caller is a legacy tenant admin on their own org.
  * Fail-closed otherwise.
  */
 export async function orgGate(
@@ -44,11 +45,10 @@ export async function orgGate(
 ): Promise<GateResult> {
   const { data: profile } = await supabase
     .from('profiles')
-    .select('organization_id, role, role_id, system_role')
+    .select('organization_id, role_id, system_role')
     .eq('id', userId)
     .single<{
       organization_id: string | null
-      role: string | null
       role_id: string | null
       system_role: string | null
     }>()
@@ -78,12 +78,6 @@ export async function orgGate(
     }
   }
 
-  // TODO(K2): remove back-compat once all 37 gate sites are retrofit and the
-  // Org Admin role is assigned (via role_id) to every existing tenant admin.
-  if (profile.organization_id === orgId && profile.role === 'admin') {
-    return { ok: true }
-  }
-
   return { ok: false, reason: 'permission_denied' }
 }
 
@@ -91,7 +85,6 @@ export async function orgGate(
  * HQ-scope permission gate. Order of precedence:
  *   1. platform_owner super-admin bypass.
  *   2. Permission bag — the caller's HQ-global role grants `permissionKey`.
- *   3. BACK-COMPAT — any provisioned HQ staffer (system_role IS NOT NULL).
  * Fail-closed otherwise.
  */
 export async function hqGate(
@@ -127,9 +120,6 @@ export async function hqGate(
       return { ok: true }
     }
   }
-
-  // TODO(K2): remove after gate retrofit — any provisioned HQ staffer passes.
-  if (profile.system_role !== null) return { ok: true }
 
   return { ok: false, reason: 'permission_denied' }
 }
