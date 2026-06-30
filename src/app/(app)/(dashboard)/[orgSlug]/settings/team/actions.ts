@@ -264,7 +264,7 @@ export async function removeMember(formData: FormData): Promise<void> {
     .from('organizations')
     .select('owner_id')
     .eq('id', ctx.orgId)
-    .single<{ owner_id: string }>()
+    .single<{ owner_id: string | null }>()
   if (org?.owner_id === memberId) return
 
   // Detach. Org-scoped so a tampered member_id from another org no-ops.

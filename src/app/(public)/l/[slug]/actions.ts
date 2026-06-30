@@ -41,7 +41,7 @@ export type CaptureLeadState =
 type OrgRow = {
   id:                                  string
   name:                                string
-  owner_id:                            string
+  owner_id:                            string | null
   latitude:                            number | null
   longitude:                           number | null
   signal_radius:                       number | null
@@ -254,7 +254,10 @@ export async function captureLeadAction(
         .insert({
           organization_id: org.id,
           lead_id:         existingLead.id,
-          created_by:      org.owner_id,
+          // W1-1: author as the org's lead-inbox bot (resolved above), falling
+          // back to the owner — keeps lead-magnet booking working for an ownerless
+          // org instead of failing the NOT-NULL created_by FK.
+          created_by:      leadInbox?.id ?? org.owner_id,
           assigned_to:     leadInbox?.id ?? null,
           title:           `Initial consultation — ${trimmedName}`,
           description:     `Booked from ${slug} lead magnet resubmission. Service address: ${address}`,
@@ -391,7 +394,10 @@ export async function captureLeadAction(
       .insert({
         organization_id: org.id,
         lead_id:         lead.id,
-        created_by:      org.owner_id,
+        // W1-1: author as the org's lead-inbox bot (resolved above), falling
+        // back to the owner — keeps lead-magnet booking working for an ownerless
+        // org instead of failing the NOT-NULL created_by FK.
+        created_by:      leadInbox?.id ?? org.owner_id,
         assigned_to:     leadInbox?.id ?? null,
         title:           `Initial consultation — ${trimmedName}`,
         description:     `Booked from ${slug} lead magnet. Service address: ${address}`,

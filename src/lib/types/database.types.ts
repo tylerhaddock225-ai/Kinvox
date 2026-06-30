@@ -10,7 +10,7 @@ export type Database = {
           name: string
           slug: string
           plan: 'free' | 'pro' | 'enterprise'
-          owner_id: string
+          owner_id: string | null
           address_line1: string | null
           address_line2: string | null
           city: string | null
@@ -42,7 +42,7 @@ export type Database = {
           name: string
           slug: string
           plan?: 'free' | 'pro' | 'enterprise'
-          owner_id: string
+          owner_id?: string | null
           address_line1?: string | null
           address_line2?: string | null
           city?: string | null
