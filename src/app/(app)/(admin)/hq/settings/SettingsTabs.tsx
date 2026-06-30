@@ -172,6 +172,7 @@ function UserAdminPanel({
   invites,
   roleOptions,
   defaultRoleId,
+  callerId,
   hqRoles,
   canManageUsers,
   canManageRoles,
@@ -180,6 +181,7 @@ function UserAdminPanel({
   invites:        HqInviteRow[]
   roleOptions:    RoleOption[]
   defaultRoleId?: string
+  callerId:       string
   hqRoles:        HqRoleRow[]
   canManageUsers: boolean
   canManageRoles: boolean
@@ -192,6 +194,7 @@ function UserAdminPanel({
           invites={invites}
           roleOptions={roleOptions}
           defaultRoleId={defaultRoleId}
+          callerId={callerId}
         />
       )}
 
@@ -232,6 +235,7 @@ export default function SettingsTabs({
   currentPrefix,
   showAffectedTab,
   showRecordId,
+  callerId,
   users,
   invites,
   roleOptions,
@@ -243,6 +247,7 @@ export default function SettingsTabs({
   currentPrefix:   string
   showAffectedTab: boolean
   showRecordId:    boolean
+  callerId:        string
   users:           HqUserRow[]
   invites:         HqInviteRow[]
   roleOptions:     RoleOption[]
@@ -284,6 +289,7 @@ export default function SettingsTabs({
           invites={invites}
           roleOptions={roleOptions}
           defaultRoleId={defaultRoleId}
+          callerId={callerId}
           hqRoles={hqRoles}
           canManageUsers={canManageUsers}
           canManageRoles={canManageRoles}

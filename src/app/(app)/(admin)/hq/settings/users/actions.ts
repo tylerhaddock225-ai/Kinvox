@@ -183,6 +183,43 @@ export async function inviteHqUser(input: {
   return { status: 'success' }
 }
 
+// Remove an HQ user by DETACHING them: system_role + role_id are BOTH nulled in a
+// single update (nulling only system_role trips enforce_profile_role_scope — audit
+// B3b), so the sorting hat routes them to /pending-invite on next login. We do NOT
+// hard-delete the profile (would orphan auth.users) and never touch auth.users. The
+// `role` text column is left as-is (audit B3c, mirrors org). Self-removal and
+// owner-removal are forbidden; both are enforced server-side and never trusted from
+// the client. The platform parallel of the tenant removeMember.
+export async function removeHqUser(targetId: string): Promise<void> {
+  const ctx = await requireHqAdmin()
+  if (!ctx) return
+  if (!targetId) return
+
+  // Self-guard: an HQ admin can't remove their own HQ access.
+  if (targetId === ctx.userId) return
+
+  const admin = createAdminClient()
+
+  // Owner-guard (authoritative, server-read): never detach the platform owner.
+  // Read system_role from the profile via the admin client — never trust the client.
+  const { data: target } = await admin
+    .from('profiles')
+    .select('system_role')
+    .eq('id', targetId)
+    .maybeSingle<{ system_role: string | null }>()
+  if (target?.system_role === 'platform_owner') return
+
+  // Detach. Both fields nulled together (audit B3b); HQ-scoped via the
+  // .not('system_role', 'is', null) filter so a tampered id for a non-HQ profile
+  // no-ops (parallels org's .eq('organization_id', orgId)).
+  await admin.from('profiles')
+    .update({ system_role: null, role_id: null })
+    .eq('id', targetId)
+    .not('system_role', 'is', null)
+
+  revalidatePath('/hq/settings', 'page')
+}
+
 // Rotate the token on an existing pending HQ invitation and re-dispatch. The raw
 // token is unrecoverable (only the hash is stored), so resend mints a fresh one —
 // exactly like the tenant resendInvite.
