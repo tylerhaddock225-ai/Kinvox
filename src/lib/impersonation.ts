@@ -70,17 +70,6 @@ export async function resolveEffectiveOrgId(
 }
 
 /**
- * Tenant-admin gate for write actions. Two ways to pass:
- *   1. The caller is an HQ admin acting via resolveImpersonation — orgId
- *      is the impersonated org, which won't equal the caller's own
- *      profile.organization_id, so the impersonating branch grants access.
- *   2. The caller's profile.organization_id matches orgId AND
- *      profile.role = 'admin'.
- *
- * Mirrors the inline pattern that previously appeared in saveHuntingProfile
- * and disconnectSocialPlatform — same predicate, deduplicated.
- */
-/**
  * Resolves the URL slug for a tenant org. Used to scope revalidatePath /
  * server-side redirects under the [orgSlug] segment after the routing
  * migration. Returns null on missing row or query error — callers decide
@@ -119,23 +108,4 @@ export async function revalidateOrgPath(
     return
   }
   revalidatePath(`/${slug}${suffix}`)
-}
-
-export async function requireTenantAdmin(
-  supabase: SupabaseServerClient,
-  userId: string,
-  orgId: string,
-  unauthorizedMessage = 'Only org admins can perform this action',
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('organization_id, role')
-    .eq('id', userId)
-    .single<{ organization_id: string | null; role: string | null }>()
-
-  const impersonating = profile?.organization_id !== orgId
-  if (!impersonating && profile?.role !== 'admin') {
-    return { ok: false, error: unauthorizedMessage }
-  }
-  return { ok: true }
 }

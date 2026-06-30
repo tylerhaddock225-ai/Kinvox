@@ -2,6 +2,7 @@ import { Suspense } from 'react'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { resolveImpersonation } from '@/lib/impersonation'
+import { hasOrgPermission } from '@/lib/permissions'
 import CreateAppointmentModal from '@/components/CreateAppointmentModal'
 import CalendarCore, { type CalAppt } from '@/components/calendar/CalendarCore'
 import CalendarViewToggle from '@/components/calendar/CalendarViewToggle'
@@ -21,9 +22,9 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
   const [{ data: profile }, impersonation] = await Promise.all([
     supabase
       .from('profiles')
-      .select('organization_id, role')
+      .select('organization_id, system_role, roles(permissions)')
       .eq('id', user.id)
-      .single<{ organization_id: string | null; role: string | null }>(),
+      .single<{ organization_id: string | null; system_role: string | null; roles: { permissions: Record<string, boolean> | null } | null }>(),
     resolveImpersonation(),
   ])
 
@@ -33,10 +34,14 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
   if (!effectiveOrgId) redirect('/onboarding')
 
   const orgId         = effectiveOrgId
-  // HQ admins impersonating a tenant are treated as admins of that tenant
-  // for view-toggle purposes — their intent is to assist, and RLS still
-  // enforces the actual write boundaries downstream.
-  const isAdmin       = impersonation.active || profile?.role === 'admin'
+  // Gates the Global calendar view (all agents' appointments). Uses the
+  // team-oversight capability (manage_team) — the permission-bag successor to
+  // the legacy role==='admin' check (K2c-A): false-by-default for custom roles,
+  // true in the Org Admin bag, so it reproduces "org admin sees global". HQ
+  // admins impersonating a tenant are treated as admins for view-toggle
+  // purposes; RLS still enforces the actual write boundaries downstream.
+  const isAdmin       = impersonation.active ||
+    hasOrgPermission({ system_role: profile?.system_role, roles: profile?.roles }, 'manage_team')
   const openId        = typeof params.open    === 'string' ? params.open    : null
   const requestedView = typeof params.view    === 'string' ? params.view    : null
   const agentParam    = typeof params.agent   === 'string' ? params.agent   : null

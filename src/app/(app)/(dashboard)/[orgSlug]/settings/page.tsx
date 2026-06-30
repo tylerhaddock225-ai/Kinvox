@@ -23,9 +23,9 @@ export default async function SettingsPage() {
 
   // K3 — the settings hub renders multiple tabs; reaching it requires ANY one
   // of the settings-scoped permissions (tabs self-gate in a later stage).
-  // Preserves: impersonation grant (HQ admin acting as tenant), legacy
-  // role='admin' back-compat (covers platform_owner Tyler with role_id NULL),
-  // AND the new permission-bag check.
+  // Preserves: impersonation grant (HQ admin acting as tenant) AND the
+  // permission-bag check. The legacy role='admin' back-compat was dropped in
+  // K2c-A (platform_owner Tyler reaches tenant pages only via impersonation).
   const { data: prof } = await supabase
     .from('profiles')
     .select('role_id, roles(permissions)')
@@ -35,7 +35,7 @@ export default async function SettingsPage() {
 
   const settingsKeys = ['manage_team','manage_roles','manage_org_support_settings','manage_lead_settings','edit_signal_settings','manage_social_connections','manage_org_settings','manage_billing'] as const
   const hasAny = !!permissions && settingsKeys.some(k => permissions[k] === true)
-  if (!ctx.impersonation.active && !hasAny && ctx.profile.role !== 'admin') redirect('/')
+  if (!ctx.impersonation.active && !hasAny) redirect('/')
 
   const effectiveOrgId = ctx.effectiveOrgId
 
