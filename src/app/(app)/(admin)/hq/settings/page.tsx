@@ -150,6 +150,7 @@ export default async function AdminSettingsPage() {
         currentPrefix={currentPrefix}
         showAffectedTab={showAffectedTab}
         showRecordId={showRecordId}
+        callerId={user.id}
         users={users}
         invites={invites}
         roleOptions={roleOptions}

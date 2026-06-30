@@ -2,8 +2,8 @@
 
 import { useRef, useState, useTransition, type FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
-import { UserPlus, X, Send } from 'lucide-react'
-import { inviteHqUser, resendHqInvite } from './actions'
+import { UserPlus, X, Send, Trash2 } from 'lucide-react'
+import { inviteHqUser, resendHqInvite, removeHqUser } from './actions'
 
 // HQ Users tab. The platform parallel of the tenant TeamTabs Members + Pending
 // Invitations panels. Two differences from the tenant flow drive the wiring:
@@ -157,6 +157,30 @@ function ResendHqInviteButton({ inviteId }: { inviteId: string }) {
   )
 }
 
+// ── Remove (detach) button ─────────────────────────────────────────────────────
+// Detach an HQ user via removeHqUser. Uses the same useTransition + router.refresh()
+// pattern as ResendHqInviteButton (this client never binds <form action>), wrapped
+// in a native confirm() — mirroring org's TeamTabs Trash2 + confirm delete UX.
+
+function RemoveHqUserButton({ userId, name }: { userId: string; name: string }) {
+  const router = useRouter()
+  const [pending, startTransition] = useTransition()
+  return (
+    <button
+      type="button"
+      disabled={pending}
+      title="Remove HQ user"
+      onClick={() => {
+        if (!confirm(`Remove ${name} from Kinvox HQ? They'll lose HQ access immediately.`)) return
+        startTransition(async () => { await removeHqUser(userId); router.refresh() })
+      }}
+      className="p-1.5 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-400/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+    >
+      <Trash2 className="w-4 h-4" />
+    </button>
+  )
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 export default function HqUsersClient({
@@ -164,11 +188,13 @@ export default function HqUsersClient({
   invites,
   roleOptions,
   defaultRoleId,
+  callerId,
 }: {
   users:          HqUserRow[]
   invites:        HqInviteRow[]
   roleOptions:    RoleOption[]
   defaultRoleId?: string
+  callerId:       string
 }) {
   return (
     <div className="space-y-8">
@@ -188,30 +214,44 @@ export default function HqUsersClient({
                 <th className="px-5 py-3 text-left font-medium">Name</th>
                 <th className="px-5 py-3 text-left font-medium">Email</th>
                 <th className="px-5 py-3 text-left font-medium">Role</th>
+                <th className="px-5 py-3 text-right font-medium sr-only">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-pvx-border">
               {users.length === 0 ? (
                 <tr>
-                  <td colSpan={3} className="px-5 py-10 text-center text-gray-500 text-sm">
+                  <td colSpan={4} className="px-5 py-10 text-center text-gray-500 text-sm">
                     No HQ users yet.
                   </td>
                 </tr>
               ) : (
-                users.map(u => (
-                  <tr key={u.id} className="hover:bg-violet-400/[0.07] transition-colors">
-                    <td className="px-5 py-3 text-gray-200 font-medium">{u.full_name ?? '—'}</td>
-                    <td className="px-5 py-3 text-gray-400">{u.email ?? '—'}</td>
-                    {/* Single Role column: assigned HQ Role name if present, else
-                        the stamped Platform Role label (e.g. Tyler, role_id NULL →
-                        "Platform Owner"). Mirrors org's one-role-per-row grammar. */}
-                    <td className="px-5 py-3">
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border bg-purple-500/10 text-purple-400 border-purple-500/20">
-                        {u.role_name ?? u.system_role_label}
-                      </span>
-                    </td>
-                  </tr>
-                ))
+                users.map(u => {
+                  // Protected rows get no delete control: the caller's own row
+                  // (self-guard) and the platform owner (owner-guard). Both are
+                  // also enforced server-side in removeHqUser — this is UX only.
+                  const isProtected = u.id === callerId || u.system_role === 'platform_owner'
+                  return (
+                    <tr key={u.id} className="hover:bg-violet-400/[0.07] transition-colors">
+                      <td className="px-5 py-3 text-gray-200 font-medium">{u.full_name ?? '—'}</td>
+                      <td className="px-5 py-3 text-gray-400">{u.email ?? '—'}</td>
+                      {/* Single Role column: assigned HQ Role name if present, else
+                          the stamped Platform Role label (e.g. Tyler, role_id NULL →
+                          "Platform Owner"). Mirrors org's one-role-per-row grammar. */}
+                      <td className="px-5 py-3">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border bg-purple-500/10 text-purple-400 border-purple-500/20">
+                          {u.role_name ?? u.system_role_label}
+                        </span>
+                      </td>
+                      <td className="px-5 py-3 text-right">
+                        {isProtected ? (
+                          <span className="text-xs text-gray-600">—</span>
+                        ) : (
+                          <RemoveHqUserButton userId={u.id} name={u.full_name ?? u.email ?? 'this user'} />
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })
               )}
             </tbody>
           </table>
