@@ -41,7 +41,7 @@ export type CaptureLeadState =
 type OrgRow = {
   id:                                  string
   name:                                string
-  owner_id:                            string
+  owner_id:                            string | null
   latitude:                            number | null
   longitude:                           number | null
   signal_radius:                       number | null

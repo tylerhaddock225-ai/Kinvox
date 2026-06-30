@@ -106,7 +106,7 @@ export default async function AdminOrgDetailPage({
       plan:                  string | null
       deleted_at:            string | null
       created_at:            string
-      owner_id:              string
+      owner_id:              string | null
       ai_template_id:        string | null
       enabled_ai_features:   Record<string, boolean> | null
       ai_listening_enabled:  boolean
