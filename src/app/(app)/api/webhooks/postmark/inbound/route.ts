@@ -182,7 +182,13 @@ export async function POST(request: NextRequest) {
   const orgId   = org?.id ?? null
   const ownerId = org?.owner_id ?? null
 
-  if (!org || !orgId || !ownerId) {
+  // W1-1: gate on a resolvable ORG only — NOT on a non-null owner. An ownerless
+  // org must still receive + route inbound mail. ownerId is no longer required
+  // here: lead-channel replies thread to existing leads (owner-irrelevant), and
+  // the support new-ticket path authors via the lead-inbox bot (leadInboxId ??
+  // ownerId). ownerId is used nowhere else in this handler beyond created_by
+  // (now bot-first) and ticket_recipients.added_by (nullable, already null-safe).
+  if (!org || !orgId) {
     console.warn(`${LOG} unknown recipient — no resolvable org for tag=${tag} source=${resolved.source}`)
     return NextResponse.json({ ignored: 'unknown recipient', tag }, { status: 200 })
   }
@@ -555,13 +561,27 @@ export async function POST(request: NextRequest) {
   // Create the ticket. Description holds the full original body; the
   // first ticket_messages row stores the cleaned reply for the thread view.
   const newSubject = subject.trim() || `Inbound from ${fromEmail}`
+
+  // W1-1: author the ticket as the org's lead-inbox bot — a per-org system
+  // profile guaranteed by the lead-inbox trigger/backfill (FK-valid, 1-per-org)
+  // — falling back to the owner. Removes this path's dependence on a non-null
+  // owner so an ownerless org's inbound mail still opens tickets.
+  const { data: leadInbox } = await supabase
+    .from('profiles')
+    .select('id')
+    .eq('organization_id', orgId)
+    .eq('is_org_inbox', true)
+    .eq('org_inbox_kind', 'lead')
+    .maybeSingle<{ id: string }>()
+  const leadInboxId = leadInbox?.id ?? null
+
   const { data: newTicket, error: tCreateErr } = await supabase
     .from('tickets')
     .insert({
       organization_id: orgId,
       customer_id:     customerId,
       lead_id:         null,
-      created_by:      ownerId,
+      created_by:      leadInboxId ?? ownerId,
       subject:         newSubject,
       description:     (textBody || stripped || '').trim() || '(empty)',
       channel:         'email',
