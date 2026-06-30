@@ -39,3 +39,14 @@ Append-only. Each row records a single `scripts/run-data-op.mjs` execution.
 > transaction guards passed; post-op verified: dual_positive=0, Tyler intact + decoupled (org_id NULL), demo org present
 > with customers=8/leads=9 unchanged. Linked to prod for the op, then **relinked back to sandbox**.
 > **STILL PENDING for prod:** migrations `20260625120000` + `20260625130000` (Turn 3) and code merge to `main` (Turn 4).
+| 2026-06-30 15:41:02Z | prod | 20260630140000_k2c_remediate_alex_org_admin.sql | ahjab | ok |
+
+> **2026-06-30 — K2c Stage A prod prerequisite (PRODUCTION).** File: `prod/20260630140000_k2c_remediate_alex_org_admin.sql`.
+> Purpose: remediate the one fallback-dependent prod user before the Stage A RLS migration removes the `role='admin'`
+> back-compat. Alex Admin (`admin@kinvox-demo.com`, `bbbbbbbb-…-001`) is Kinvox Demo Org's `owner_id` (NOT NULL FK →
+> cannot be deleted), and authorized only via the legacy fallback (`role_id` NULL). Assigned him the demo org's existing
+> system "Org Admin" role (`ddaff626…`, full 19-key bag) so he authorizes via the permission bag instead. Non-destructive:
+> `owner_id` untouched, Sam Agent (`role='agent'`, not a fallback user) untouched, no other rows touched. All transaction
+> guards passed; post-op verified: Alex `role_id=ddaff626…` with manage_org_settings/manage_roles/manage_team=true, and
+> the fallback-dependent-users count = 0 (the invariant Stage A's RLS removal requires). Linked to prod for the op, then
+> relinked back to sandbox. Migrations `20260630120000` (B) + `20260630130000` (A) pushed to prod immediately after.
