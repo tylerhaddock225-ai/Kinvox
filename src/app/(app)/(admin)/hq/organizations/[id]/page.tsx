@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { ArrowLeft, ShieldAlert, Archive, RotateCcw, Sparkles, Megaphone, Mail, CheckCircle2, AlertCircle, Wallet, Radar, MapPin, Users, Crown, UserMinus } from 'lucide-react'
+import { ArrowLeft, ShieldAlert, Archive, RotateCcw, Sparkles, Megaphone, Mail, CheckCircle2, AlertCircle, Wallet, Radar, MapPin, Users, Crown, UserMinus, UserX } from 'lucide-react'
 import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
@@ -11,6 +11,7 @@ import {
   setOrgGeofence,
   setOrgOwner,
   removeOrgOwner,
+  removeOrgMember,
 } from '@/app/(app)/(admin)/hq/actions/organizations'
 import { sendOrganizationClaimInvite } from '@/app/(app)/(admin)/hq/actions/claim'
 import ConfirmButton from '@/components/admin/ConfirmButton'
@@ -85,6 +86,8 @@ export default async function AdminOrgDetailPage({
     geofence_error?:  string
     owner_saved?:     string
     owner_error?:     string
+    member_removed?:  string
+    member_error?:    string
   }>
 }) {
   const { id } = await params
@@ -111,6 +114,8 @@ export default async function AdminOrgDetailPage({
   const geofenceError = typeof sp.geofence_error === 'string' ? sp.geofence_error : null
   const ownerSaved    = sp.owner_saved === '1'
   const ownerError    = typeof sp.owner_error === 'string' ? sp.owner_error : null
+  const memberRemoved = sp.member_removed === '1'
+  const memberError   = typeof sp.member_error === 'string' ? sp.member_error : null
   const supabase = await createClient()
 
   const { data: org } = await supabase
@@ -589,6 +594,18 @@ export default async function AdminOrgDetailPage({
               <span>{ownerError}</span>
             </div>
           )}
+          {memberRemoved && (
+            <div className="mt-4 flex items-start gap-2 rounded-md border border-emerald-800/60 bg-emerald-950/30 px-3 py-2 text-xs text-emerald-200">
+              <CheckCircle2 className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+              <span>Member removed from the organization. Their account was kept — re-invite to restore access.</span>
+            </div>
+          )}
+          {memberError && (
+            <div className="mt-4 flex items-start gap-2 rounded-md border border-rose-900/60 bg-rose-950/30 px-3 py-2 text-xs text-rose-200">
+              <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+              <span>{memberError}</span>
+            </div>
+          )}
 
           {!org.owner_id && (
             <div className="mt-4 flex items-start gap-2 rounded-md border border-amber-900/60 bg-amber-950/30 px-3 py-2 text-xs text-amber-200">
@@ -646,29 +663,45 @@ export default async function AdminOrgDetailPage({
                           )}
                         </td>
                         <td className="px-4 py-3 text-gray-400">{m.role_name ?? '—'}</td>
-                        <td className="px-4 py-3 text-right">
+                        <td className="px-4 py-3">
                           {isOwner ? (
-                            <form action={removeOrgOwner.bind(null, org.id)} className="inline">
-                              <ConfirmButton
-                                message={`Remove ${m.full_name ?? m.email ?? 'this member'} as owner? The organization will have no owner until you assign one. They stay a member.`}
-                                className="inline-flex items-center gap-1.5 rounded-md border border-amber-700/60 bg-amber-950/40 px-3 py-1.5 text-xs font-medium text-amber-200 hover:bg-amber-900/40 transition-colors"
-                              >
-                                <UserMinus className="w-3.5 h-3.5" />
-                                Remove owner
-                              </ConfirmButton>
-                            </form>
+                            <div className="flex items-center justify-end gap-2">
+                              <form action={removeOrgOwner.bind(null, org.id)} className="inline">
+                                <ConfirmButton
+                                  message={`Remove ${m.full_name ?? m.email ?? 'this member'} as owner? The organization will have no owner until you assign one. They stay a member.`}
+                                  className="inline-flex items-center gap-1.5 rounded-md border border-amber-700/60 bg-amber-950/40 px-3 py-1.5 text-xs font-medium text-amber-200 hover:bg-amber-900/40 transition-colors"
+                                >
+                                  <UserMinus className="w-3.5 h-3.5" />
+                                  Remove owner
+                                </ConfirmButton>
+                              </form>
+                              <span className="text-[11px] italic text-gray-600" title="An owner can't be removed from the org while they hold the owner slot.">
+                                Remove as owner first
+                              </span>
+                            </div>
                           ) : (
-                            <form action={setOrgOwner.bind(null, org.id, m.id)} className="inline">
-                              <ConfirmButton
-                                message={org.owner_id
-                                  ? `Transfer ownership to ${m.full_name ?? m.email ?? 'this member'}? The current owner becomes a normal member.`
-                                  : `Make ${m.full_name ?? m.email ?? 'this member'} the owner of this organization?`}
-                                className="inline-flex items-center gap-1.5 rounded-md border border-pvx-border bg-pvx-surface px-3 py-1.5 text-xs font-medium text-gray-200 hover:bg-white/5 transition-colors"
-                              >
-                                <Crown className="w-3.5 h-3.5" />
-                                Make owner
-                              </ConfirmButton>
-                            </form>
+                            <div className="flex items-center justify-end gap-2">
+                              <form action={setOrgOwner.bind(null, org.id, m.id)} className="inline">
+                                <ConfirmButton
+                                  message={org.owner_id
+                                    ? `Transfer ownership to ${m.full_name ?? m.email ?? 'this member'}? The current owner becomes a normal member.`
+                                    : `Make ${m.full_name ?? m.email ?? 'this member'} the owner of this organization?`}
+                                  className="inline-flex items-center gap-1.5 rounded-md border border-pvx-border bg-pvx-surface px-3 py-1.5 text-xs font-medium text-gray-200 hover:bg-white/5 transition-colors"
+                                >
+                                  <Crown className="w-3.5 h-3.5" />
+                                  Make owner
+                                </ConfirmButton>
+                              </form>
+                              <form action={removeOrgMember.bind(null, org.id, m.id)} className="inline">
+                                <ConfirmButton
+                                  message={`Remove ${m.full_name ?? m.email ?? 'this member'} from this organization? They lose access but their account is kept — you can re-invite them later.`}
+                                  className="inline-flex items-center gap-1.5 rounded-md border border-rose-800/60 bg-rose-950/30 px-3 py-1.5 text-xs font-medium text-rose-200 hover:bg-rose-900/40 transition-colors"
+                                >
+                                  <UserX className="w-3.5 h-3.5" />
+                                  Remove from org
+                                </ConfirmButton>
+                              </form>
+                            </div>
                           )}
                         </td>
                       </tr>

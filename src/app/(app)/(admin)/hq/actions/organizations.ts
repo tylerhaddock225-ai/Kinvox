@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { hqGate } from '@/lib/permissions/gates'
 import type { HqPermissionKey } from '@/lib/permissions'
 
@@ -207,6 +208,51 @@ export async function setOrgOwner(organizationId: string, newOwnerUserId: string
   revalidatePath(`/hq/organizations/${orgId}`)
   revalidatePath('/hq/organizations')
   redirect(`/hq/organizations/${orgId}?tab=members&owner_saved=1`)
+}
+
+// Remove a NON-OWNER member from a tenant org by DETACHING them — nulling
+// organization_id + role_id, keeping the auth.users + profiles row (reversible:
+// a re-invite restores membership; authorship is untouched). Mirrors the org-side
+// removeMember / HQ removeHqUser detach pattern. NOT a hard delete of auth.users.
+export async function removeOrgMember(organizationId: string, memberUserId: string): Promise<void> {
+  const orgId  = String(organizationId ?? '').trim()
+  const userId = String(memberUserId  ?? '').trim()
+  if (!orgId || !userId) redirect('/hq/organizations')
+
+  // HQ gate (redirects on failure); the detach itself runs through the admin
+  // client below, exactly like the org-side removeMember.
+  await requireAdmin('manage_organizations')
+
+  const fail = (msg: string) =>
+    redirect(`/hq/organizations/${orgId}?tab=members&member_error=${encodeURIComponent(msg)}`)
+
+  const admin = createAdminClient()
+
+  // GUARDRAIL 1 — owner-refusal (authoritative, server-read): never detach the
+  // person while they still hold the owner_id slot. Clear ownership first.
+  const { data: org } = await admin
+    .from('organizations')
+    .select('owner_id')
+    .eq('id', orgId)
+    .single<{ owner_id: string | null }>()
+  if (org?.owner_id === userId) {
+    fail('Remove this user as owner before removing them from the organization.')
+  }
+
+  // DETACH (not a hard delete). Org-scoped so a tampered id from another org
+  // no-ops; is_org_inbox IS NOT TRUE excludes the per-org lead-inbox bot
+  // (GUARDRAIL 2, belt-and-suspenders — the bot is never given a remove control).
+  const { error } = await admin
+    .from('profiles')
+    .update({ organization_id: null, role_id: null })
+    .eq('id', userId)
+    .eq('organization_id', orgId)
+    .not('is_org_inbox', 'is', true)
+  if (error) fail(error.message)
+
+  revalidatePath(`/hq/organizations/${orgId}`)
+  revalidatePath('/hq/organizations')
+  redirect(`/hq/organizations/${orgId}?tab=members&member_removed=1`)
 }
 
 // Clear the owner slot only. The org becomes ownerless (valid post-W1); the
