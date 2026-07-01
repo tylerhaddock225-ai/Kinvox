@@ -102,16 +102,6 @@ function buildCustomAnswersTextBlock(
   return `\n${lines}`
 }
 
-function buildCustomAnswersHtmlBlock(
-  customAnswers: LeadConfirmationContext['customAnswers'],
-): string {
-  if (!customAnswers.length) return ''
-  const items = customAnswers
-    .map((c) => `  <li>${escapeHtml(c.label)}: ${escapeHtml(c.answer)}</li>`)
-    .join('\n')
-  return `\n<ul>\n${items}\n</ul>`
-}
-
 // Convert a free-form text body (with embedded \n) into a deliverability-
 // friendly HTML body: escape, split on double-newline into paragraphs,
 // preserve single newlines as <br>. Used by the override path so a plain-
