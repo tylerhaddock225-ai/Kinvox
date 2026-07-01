@@ -45,7 +45,6 @@ type OrgMemberRow = {
   id:          string
   full_name:   string | null
   email:       string | null
-  system_role: string | null
   role_name:   string | null
 }
 
@@ -196,7 +195,6 @@ export default async function AdminOrgDetailPage({
       id:          m.id,
       full_name:   m.full_name,
       email:       emailMap[m.id] ?? null,
-      system_role: (m.role as string | null) ?? null,
       role_name:   (m.roles as unknown as { name: string } | null)?.name ?? null,
     }))
   } else if (activeTab === 'integrations-billing') {
@@ -620,7 +618,6 @@ export default async function AdminOrgDetailPage({
                 <tr className="border-b border-pvx-border text-xs text-gray-500">
                   <th className="px-4 py-3 text-left font-medium">Name</th>
                   <th className="px-4 py-3 text-left font-medium">Email</th>
-                  <th className="px-4 py-3 text-left font-medium">System Role</th>
                   <th className="px-4 py-3 text-left font-medium">Custom Role</th>
                   <th className="px-4 py-3 text-right font-medium">Actions</th>
                 </tr>
@@ -628,7 +625,7 @@ export default async function AdminOrgDetailPage({
               <tbody className="divide-y divide-pvx-border">
                 {members.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-4 py-10 text-center text-gray-500 text-sm">
+                    <td colSpan={4} className="px-4 py-10 text-center text-gray-500 text-sm">
                       No members in this organization.
                     </td>
                   </tr>
@@ -649,19 +646,6 @@ export default async function AdminOrgDetailPage({
                           </div>
                         </td>
                         <td className="px-4 py-3 text-gray-400 font-mono text-xs">{m.email ?? '—'}</td>
-                        <td className="px-4 py-3">
-                          {m.system_role ? (
-                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border capitalize ${
-                              m.system_role === 'admin'
-                                ? 'bg-purple-500/10 text-purple-400 border-purple-500/20'
-                                : 'bg-gray-500/10 text-gray-400 border-gray-500/20'
-                            }`}>
-                              {m.system_role}
-                            </span>
-                          ) : (
-                            <span className="text-xs text-gray-600">—</span>
-                          )}
-                        </td>
                         <td className="px-4 py-3 text-gray-400">{m.role_name ?? '—'}</td>
                         <td className="px-4 py-3">
                           {isOwner ? (

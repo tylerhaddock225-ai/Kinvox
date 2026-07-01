@@ -193,7 +193,6 @@ function MembersPanel({
             <tr className="border-b border-pvx-border text-xs text-gray-500">
               <th className="px-5 py-3 text-left font-medium">Name</th>
               <th className="px-5 py-3 text-left font-medium">Email</th>
-              <th className="px-5 py-3 text-left font-medium">System Role</th>
               <th className="px-5 py-3 text-left font-medium">Custom Role</th>
               <th className="px-5 py-3 text-right font-medium sr-only">Actions</th>
             </tr>
@@ -201,7 +200,7 @@ function MembersPanel({
           <tbody className="divide-y divide-pvx-border">
             {members.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-5 py-10 text-center text-gray-500 text-sm">
+                <td colSpan={4} className="px-5 py-10 text-center text-gray-500 text-sm">
                   No team members yet.
                 </td>
               </tr>
@@ -214,15 +213,6 @@ function MembersPanel({
                       {m.full_name ?? '—'}
                     </td>
                     <td className="px-5 py-3 text-gray-400">{m.email ?? '—'}</td>
-                    <td className="px-5 py-3">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border capitalize ${
-                        m.system_role === 'admin'
-                          ? 'bg-purple-500/10 text-purple-400 border-purple-500/20'
-                          : 'bg-gray-500/10 text-gray-400 border-gray-500/20'
-                      }`}>
-                        {m.system_role}
-                      </span>
-                    </td>
                     <td className="px-5 py-3">
                       <MemberRoleSelect
                         memberId={m.id}
