@@ -136,11 +136,12 @@ export default async function TeamSettingsPage({
     })
   )
 
-  // Outstanding (unaccepted) member invitations for this org. Read via the admin
-  // client: member_invitations SELECT RLS still keys on legacy auth_user_role()=
-  // 'admin', so a permission-bag Org Admin (role='agent') couldn't see these via
-  // the authenticated client. orgId is the impersonation-aware effective org.
-  const { data: pendingInvites } = await admin
+  // Outstanding (unaccepted) member invitations for this org. Read via the
+  // authenticated client — member_invitations SELECT RLS grants an Org Admin
+  // (manage_team) their own org's invitations and an impersonating HQ admin
+  // (is_admin_hq()) any org's; the organization_id filter scopes the org-agnostic
+  // HQ policy to the effective org (orgId is the impersonation-aware effective org).
+  const { data: pendingInvites } = await supabase
     .from('member_invitations')
     .select('id, email, full_name, role_id, expires_at, created_at')
     .eq('organization_id', orgId)
