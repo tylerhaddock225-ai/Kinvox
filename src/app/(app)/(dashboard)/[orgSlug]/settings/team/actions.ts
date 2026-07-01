@@ -24,7 +24,7 @@ export type TeamActionState =
 // EFFECTIVE org, never the caller's own profile.organization_id. orgGate grants
 // an HQ admin "acting as" a tenant (via the kinvox_impersonate_id cookie →
 // resolveEffectiveOrgId), otherwise checks the caller's permission bag for
-// `permissionKey` (with the K2 back-compat role === 'admin' fallback in place).
+// `permissionKey`.
 async function requireAdmin(permissionKey: OrgPermissionKey) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
