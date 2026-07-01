@@ -26,7 +26,6 @@ export type MemberRow = {
   id: string
   full_name: string | null
   email: string | null
-  system_role: 'admin' | 'agent' | 'viewer'
   role_id: string | null
   role_name: string | null
 }
@@ -152,7 +151,6 @@ export default async function TeamSettingsPage({
     id: m.id,
     full_name: m.full_name,
     email: emailMap[m.id] ?? null,
-    system_role: m.role as MemberRow['system_role'],
     role_id: m.role_id,
     role_name: (m.roles as unknown as { name: string } | null)?.name ?? null,
   }))
