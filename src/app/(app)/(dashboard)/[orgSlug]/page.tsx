@@ -62,7 +62,7 @@ export default async function DashboardPage({
   const [profileRes, dashConfigRes] = await Promise.all([
     supabase
       .from('profiles')
-      .select('organization_id, full_name, role, roles(permissions)')
+      .select('organization_id, full_name, roles(permissions)')
       .eq('id', user.id)
       .single(),
     supabase
@@ -75,7 +75,6 @@ export default async function DashboardPage({
   const profileData = profileRes.data as {
     organization_id: string | null
     full_name:       string | null
-    role:            string
     roles:           unknown
   } | null
 

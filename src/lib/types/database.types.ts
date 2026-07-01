@@ -76,7 +76,6 @@ export type Database = {
           organization_id: string | null
           full_name: string | null
           avatar_url: string | null
-          role: 'admin' | 'agent' | 'viewer' | 'hq'
           role_id: string | null
           calendar_email: string | null
           is_org_inbox: boolean
@@ -89,7 +88,6 @@ export type Database = {
           organization_id?: string | null
           full_name?: string | null
           avatar_url?: string | null
-          role?: 'admin' | 'agent' | 'viewer' | 'hq'
           role_id?: string | null
           calendar_email?: string | null
           is_org_inbox?: boolean

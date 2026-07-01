@@ -65,13 +65,11 @@ export async function PATCH(request: NextRequest) {
 
   const email: string = row.email
 
-  // The HQ profile shape. organization_id MUST be null (profiles_no_dual_positive);
-  // role is the honest 'hq' sentinel (K2c-C; see header).
+  // The HQ profile shape. organization_id MUST be null (profiles_no_dual_positive).
   const hqProfile = {
     system_role:     row.system_role,
     organization_id: null,
     role_id:         row.role_id,
-    role:            'hq',
   }
 
   // auth.users isn't reachable via PostgREST — resolve email → user through the

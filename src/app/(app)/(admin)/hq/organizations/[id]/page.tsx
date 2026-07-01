@@ -175,7 +175,7 @@ export default async function AdminOrgDetailPage({
     // the embed is ambiguous (PGRST201). Filter by organization_id only.
     const { data: memberRows } = await supabase
       .from('profiles')
-      .select('id, full_name, role, role_id, roles(id, name)')
+      .select('id, full_name, role_id, roles(id, name)')
       .eq('organization_id', org.id)
       .not('is_org_inbox', 'is', true)
       .order('full_name', { ascending: true })
