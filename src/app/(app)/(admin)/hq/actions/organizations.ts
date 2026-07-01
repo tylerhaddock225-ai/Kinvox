@@ -165,3 +165,68 @@ export async function setOrgGeofence(formData: FormData) {
   revalidatePath(`/hq/organizations/${id}`)
   redirect(`/hq/organizations/${id}?tab=details&geofence_saved=1`)
 }
+
+// ── Owner management (HQ-only) ───────────────────────────────────────────────
+// "Owner" is NOT a role or permission — it is the single organizations.owner_id
+// slot. These write it directly; no migration/RLS is needed because the existing
+// is_admin_hq() row-level UPDATE policy on organizations already covers owner_id.
+// Bound in-form on the Members tab (setOrgOwner.bind(null, orgId, userId)), so
+// the trailing FormData a form action passes is intentionally ignored.
+
+// Set or transfer ownership. Same UPDATE covers first-set (owner_id was NULL)
+// and transfer (owner_id was someone else). GUARDRAIL: the new owner must
+// already be a non-bot member of THIS org — never a floating/other-org/bot
+// account. Enforced server-side here, not just in the UI.
+export async function setOrgOwner(organizationId: string, newOwnerUserId: string): Promise<void> {
+  const orgId  = String(organizationId  ?? '').trim()
+  const userId = String(newOwnerUserId ?? '').trim()
+  if (!orgId || !userId) redirect('/hq/organizations')
+
+  const supabase = await requireAdmin('manage_organizations')
+
+  const fail = (msg: string) =>
+    redirect(`/hq/organizations/${orgId}?tab=members&owner_error=${encodeURIComponent(msg)}`)
+
+  // Same-org, non-bot membership guard. is_org_inbox IS NOT TRUE excludes the
+  // per-org lead-inbox bot; organization_id ties the user to THIS org.
+  const { data: member } = await supabase
+    .from('profiles')
+    .select('id')
+    .eq('id', userId)
+    .eq('organization_id', orgId)
+    .not('is_org_inbox', 'is', true)
+    .maybeSingle<{ id: string }>()
+  if (!member) fail('That user is not a member of this organization')
+
+  const { error } = await supabase
+    .from('organizations')
+    .update({ owner_id: userId })
+    .eq('id', orgId)
+  if (error) fail(error.message)
+
+  revalidatePath(`/hq/organizations/${orgId}`)
+  revalidatePath('/hq/organizations')
+  redirect(`/hq/organizations/${orgId}?tab=members&owner_saved=1`)
+}
+
+// Clear the owner slot only. The org becomes ownerless (valid post-W1); the
+// person stays a normal member — this does NOT detach or delete them (that is
+// Stage 3, a separate action).
+export async function removeOrgOwner(organizationId: string): Promise<void> {
+  const orgId = String(organizationId ?? '').trim()
+  if (!orgId) redirect('/hq/organizations')
+
+  const supabase = await requireAdmin('manage_organizations')
+
+  const { error } = await supabase
+    .from('organizations')
+    .update({ owner_id: null })
+    .eq('id', orgId)
+  if (error) {
+    redirect(`/hq/organizations/${orgId}?tab=members&owner_error=${encodeURIComponent(error.message)}`)
+  }
+
+  revalidatePath(`/hq/organizations/${orgId}`)
+  revalidatePath('/hq/organizations')
+  redirect(`/hq/organizations/${orgId}?tab=members&owner_saved=1`)
+}
