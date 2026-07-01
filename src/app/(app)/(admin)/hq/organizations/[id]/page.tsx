@@ -1,7 +1,8 @@
 import Link from 'next/link'
-import { ArrowLeft, ShieldAlert, Archive, RotateCcw, Sparkles, Megaphone, Mail, CheckCircle2, AlertCircle, Wallet, Radar, MapPin } from 'lucide-react'
+import { ArrowLeft, ShieldAlert, Archive, RotateCcw, Sparkles, Megaphone, Mail, CheckCircle2, AlertCircle, Wallet, Radar, MapPin, Users, Crown } from 'lucide-react'
 import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import {
   updateOrganization,
   setOrgStatus,
@@ -25,13 +26,25 @@ import type {
   Vertical,
 } from '@/lib/types/database.types'
 
-type TabKey = 'details' | 'lead-capture' | 'signal-configs' | 'integrations-billing'
+type TabKey = 'details' | 'members' | 'lead-capture' | 'signal-configs' | 'integrations-billing'
 const TABS: Array<{ key: TabKey; label: string; icon: typeof Sparkles }> = [
-  { key: 'details',              label: 'Details',               icon: Sparkles },
-  { key: 'lead-capture',         label: 'Lead Capture',          icon: Megaphone },
-  { key: 'signal-configs',       label: 'Signal Configs',        icon: Radar },
+  { key: 'details',              label: 'Details',                icon: Sparkles },
+  { key: 'members',              label: 'Members',                icon: Users },
+  { key: 'lead-capture',         label: 'Lead Capture',           icon: Megaphone },
+  { key: 'signal-configs',       label: 'Signal Configs',         icon: Radar },
   { key: 'integrations-billing', label: 'Integrations & Billing', icon: Wallet },
 ]
+
+// Read-only member row for the HQ Members tab. profiles has no email column —
+// email lives in auth.users and is resolved via the service-role admin API,
+// mirroring the tenant-side Members list (settings/team/page.tsx).
+type OrgMemberRow = {
+  id:          string
+  full_name:   string | null
+  email:       string | null
+  system_role: string | null
+  role_name:   string | null
+}
 
 // Base URL the preview link + embed snippet should use. NEXT_PUBLIC_APP_URL
 // is set per-environment in Vercel; the fallback points at the prod host
@@ -73,6 +86,7 @@ export default async function AdminOrgDetailPage({
   const { id } = await params
   const sp     = await searchParams
   const activeTab: TabKey =
+    sp.tab === 'members'              ? 'members' :
     sp.tab === 'lead-capture'         ? 'lead-capture' :
     sp.tab === 'signal-configs'       ? 'signal-configs' :
     sp.tab === 'integrations-billing' ? 'integrations-billing' :
@@ -142,7 +156,39 @@ export default async function AdminOrgDetailPage({
   let credits: OrganizationCredits | null = null
   let apiKeys: OrganizationApiKey[] = []
   let signalConfigs: SignalConfig[] = []
-  if (activeTab === 'integrations-billing') {
+  let members: OrgMemberRow[] = []
+  if (activeTab === 'members') {
+    // Human members of this org (exclude the per-org lead-inbox bot). Read via
+    // the SSR client under HQ RLS parity — the same cross-org profiles read the
+    // HQ ticket-detail page uses. NB: do NOT embed organizations(...) here — the
+    // profiles↔organizations pair has two FKs (owner_id + organization_id), so
+    // the embed is ambiguous (PGRST201). Filter by organization_id only.
+    const { data: memberRows } = await supabase
+      .from('profiles')
+      .select('id, full_name, role, role_id, roles(id, name)')
+      .eq('organization_id', org.id)
+      .not('is_org_inbox', 'is', true)
+      .order('full_name', { ascending: true })
+
+    // Emails aren't stored on profiles — resolve each via the service-role admin
+    // API, the same mechanism the tenant Members list uses.
+    const admin = createAdminClient()
+    const emailMap: Record<string, string> = {}
+    await Promise.all(
+      (memberRows ?? []).map(async (m) => {
+        const { data } = await admin.auth.admin.getUserById(m.id)
+        if (data?.user?.email) emailMap[m.id] = data.user.email
+      })
+    )
+
+    members = (memberRows ?? []).map((m) => ({
+      id:          m.id,
+      full_name:   m.full_name,
+      email:       emailMap[m.id] ?? null,
+      system_role: (m.role as string | null) ?? null,
+      role_name:   (m.roles as unknown as { name: string } | null)?.name ?? null,
+    }))
+  } else if (activeTab === 'integrations-billing') {
     const [{ data: c }, { data: k }] = await Promise.all([
       supabase
         .from('organization_credits')
@@ -511,6 +557,83 @@ export default async function AdminOrgDetailPage({
         )}
       </section>
       </>}
+
+      {activeTab === 'members' && (
+        <section className="rounded-xl border border-pvx-border bg-gray-900 p-5">
+          <div className="flex items-center gap-2">
+            <Users className="w-4 h-4 text-violet-300" />
+            <h2 className="text-sm font-semibold text-white">
+              Members <span className="text-xs text-gray-500 font-normal">({members.length})</span>
+            </h2>
+          </div>
+          <p className="mt-1 text-xs text-gray-500">
+            Human members of this organization (the lead-inbox bot is excluded). Read-only.
+          </p>
+
+          {!org.owner_id && (
+            <div className="mt-4 flex items-start gap-2 rounded-md border border-amber-900/60 bg-amber-950/30 px-3 py-2 text-xs text-amber-200">
+              <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+              <span>No owner assigned.</span>
+            </div>
+          )}
+
+          <div className="mt-5 overflow-x-auto rounded-lg border border-pvx-border">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-pvx-border text-xs text-gray-500">
+                  <th className="px-4 py-3 text-left font-medium">Name</th>
+                  <th className="px-4 py-3 text-left font-medium">Email</th>
+                  <th className="px-4 py-3 text-left font-medium">System Role</th>
+                  <th className="px-4 py-3 text-left font-medium">Custom Role</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-pvx-border">
+                {members.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="px-4 py-10 text-center text-gray-500 text-sm">
+                      No members in this organization.
+                    </td>
+                  </tr>
+                ) : (
+                  members.map((m) => {
+                    const isOwner = !!org.owner_id && m.id === org.owner_id
+                    return (
+                      <tr key={m.id} className="hover:bg-violet-400/[0.07] transition-colors">
+                        <td className="px-4 py-3 text-gray-200 font-medium">
+                          <div className="flex items-center gap-2">
+                            <span>{m.full_name ?? '—'}</span>
+                            {isOwner && (
+                              <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-300">
+                                <Crown className="w-3 h-3" />
+                                Owner
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-gray-400 font-mono text-xs">{m.email ?? '—'}</td>
+                        <td className="px-4 py-3">
+                          {m.system_role ? (
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border capitalize ${
+                              m.system_role === 'admin'
+                                ? 'bg-purple-500/10 text-purple-400 border-purple-500/20'
+                                : 'bg-gray-500/10 text-gray-400 border-gray-500/20'
+                            }`}>
+                              {m.system_role}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-gray-600">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-gray-400">{m.role_name ?? '—'}</td>
+                      </tr>
+                    )
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       {activeTab === 'lead-capture' && (
         <section className="rounded-xl border border-pvx-border bg-gray-900 p-5">
