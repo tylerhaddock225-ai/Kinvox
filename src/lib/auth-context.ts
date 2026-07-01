@@ -15,7 +15,6 @@ import { resolveImpersonation, type ImpersonationContext } from '@/lib/impersona
 
 type ProfileSlim = {
   organization_id: string | null
-  role:            'admin' | 'agent' | 'viewer' | 'hq' | null
 }
 
 export type OrgContext = {
@@ -43,7 +42,7 @@ export const getOrgContext = cache(async (): Promise<OrgContext | null> => {
   const [{ data: profile }, impersonation] = await Promise.all([
     supabase
       .from('profiles')
-      .select('organization_id, role')
+      .select('organization_id')
       .eq('id', user.id)
       .single<ProfileSlim>(),
     resolveImpersonation(),
@@ -55,7 +54,7 @@ export const getOrgContext = cache(async (): Promise<OrgContext | null> => {
 
   return {
     user,
-    profile:        profile ?? { organization_id: null, role: null },
+    profile:        profile ?? { organization_id: null },
     impersonation,
     effectiveOrgId,
   }

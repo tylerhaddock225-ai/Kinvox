@@ -88,7 +88,7 @@ export default async function TeamSettingsPage({
   const [membersRes, rolesRes, orgRes, signalConfigRes, credsRes] = await Promise.all([
     supabase
       .from('profiles')
-      .select('id, full_name, role, role_id, roles(id, name)')
+      .select('id, full_name, role_id, roles(id, name)')
       .eq('organization_id', orgId)
       .eq('is_org_inbox', false),
     supabase

@@ -82,7 +82,7 @@ export async function PATCH(request: NextRequest) {
     // present yet, fall back to an INSERT (mirrors the existing-user branch).
     const { data: updated, error: updErr } = await supabase
       .from('profiles')
-      .update({ organization_id: row.organization_id, role: 'agent', role_id: row.role_id })
+      .update({ organization_id: row.organization_id, role_id: row.role_id })
       .eq('id', userId)
       .select('id')
       .maybeSingle()
@@ -93,7 +93,7 @@ export async function PATCH(request: NextRequest) {
     if (!updated) {
       const { error: insErr } = await supabase
         .from('profiles')
-        .insert({ id: userId, organization_id: row.organization_id, role: 'agent', role_id: row.role_id, full_name: fullName })
+        .insert({ id: userId, organization_id: row.organization_id, role_id: row.role_id, full_name: fullName })
       if (insErr) {
         console.error(`${LOG} profile insert (new-user fallback) failed for ${userId}: ${insErr.message}`)
         return NextResponse.json({ error: insErr.message }, { status: 500 })
@@ -137,7 +137,7 @@ export async function PATCH(request: NextRequest) {
     if (profile) {
       const { error: updErr } = await supabase
         .from('profiles')
-        .update({ organization_id: row.organization_id, role: 'agent', role_id: row.role_id, full_name: fullName })
+        .update({ organization_id: row.organization_id, role_id: row.role_id, full_name: fullName })
         .eq('id', userId)
       if (updErr) {
         console.error(`${LOG} profile attach failed for ${userId}: ${updErr.message}`)
@@ -148,7 +148,7 @@ export async function PATCH(request: NextRequest) {
       // handle_new_user trigger should always create it, but never assume.
       const { error: insErr } = await supabase
         .from('profiles')
-        .insert({ id: userId, organization_id: row.organization_id, role: 'agent', role_id: row.role_id, full_name: fullName })
+        .insert({ id: userId, organization_id: row.organization_id, role_id: row.role_id, full_name: fullName })
       if (insErr) {
         console.error(`${LOG} profile insert failed for ${userId}: ${insErr.message}`)
         return NextResponse.json({ error: insErr.message }, { status: 500 })
