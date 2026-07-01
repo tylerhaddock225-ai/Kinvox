@@ -15,7 +15,7 @@ import { resolveImpersonation, type ImpersonationContext } from '@/lib/impersona
 
 type ProfileSlim = {
   organization_id: string | null
-  role:            'admin' | 'agent' | 'viewer' | null
+  role:            'admin' | 'agent' | 'viewer' | 'hq' | null
 }
 
 export type OrgContext = {
