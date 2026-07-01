@@ -78,8 +78,8 @@ export async function saveGeofence(
   return { status: 'success' }
 }
 
-// Branding logo upload. Same role gate as saveGeofence: HQ admin impersonating
-// OR tenant owner / role='admin'. The upload path is built from the
+// Branding logo upload. Same gate as saveGeofence: HQ admin impersonating
+// OR a tenant user with the required permission (via orgGate). The upload path is built from the
 // session-derived org id (Zero-Inference) — never from the form payload —
 // so a tenant cannot overwrite another tenant's logo by tampering with input.
 //

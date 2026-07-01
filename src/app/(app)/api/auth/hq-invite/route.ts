@@ -15,12 +15,9 @@ const LOG = '[hq-invite]'
 //
 // CONSTRAINT-CRITICAL: organization_id MUST be NULL. profiles_no_dual_positive
 // — CHECK (NOT (system_role IS NOT NULL AND organization_id IS NOT NULL)) —
-// rejects any row carrying system_role alongside a non-null org. profiles.role is
-// NOT NULL; K2c-C added a dedicated 'hq' value to profiles_role_check, so HQ users
-// now carry the honest role='hq' (a borrowed 'admin' from J2 until K2c-C). It is
-// inert for tenant access either way — every tenant RLS path also requires a
-// matching org, which an org-null HQ user never has — and nothing reads
-// profiles.role for HQ rows (HQ gating keys on system_role).
+// rejects any row carrying system_role alongside a non-null org. So the HQ
+// profile shape is: system_role set, organization_id NULL, and role_id assigned
+// (the HQ permission bag). HQ gating keys on system_role.
 export async function PATCH(request: NextRequest) {
   let body: { token?: unknown; password?: unknown; full_name?: unknown }
   try {
@@ -97,7 +94,7 @@ export async function PATCH(request: NextRequest) {
     }
     userId = created.user.id
 
-    // handle_new_user created the profile (role defaults to 'agent', org null);
+    // handle_new_user created the profile (org null);
     // promote it to HQ. maybeSingle surfaces rows-affected so a zero-row update
     // (profile not present yet) falls back to an INSERT.
     const { data: updated, error: updErr } = await supabase

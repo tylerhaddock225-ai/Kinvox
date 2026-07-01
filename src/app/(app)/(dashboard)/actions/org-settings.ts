@@ -29,8 +29,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 // Permission gate for org email/inbound settings, routed through orgGate so HQ
 // admins impersonating a tenant pass, and otherwise the caller's permission bag
-// must grant `permissionKey` (K2 back-compat role='admin' fallback still applies
-// inside orgGate). Returns { ok: true, orgId } or { ok: false, error } so
+// must grant `permissionKey`. Returns { ok: true, orgId } or { ok: false, error } so
 // callers can fail uniformly.
 async function requireSettingsAdmin(
   supabase: Awaited<ReturnType<typeof createClient>>,

@@ -32,7 +32,7 @@ export const getAuthUser = cache(async (): Promise<User | null> => {
 
 // Returns null when the caller isn't authenticated. Pages/layouts that
 // require auth should redirect on null. Pages that need to enforce
-// role='admin' do so themselves on top of this — getOrgContext stays
+// authorization (via orgGate) do so themselves on top of this — getOrgContext stays
 // gate-free so non-admin paths (e.g., billing, signals queue) can reuse it.
 export const getOrgContext = cache(async (): Promise<OrgContext | null> => {
   const user = await getAuthUser()

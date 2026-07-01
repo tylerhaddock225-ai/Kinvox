@@ -18,7 +18,7 @@ type State =
 // HQ admins are allowed to mutate via these actions while impersonating
 // because features + custom questions are owned by the Organization (not
 // HQ) post-Sprint-3 and have no /hq mutation path. Real tenants must be
-// owner OR have role='admin' on their effective org, same as before.
+// owner OR hold the required permission on their effective org (via orgGate).
 async function requireOrgAdmin(
   supabase: Awaited<ReturnType<typeof createClient>>,
   permissionKey: OrgPermissionKey,
@@ -28,8 +28,7 @@ async function requireOrgAdmin(
   if (!ctx.effectiveOrgId)   return { ok: false as const, error: 'No organization' }
 
   // orgGate handles both paths: an HQ admin impersonating the tenant passes,
-  // otherwise the caller's permission bag must grant `permissionKey` (K2
-  // back-compat role='admin' fallback still applies inside orgGate).
+  // otherwise the caller's permission bag must grant `permissionKey`.
   const gate = await orgGate(supabase, ctx.user.id, ctx.effectiveOrgId, permissionKey)
   if (!gate.ok) {
     return { ok: false as const, error: 'You do not have permission to change these settings' }
