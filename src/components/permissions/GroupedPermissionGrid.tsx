@@ -132,36 +132,44 @@ export default function GroupedPermissionGrid({
         )}
       </div>
 
-      {groups.map((group) => {
-        const groupHasMatch = group.permissions.some((p) => matches(p.label))
-        const groupHidden   = searching && !groupHasMatch
-        const bodyCollapsed = !searching && collapsed.has(group.slug) // a search force-expands
-        return (
-          <div key={group.slug} className={groupHidden ? 'hidden' : ''}>
-            <button
-              type="button"
-              onClick={() => toggle(group.slug)}
-              className="flex w-full items-center gap-1.5 py-1 text-xs font-semibold uppercase tracking-wide text-gray-400 hover:text-gray-200 transition-colors"
-            >
-              {bodyCollapsed
-                ? <ChevronRight className="w-3.5 h-3.5 shrink-0" />
-                : <ChevronDown  className="w-3.5 h-3.5 shrink-0" />}
-              {group.label}
-            </button>
-            <div className={`grid grid-cols-2 gap-2 mt-1.5${bodyCollapsed ? ' hidden' : ''}`}>
-              {group.permissions.map((p) => (
-                <Checkbox
-                  key={p.key}
-                  perm={{ key: p.key, label: p.label }}
-                  defaultChecked={defaults(p.key)}
-                  variant={variant}
-                  hidden={searching && !matches(p.label)}
-                />
-              ))}
+      {/* Groups flow in responsive CSS columns so they use horizontal space
+          instead of stacking into one tall column; break-inside-avoid keeps each
+          group whole across a column break. Column count keys off the viewport,
+          so a wide modal / HQ card gets 2–3 columns and a phone collapses to 1.
+          Hidden/collapsed toggling stays display:none, so every checkbox remains
+          mounted — the submit payload is unaffected by the layout. */}
+      <div className="columns-1 md:columns-2 lg:columns-3 gap-x-6">
+        {groups.map((group) => {
+          const groupHasMatch = group.permissions.some((p) => matches(p.label))
+          const groupHidden   = searching && !groupHasMatch
+          const bodyCollapsed = !searching && collapsed.has(group.slug) // a search force-expands
+          return (
+            <div key={group.slug} className={`break-inside-avoid mb-3${groupHidden ? ' hidden' : ''}`}>
+              <button
+                type="button"
+                onClick={() => toggle(group.slug)}
+                className="flex w-full items-center gap-1.5 py-1 text-xs font-semibold uppercase tracking-wide text-gray-400 hover:text-gray-200 transition-colors"
+              >
+                {bodyCollapsed
+                  ? <ChevronRight className="w-3.5 h-3.5 shrink-0" />
+                  : <ChevronDown  className="w-3.5 h-3.5 shrink-0" />}
+                {group.label}
+              </button>
+              <div className={`grid grid-cols-1 gap-1.5 mt-1.5${bodyCollapsed ? ' hidden' : ''}`}>
+                {group.permissions.map((p) => (
+                  <Checkbox
+                    key={p.key}
+                    perm={{ key: p.key, label: p.label }}
+                    defaultChecked={defaults(p.key)}
+                    variant={variant}
+                    hidden={searching && !matches(p.label)}
+                  />
+                ))}
+              </div>
             </div>
-          </div>
-        )
-      })}
+          )
+        })}
+      </div>
     </div>
   )
 }

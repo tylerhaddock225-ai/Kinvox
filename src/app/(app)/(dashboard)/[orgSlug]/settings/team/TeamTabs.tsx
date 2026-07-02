@@ -369,37 +369,43 @@ function CreateRoleModal({ catalog }: { catalog: CatalogRow[] }) {
         New Role
       </button>
 
+      {/* Widened + internally-scrolling: header and footer stay pinned while the
+          body scrolls, so the action buttons are reachable without scrolling past
+          every permission. min-h-0 on the flex children is what lets the body's
+          overflow-y-auto actually engage. */}
       <dialog
         ref={dialogRef}
-        className="m-auto w-full max-w-md rounded-xl border border-pvx-border bg-pvx-surface p-6 text-white shadow-2xl backdrop:bg-black/70"
+        className="m-auto w-[calc(100%-2rem)] max-w-4xl max-h-[85vh] open:flex open:flex-col overflow-hidden rounded-xl border border-pvx-border bg-pvx-surface text-white shadow-2xl backdrop:bg-black/70"
       >
-        <div className="flex items-center justify-between mb-5">
+        <div className="flex items-center justify-between px-6 pt-6 pb-4 shrink-0">
           <h2 className="text-base font-semibold">Create Role</h2>
           <button type="button" onClick={() => dialogRef.current?.close()} className="text-gray-400 hover:text-white">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <form ref={formRef} action={action} className="space-y-5">
-          <div>
-            <label className={LABEL} htmlFor="role-name">Role Name <span className="text-red-400">*</span></label>
-            <input id="role-name" name="name" type="text" required placeholder="e.g. Junior Support" className={INPUT} />
-          </div>
-
-          <div>
-            <p className={LABEL}>Permissions</p>
-            <div className="mt-2 p-3 rounded-lg border border-pvx-border bg-black/25">
-              <PermissionGrid catalog={catalog} />
+        <form ref={formRef} action={action} className="flex flex-col min-h-0 flex-1">
+          <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-2 space-y-5">
+            <div>
+              <label className={LABEL} htmlFor="role-name">Role Name <span className="text-red-400">*</span></label>
+              <input id="role-name" name="name" type="text" required placeholder="e.g. Junior Support" className={INPUT} />
             </div>
+
+            <div>
+              <p className={LABEL}>Permissions</p>
+              <div className="mt-2 p-3 rounded-lg border border-pvx-border bg-black/25">
+                <PermissionGrid catalog={catalog} />
+              </div>
+            </div>
+
+            {state?.status === 'error' && (
+              <p className="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2">
+                {state.error}
+              </p>
+            )}
           </div>
 
-          {state?.status === 'error' && (
-            <p className="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2">
-              {state.error}
-            </p>
-          )}
-
-          <div className="flex justify-end gap-3">
+          <div className="flex justify-end gap-3 px-6 py-4 border-t border-pvx-border shrink-0">
             <button type="button" onClick={() => dialogRef.current?.close()} className={BTN_SECONDARY}>
               Cancel
             </button>
@@ -424,48 +430,52 @@ function EditRoleModal({ role, onClose, catalog }: { role: RoleRow; onClose: () 
     if (state?.status === 'success') onClose()
   }, [state, onClose])
 
+  // Same widen + internal-scroll structure as CreateRoleModal (keeps this modal's
+  // gray theme). min-h-0 on the flex chain enables the body scroll.
   return (
     <dialog
       ref={dialogRef}
       onClose={onClose}
-      className="m-auto w-full max-w-md rounded-xl border border-gray-700 bg-gray-900 p-6 text-white shadow-2xl backdrop:bg-black/60"
+      className="m-auto w-[calc(100%-2rem)] max-w-4xl max-h-[85vh] open:flex open:flex-col overflow-hidden rounded-xl border border-gray-700 bg-gray-900 text-white shadow-2xl backdrop:bg-black/60"
     >
-      <div className="flex items-center justify-between mb-5">
+      <div className="flex items-center justify-between px-6 pt-6 pb-4 shrink-0">
         <h2 className="text-base font-semibold">Edit Role</h2>
         <button type="button" onClick={() => dialogRef.current?.close()} className="text-gray-400 hover:text-white">
           <X className="w-5 h-5" />
         </button>
       </div>
 
-      <form action={action} className="space-y-5">
+      <form action={action} className="flex flex-col min-h-0 flex-1">
         <input type="hidden" name="role_id" value={role.id} />
 
-        <div>
-          <label className={LABEL} htmlFor="edit-role-name">Role Name <span className="text-red-400">*</span></label>
-          <input
-            id="edit-role-name"
-            name="name"
-            type="text"
-            required
-            defaultValue={role.name}
-            className={INPUT}
-          />
-        </div>
-
-        <div>
-          <p className={LABEL}>Permissions</p>
-          <div className="mt-2 p-3 rounded-lg border border-gray-700 bg-gray-800/50">
-            <PermissionGrid defaults={role.permissions} catalog={catalog} />
+        <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-2 space-y-5">
+          <div>
+            <label className={LABEL} htmlFor="edit-role-name">Role Name <span className="text-red-400">*</span></label>
+            <input
+              id="edit-role-name"
+              name="name"
+              type="text"
+              required
+              defaultValue={role.name}
+              className={INPUT}
+            />
           </div>
+
+          <div>
+            <p className={LABEL}>Permissions</p>
+            <div className="mt-2 p-3 rounded-lg border border-gray-700 bg-gray-800/50">
+              <PermissionGrid defaults={role.permissions} catalog={catalog} />
+            </div>
+          </div>
+
+          {state?.status === 'error' && (
+            <p className="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2">
+              {state.error}
+            </p>
+          )}
         </div>
 
-        {state?.status === 'error' && (
-          <p className="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2">
-            {state.error}
-          </p>
-        )}
-
-        <div className="flex justify-end gap-3">
+        <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-700 shrink-0">
           <button type="button" onClick={() => dialogRef.current?.close()} className={BTN_SECONDARY}>
             Cancel
           </button>
