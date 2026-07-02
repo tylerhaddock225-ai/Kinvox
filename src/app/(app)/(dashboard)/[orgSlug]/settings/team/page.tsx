@@ -4,6 +4,7 @@ import { getOrgContext } from '@/lib/auth-context'
 import { redirect } from 'next/navigation'
 import TeamTabs from './TeamTabs'
 import type { Permissions } from '@/lib/permissions'
+import type { CatalogRow } from '@/lib/permissions/grouping'
 import { normalizeLeadQuestions } from '@/lib/lead-questions'
 import { constructInboundEmailAddress } from '@/lib/email/inbound-address'
 import type { CredentialRow } from './SocialConnectionsTab'
@@ -126,6 +127,19 @@ export default async function TeamSettingsPage({
     .eq('organization_id', orgId)
     .maybeSingle<{ balance: number }>()
 
+  // Workstream L — permission_catalog grouping metadata for the Roles editor.
+  // Public-read to authenticated (RLS: permission_catalog_select_authenticated).
+  // Display-only; an empty/failed read falls back to the flat grid in TeamTabs.
+  const { data: catalogRows } = await supabase
+    .from('permission_catalog')
+    .select('key, scope, group_slug, group_label, permission_label, description, action_tier, sort_order')
+    .eq('scope', 'org')
+    .order('sort_order')
+  const permissionCatalog = (catalogRows ?? []) as CatalogRow[]
+  if (permissionCatalog.length === 0) {
+    console.warn('[team/settings] permission_catalog read empty — Roles grid falls back to flat rendering')
+  }
+
   // Fetch emails via admin API
   const admin = createAdminClient()
   const emailMap: Record<string, string> = {}
@@ -233,6 +247,7 @@ export default async function TeamSettingsPage({
       <TeamTabs
         members={members}
         roles={roles}
+        permissionCatalog={permissionCatalog}
         callerId={ctx.user.id}
         ownerId={orgRes.data?.owner_id ?? null}
         pendingInvites={(pendingInvites ?? []).map((inv) => ({

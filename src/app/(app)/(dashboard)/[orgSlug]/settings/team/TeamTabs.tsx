@@ -25,6 +25,9 @@ import SocialConnectionsTab, {
   type SocialBannerState,
 } from './SocialConnectionsTab'
 import { PERMISSION_KEYS, DEFAULT_PERMISSIONS, type Permissions } from '@/lib/permissions'
+import type { CatalogRow } from '@/lib/permissions/grouping'
+import GroupedPermissionGrid from '@/components/permissions/GroupedPermissionGrid'
+import PermissionPills from '@/components/permissions/PermissionPills'
 import type { MemberRow, RoleRow, PendingInviteRow } from './page'
 
 export type OrgSettings = {
@@ -47,21 +50,23 @@ const BTN_SECONDARY = `${BTN} text-gray-400 hover:text-white`
 
 // ── Permission checkboxes ────────────────────────────────────────────────────
 
-function PermissionGrid({ defaults }: { defaults?: Permissions }) {
+// Workstream L — grouped + searchable grid sourced from permission_catalog.
+// Checkbox names/defaults are unchanged (defaults(key) reproduces the prior
+// `defaults ? defaults[key] : DEFAULT_PERMISSIONS[key]`), so the submit payload
+// is identical; only grouping + search are added. An empty catalog falls back to
+// the flat grid inside GroupedPermissionGrid.
+function PermissionGrid({ defaults, catalog }: { defaults?: Permissions; catalog: CatalogRow[] }) {
   return (
-    <div className="grid grid-cols-2 gap-2">
-      {PERMISSION_KEYS.map(({ key, label }) => (
-        <label key={key} className="flex items-center gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            name={key}
-            defaultChecked={defaults ? defaults[key] : DEFAULT_PERMISSIONS[key]}
-            className="w-4 h-4 rounded border-gray-600 bg-gray-800 text-indigo-500 focus:ring-indigo-500 focus:ring-offset-gray-900"
-          />
-          <span className="text-sm text-gray-300">{label}</span>
-        </label>
-      ))}
-    </div>
+    <GroupedPermissionGrid
+      catalog={catalog}
+      flatKeys={PERMISSION_KEYS}
+      variant="org"
+      defaults={(key) =>
+        defaults
+          ? Boolean((defaults as Record<string, boolean>)[key])
+          : Boolean((DEFAULT_PERMISSIONS as Record<string, boolean>)[key])
+      }
+    />
   )
 }
 
@@ -345,7 +350,7 @@ function PendingInvitesPanel({
 
 // ── Create role modal ────────────────────────────────────────────────────────
 
-function CreateRoleModal() {
+function CreateRoleModal({ catalog }: { catalog: CatalogRow[] }) {
   const [state, action, pending] = useActionState(createRole, null)
   const dialogRef = useRef<HTMLDialogElement>(null)
   const formRef   = useRef<HTMLFormElement>(null)
@@ -384,7 +389,7 @@ function CreateRoleModal() {
           <div>
             <p className={LABEL}>Permissions</p>
             <div className="mt-2 p-3 rounded-lg border border-pvx-border bg-black/25">
-              <PermissionGrid />
+              <PermissionGrid catalog={catalog} />
             </div>
           </div>
 
@@ -410,7 +415,7 @@ function CreateRoleModal() {
 
 // ── Edit role modal ──────────────────────────────────────────────────────────
 
-function EditRoleModal({ role, onClose }: { role: RoleRow; onClose: () => void }) {
+function EditRoleModal({ role, onClose, catalog }: { role: RoleRow; onClose: () => void; catalog: CatalogRow[] }) {
   const [state, action, pending] = useActionState(updateRole, null)
   const dialogRef = useRef<HTMLDialogElement>(null)
 
@@ -450,7 +455,7 @@ function EditRoleModal({ role, onClose }: { role: RoleRow; onClose: () => void }
         <div>
           <p className={LABEL}>Permissions</p>
           <div className="mt-2 p-3 rounded-lg border border-gray-700 bg-gray-800/50">
-            <PermissionGrid defaults={role.permissions} />
+            <PermissionGrid defaults={role.permissions} catalog={catalog} />
           </div>
         </div>
 
@@ -475,13 +480,13 @@ function EditRoleModal({ role, onClose }: { role: RoleRow; onClose: () => void }
 
 // ── Roles panel ──────────────────────────────────────────────────────────────
 
-function RolesPanel({ roles }: { roles: RoleRow[] }) {
+function RolesPanel({ roles, catalog }: { roles: RoleRow[]; catalog: CatalogRow[] }) {
   const [editingRole, setEditingRole] = useState<RoleRow | null>(null)
 
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
-        <CreateRoleModal />
+        <CreateRoleModal catalog={catalog} />
       </div>
 
       {roles.length === 0 ? (
@@ -500,20 +505,11 @@ function RolesPanel({ roles }: { roles: RoleRow[] }) {
                   <ShieldCheck className="w-4 h-4 text-indigo-400 shrink-0" />
                   <span className="text-sm font-semibold text-white">{role.name}</span>
                 </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {PERMISSION_KEYS.map(({ key, label }) => (
-                    <span
-                      key={key}
-                      className={`text-xs px-2 py-0.5 rounded-full border ${
-                        role.permissions[key]
-                          ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                          : 'bg-gray-700/50 text-gray-500 border-gray-700 line-through'
-                      }`}
-                    >
-                      {label}
-                    </span>
-                  ))}
-                </div>
+                <PermissionPills
+                  catalog={catalog}
+                  flatKeys={PERMISSION_KEYS}
+                  granted={(key) => Boolean((role.permissions as Record<string, boolean>)[key])}
+                />
               </div>
 
               <div className="flex items-center gap-2 shrink-0">
@@ -550,6 +546,7 @@ function RolesPanel({ roles }: { roles: RoleRow[] }) {
           key={editingRole.id}
           role={editingRole}
           onClose={() => setEditingRole(null)}
+          catalog={catalog}
         />
       )}
     </div>
@@ -625,6 +622,7 @@ export type { SignalSettingsState }
 export default function TeamTabs({
   members,
   roles,
+  permissionCatalog,
   callerId,
   ownerId,
   pendingInvites,
@@ -635,9 +633,10 @@ export default function TeamTabs({
   socialBanner,
   initialTab,
 }: {
-  members:        MemberRow[]
-  roles:          RoleRow[]
-  callerId:       string
+  members:           MemberRow[]
+  roles:             RoleRow[]
+  permissionCatalog: CatalogRow[]
+  callerId:          string
   ownerId:        string | null
   pendingInvites: PendingInviteRow[]
   orgSettings:    OrgSettings
@@ -697,7 +696,7 @@ export default function TeamTabs({
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold text-white">Roles</h3>
             </div>
-            <RolesPanel roles={roles} />
+            <RolesPanel roles={roles} catalog={permissionCatalog} />
           </section>
         </div>
       )}

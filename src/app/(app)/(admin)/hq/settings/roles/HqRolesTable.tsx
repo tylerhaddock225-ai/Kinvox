@@ -2,39 +2,38 @@
 
 import { useState } from 'react'
 import { useActionState } from 'react'
-import { HQ_PERMISSION_KEYS, type HqPermissions } from '@/lib/permissions'
+import { HQ_PERMISSION_KEYS } from '@/lib/permissions'
+import type { CatalogRow } from '@/lib/permissions/grouping'
+import GroupedPermissionGrid from '@/components/permissions/GroupedPermissionGrid'
+import PermissionPills from '@/components/permissions/PermissionPills'
 import { updateHqRole, deleteHqRole, type HqRoleActionState } from './actions'
 import type { HqRoleRow } from './page'
 
-export default function HqRolesTable({ rows }: { rows: HqRoleRow[] }) {
+export default function HqRolesTable({ rows, catalog }: { rows: HqRoleRow[]; catalog: CatalogRow[] }) {
   return (
     <div className="space-y-3">
       {rows.map(r => (
-        <RoleCard key={r.id} row={r} />
+        <RoleCard key={r.id} row={r} catalog={catalog} />
       ))}
     </div>
   )
 }
 
-function RoleCard({ row }: { row: HqRoleRow }) {
+function RoleCard({ row, catalog }: { row: HqRoleRow; catalog: CatalogRow[] }) {
   const [editing, setEditing] = useState(false)
 
   return (
-    <div className="rounded-lg border border-gray-800 bg-gray-900 p-4">
+    <div className="rounded-lg border border-pvx-border bg-pvx-surface p-4">
       {editing ? (
-        <EditForm row={row} onDone={() => setEditing(false)} />
+        <EditForm row={row} onDone={() => setEditing(false)} catalog={catalog} />
       ) : (
-        <ViewMode row={row} onEdit={() => setEditing(true)} />
+        <ViewMode row={row} onEdit={() => setEditing(true)} catalog={catalog} />
       )}
     </div>
   )
 }
 
-function ViewMode({ row, onEdit }: { row: HqRoleRow; onEdit: () => void }) {
-  const grantedKeys = HQ_PERMISSION_KEYS
-    .filter(({ key }) => row.permissions[key as keyof HqPermissions])
-    .map(({ label }) => label)
-
+function ViewMode({ row, onEdit, catalog }: { row: HqRoleRow; onEdit: () => void; catalog: CatalogRow[] }) {
   return (
     <div className="flex items-start justify-between gap-4">
       <div className="min-w-0">
@@ -49,12 +48,12 @@ function ViewMode({ row, onEdit }: { row: HqRoleRow; onEdit: () => void }) {
             {row.member_count} {row.member_count === 1 ? 'member' : 'members'}
           </span>
         </div>
-        <div className="mt-2 text-xs text-gray-400">
-          {grantedKeys.length === 0 ? (
-            <span className="text-gray-600">No permissions granted</span>
-          ) : (
-            grantedKeys.join(' · ')
-          )}
+        <div className="mt-2">
+          <PermissionPills
+            catalog={catalog}
+            flatKeys={HQ_PERMISSION_KEYS}
+            granted={(key) => Boolean((row.permissions as Record<string, boolean>)[key])}
+          />
         </div>
       </div>
 
@@ -81,7 +80,7 @@ function ViewMode({ row, onEdit }: { row: HqRoleRow; onEdit: () => void }) {
   )
 }
 
-function EditForm({ row, onDone }: { row: HqRoleRow; onDone: () => void }) {
+function EditForm({ row, onDone, catalog }: { row: HqRoleRow; onDone: () => void; catalog: CatalogRow[] }) {
   const [state, formAction, pending] = useActionState<HqRoleActionState, FormData>(
     async (prev, fd) => {
       const result = await updateHqRole(prev, fd)
@@ -108,22 +107,12 @@ function EditForm({ row, onDone }: { row: HqRoleRow; onDone: () => void }) {
         />
       </div>
 
-      <div className="grid grid-cols-2 gap-2">
-        {HQ_PERMISSION_KEYS.map(({ key, label }) => (
-          <label
-            key={key}
-            className="flex items-center gap-2 rounded-lg border border-gray-800 bg-gray-900 px-3 py-2 text-sm text-gray-200 hover:border-emerald-500/40 cursor-pointer"
-          >
-            <input
-              type="checkbox"
-              name={key}
-              defaultChecked={row.permissions[key as keyof HqPermissions]}
-              className="rounded border-gray-700 bg-gray-800 text-emerald-500 focus:ring-emerald-500"
-            />
-            {label}
-          </label>
-        ))}
-      </div>
+      <GroupedPermissionGrid
+        catalog={catalog}
+        flatKeys={HQ_PERMISSION_KEYS}
+        variant="hq"
+        defaults={(key) => Boolean((row.permissions as Record<string, boolean>)[key])}
+      />
 
       {state?.status === 'error' && (
         <p className="text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2">

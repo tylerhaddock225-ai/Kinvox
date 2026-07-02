@@ -1,12 +1,15 @@
 'use client'
 
 import { useActionState } from 'react'
+import { HQ_PERMISSION_KEYS } from '@/lib/permissions'
+import type { CatalogRow } from '@/lib/permissions/grouping'
+import GroupedPermissionGrid from '@/components/permissions/GroupedPermissionGrid'
 import { createHqRole, type HqRoleActionState } from './actions'
 
 export default function CreateHqRoleForm({
-  permissionKeys,
+  catalog,
 }: {
-  permissionKeys: { key: string; label: string }[]
+  catalog: CatalogRow[]
 }) {
   const [state, formAction, pending] = useActionState<HqRoleActionState, FormData>(
     createHqRole,
@@ -32,21 +35,14 @@ export default function CreateHqRoleForm({
         <div className="block text-xs font-medium text-gray-400 mb-2">
           Permissions
         </div>
-        <div className="grid grid-cols-2 gap-2">
-          {permissionKeys.map(({ key, label }) => (
-            <label
-              key={key}
-              className="flex items-center gap-2 rounded-lg border border-gray-800 bg-gray-900 px-3 py-2 text-sm text-gray-200 hover:border-emerald-500/40 cursor-pointer"
-            >
-              <input
-                type="checkbox"
-                name={key}
-                className="rounded border-gray-700 bg-gray-800 text-emerald-500 focus:ring-emerald-500"
-              />
-              {label}
-            </label>
-          ))}
-        </div>
+        {/* Workstream L — grouped + searchable; defaults all-unchecked, matching
+            the prior bare checkboxes (no defaultChecked). Payload unchanged. */}
+        <GroupedPermissionGrid
+          catalog={catalog}
+          flatKeys={HQ_PERMISSION_KEYS}
+          variant="hq"
+          defaults={() => false}
+        />
       </div>
 
       {state?.status === 'error' && (

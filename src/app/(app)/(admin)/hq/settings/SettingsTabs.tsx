@@ -3,7 +3,7 @@
 import { useActionState, useEffect, useRef, useState, useTransition } from 'react'
 import { CheckCircle2, Hash, ToggleRight } from 'lucide-react'
 import { updateTicketIdPrefix, updatePlatformToggle } from '@/app/(app)/(admin)/hq/actions/platform-settings'
-import { HQ_PERMISSION_KEYS } from '@/lib/permissions'
+import type { CatalogRow } from '@/lib/permissions/grouping'
 import HqUsersClient, {
   type HqUserRow,
   type HqInviteRow,
@@ -174,17 +174,19 @@ function UserAdminPanel({
   defaultRoleId,
   callerId,
   hqRoles,
+  permissionCatalog,
   canManageUsers,
   canManageRoles,
 }: {
-  users:          HqUserRow[]
-  invites:        HqInviteRow[]
-  roleOptions:    RoleOption[]
-  defaultRoleId?: string
-  callerId:       string
-  hqRoles:        HqRoleRow[]
-  canManageUsers: boolean
-  canManageRoles: boolean
+  users:             HqUserRow[]
+  invites:           HqInviteRow[]
+  roleOptions:       RoleOption[]
+  defaultRoleId?:    string
+  callerId:          string
+  hqRoles:           HqRoleRow[]
+  permissionCatalog: CatalogRow[]
+  canManageUsers:    boolean
+  canManageRoles:    boolean
 }) {
   return (
     <div className="space-y-10">
@@ -213,13 +215,13 @@ function UserAdminPanel({
             {hqRoles.length === 0 ? (
               <p className="text-sm text-gray-500">No HQ roles yet.</p>
             ) : (
-              <HqRolesTable rows={hqRoles} />
+              <HqRolesTable rows={hqRoles} catalog={permissionCatalog} />
             )}
           </div>
 
           <div className="rounded-xl border border-pvx-border bg-pvx-surface p-6">
             <h4 className="text-sm font-semibold text-white mb-4">Create new role</h4>
-            <CreateHqRoleForm permissionKeys={HQ_PERMISSION_KEYS.map(k => ({ key: k.key, label: k.label }))} />
+            <CreateHqRoleForm catalog={permissionCatalog} />
           </div>
         </section>
       )}
@@ -241,20 +243,22 @@ export default function SettingsTabs({
   roleOptions,
   defaultRoleId,
   hqRoles,
+  permissionCatalog,
   canManageUsers,
   canManageRoles,
 }: {
-  currentPrefix:   string
-  showAffectedTab: boolean
-  showRecordId:    boolean
-  callerId:        string
-  users:           HqUserRow[]
-  invites:         HqInviteRow[]
-  roleOptions:     RoleOption[]
-  defaultRoleId?:  string
-  hqRoles:         HqRoleRow[]
-  canManageUsers:  boolean
-  canManageRoles:  boolean
+  currentPrefix:     string
+  showAffectedTab:   boolean
+  showRecordId:      boolean
+  callerId:          string
+  users:             HqUserRow[]
+  invites:           HqInviteRow[]
+  roleOptions:       RoleOption[]
+  defaultRoleId?:    string
+  hqRoles:           HqRoleRow[]
+  permissionCatalog: CatalogRow[]
+  canManageUsers:    boolean
+  canManageRoles:    boolean
 }) {
   const showUserAdmin = canManageUsers || canManageRoles
 
@@ -291,6 +295,7 @@ export default function SettingsTabs({
           defaultRoleId={defaultRoleId}
           callerId={callerId}
           hqRoles={hqRoles}
+          permissionCatalog={permissionCatalog}
           canManageUsers={canManageUsers}
           canManageRoles={canManageRoles}
         />
