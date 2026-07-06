@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { isSuperAdmin, hasHqPermission, type HqPermissions } from '@/lib/permissions'
+import type { CatalogRow } from '@/lib/permissions/grouping'
 import { getRoleLabel } from '@/lib/types/auth'
 import SettingsTabs from './SettingsTabs'
 import type {
@@ -82,6 +83,19 @@ export default async function AdminSettingsPage() {
     admin.auth.admin.listUsers({ perPage: 1000 }),
   ])
 
+  // Workstream L — permission_catalog grouping metadata for the HQ Roles editor.
+  // Public-read to authenticated (RLS: permission_catalog_select_authenticated);
+  // display-only, empty/failed read falls back to the flat grid in SettingsTabs.
+  const { data: catalogRows } = await supabase
+    .from('permission_catalog')
+    .select('key, scope, group_slug, group_label, permission_label, description, action_tier, sort_order')
+    .eq('scope', 'hq')
+    .order('sort_order')
+  const permissionCatalog = (catalogRows ?? []) as CatalogRow[]
+  if (permissionCatalog.length === 0) {
+    console.warn('[hq/settings] permission_catalog read empty — HQ Roles grid falls back to flat rendering')
+  }
+
   // ── Support settings ──────────────────────────────────────────────────────
   const byKey = new Map<string, unknown>((settingsRes.data ?? []).map(r => [r.key, r.value]))
   const currentPrefix   = typeof byKey.get('ticket_id_prefix') === 'string' ? (byKey.get('ticket_id_prefix') as string) : 'tk_'
@@ -156,6 +170,7 @@ export default async function AdminSettingsPage() {
         roleOptions={roleOptions}
         defaultRoleId={defaultRoleId}
         hqRoles={hqRoles}
+        permissionCatalog={permissionCatalog}
         canManageUsers={canManageUsers}
         canManageRoles={canManageRoles}
       />
