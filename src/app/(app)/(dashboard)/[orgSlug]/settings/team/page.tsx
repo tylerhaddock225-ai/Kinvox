@@ -177,8 +177,9 @@ export default async function TeamSettingsPage({
     is_system_role: r.is_system_role,
   }))
 
-  // Resolve the per-channel tags into full plus-addressed inbound emails
-  // server-side. Client components never see POSTMARK_INBOUND_ADDRESS.
+  // Resolve the per-channel tags into full inbound forwarding addresses
+  // (<tag>@<POSTMARK_INBOUND_DOMAIN>) server-side. Client components never
+  // see POSTMARK_INBOUND_DOMAIN.
   const supportInboundAddress = constructInboundEmailAddress(orgRes.data?.inbound_email_tag      ?? null)
   const leadInboundAddress    = constructInboundEmailAddress(orgRes.data?.inbound_lead_email_tag ?? null)
 

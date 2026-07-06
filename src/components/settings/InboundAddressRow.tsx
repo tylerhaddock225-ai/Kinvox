@@ -1,10 +1,10 @@
 'use client'
 
 // Reusable forwarding-address panel — both Support Settings (Tickets) and
-// Lead Support tabs use this. The full plus-addressed email is computed
+// Lead Support tabs use this. The full inbound forwarding address is computed
 // server-side via constructInboundEmailAddress and passed in as `address`;
-// the client never reads POSTMARK_INBOUND_ADDRESS directly. The DB stores
-// only the per-tenant tag.
+// the client never reads POSTMARK_INBOUND_DOMAIN directly. The DB stores
+// only the per-tenant tag (the address is <tag>@<POSTMARK_INBOUND_DOMAIN>).
 //
 // Post-Phase-A1: tags auto-mint on email verification, so a null address
 // means the verification panel above hasn't completed yet — the row hides
@@ -27,9 +27,9 @@ export type InboundActionState =
   | null
 
 type Props = {
-  // Pre-constructed plus-addressed email, computed server-side. null when
-  // the tenant hasn't generated one yet OR when POSTMARK_INBOUND_ADDRESS is
-  // unset / malformed. Null hides the row entirely.
+  // Pre-constructed inbound forwarding address (<tag>@<POSTMARK_INBOUND_DOMAIN>),
+  // computed server-side. null when the tenant hasn't generated one yet OR when
+  // POSTMARK_INBOUND_DOMAIN is unset / malformed. Null hides the row entirely.
   address:    string | null
   // Retained for source-compatibility with existing call sites; unused
   // since auto-mint replaced the manual "Generate Address" button.
