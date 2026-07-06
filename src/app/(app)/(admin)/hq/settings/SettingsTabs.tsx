@@ -10,7 +10,7 @@ import HqUsersClient, {
   type RoleOption,
 } from './users/HqUsersClient'
 import HqRolesTable from './roles/HqRolesTable'
-import CreateHqRoleForm from './roles/CreateHqRoleForm'
+import CreateHqRoleModal from './roles/CreateHqRoleForm'
 import type { HqRoleRow } from './roles/page'
 
 const INPUT = 'w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-violet-500'
@@ -202,12 +202,17 @@ function UserAdminPanel({
 
       {canManageRoles && (
         <section className="space-y-4">
-          <div>
-            <h3 className="text-sm font-semibold text-white">HQ Roles</h3>
-            <p className="mt-1 text-xs text-gray-500">
-              Permission bundles for Kinvox HQ staff. These roles are not visible to tenant
-              organizations; organizations define their own role set at /settings/team.
-            </p>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h3 className="text-sm font-semibold text-white">HQ Roles</h3>
+              <p className="mt-1 text-xs text-gray-500">
+                Permission bundles for Kinvox HQ staff. These roles are not visible to tenant
+                organizations; organizations define their own role set at /settings/team.
+              </p>
+            </div>
+            <div className="shrink-0">
+              <CreateHqRoleModal catalog={permissionCatalog} />
+            </div>
           </div>
 
           <div className="rounded-xl border border-pvx-border bg-pvx-surface p-6">
@@ -217,11 +222,6 @@ function UserAdminPanel({
             ) : (
               <HqRolesTable rows={hqRoles} catalog={permissionCatalog} />
             )}
-          </div>
-
-          <div className="rounded-xl border border-pvx-border bg-pvx-surface p-6">
-            <h4 className="text-sm font-semibold text-white mb-4">Create new role</h4>
-            <CreateHqRoleForm catalog={permissionCatalog} />
           </div>
         </section>
       )}
