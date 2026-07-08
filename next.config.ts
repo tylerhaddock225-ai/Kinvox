@@ -1,10 +1,14 @@
 import type { NextConfig } from "next";
 
 // ── Security headers (SEC-M2) ────────────────────────────────────────────────
-// Content-Security-Policy is shipped REPORT-ONLY for now
-// (Content-Security-Policy-Report-Only): violations are logged to the browser
-// console (no report-sink route exists yet) but nothing is blocked, so we can
-// watch for a missed origin before flipping to an enforcing policy.
+// Content-Security-Policy — GLOBAL scope is ENFORCING (SEC-CSP-A).
+// The header key on the global rule is now "Content-Security-Policy" (not
+// -Report-Only), so CSP_GLOBAL violations are BLOCKED by the browser. The
+// SEC-M2 report-only monitoring window was clean, so enforcing the global
+// policy is non-breaking ('unsafe-inline' remains in script-src/style-src, so
+// Next's inline bootstrap and inline styles are unaffected). No report-sink
+// route exists; an enforcing policy needs none (there is also no server-side
+// violation collection).
 //
 // Frame-policy carve-out: the public lead-magnet landing page /l/[slug] is
 // intended to be embedded in customer sites via an iframe (see
@@ -20,10 +24,16 @@ import type { NextConfig } from "next";
 // (report-only, so it logs nothing-blocking either way) and omits
 // X-Frame-Options entirely.
 //
-// FLIP-TO-ENFORCING IS A FUTURE TASK: when CSP becomes enforcing, the /l
-// `frame-ancestors *` MUST be replaced by a per-request, per-org allowlist
-// derived from organizations.allowed_embed_domains (X-Frame-Options cannot
-// express an allowlist, which is why /l omits it rather than relaxing it).
+// /l STAYS REPORT-ONLY (Piece B — future, blocked): the /l rule below keeps the
+// "Content-Security-Policy-Report-Only" key with `frame-ancestors *`. Flipping
+// /l to enforcing REQUIRES first replacing `frame-ancestors *` with a
+// per-request, per-org allowlist derived from
+// organizations.allowed_embed_domains. That is a hard PREREQUISITE: proxy.ts
+// has no anon read path for that column today (organizations SELECT is
+// RLS-gated TO authenticated), so Piece B needs a new anon-granted SECURITY
+// DEFINER RPC (e.g. resolve_embed_domains_by_slug) plus proxy.ts wiring to set
+// the per-org frame-ancestors. X-Frame-Options cannot express an allowlist,
+// which is why /l omits it rather than relaxing it.
 
 // Shared CSP directives — identical for both scopes except frame-ancestors.
 const CSP_BASE =
@@ -73,7 +83,7 @@ const nextConfig: NextConfig = {
         // lookahead), so the frame-locking headers never touch /l at all.
         source: "/((?!l/).*)",
         headers: [
-          { key: "Content-Security-Policy-Report-Only", value: CSP_GLOBAL },
+          { key: "Content-Security-Policy", value: CSP_GLOBAL },
           ...COMMON_SECURITY_HEADERS,
           { key: "X-Frame-Options", value: "SAMEORIGIN" },
         ],
