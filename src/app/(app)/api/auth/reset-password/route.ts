@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { ServerClient } from 'postmark'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { checkRateLimit, ipFromHeaders, type RateLimitResult } from '@/lib/rate-limit'
 import { mintToken, hashToken, ttlFromNow, TTL } from '@/lib/auth/tokens'
 
 export const runtime = 'nodejs'
@@ -29,6 +30,24 @@ export async function POST(request: NextRequest) {
   // We always respond 200 below to avoid leaking which addresses are registered.
   // Internal failures still log to the terminal so we can spot them.
   const supabase = createAdminClient()
+
+  // SEC-M5-2: throttle BEFORE the O(n) listUsers scan so the admin scan itself is
+  // rate-limited, not just the email send. FAIL-CLOSED but INVISIBLY: on a limit
+  // hit OR an RPC error we return the SAME uniform 200 the endpoint always
+  // returns — the caller can't distinguish throttling from a normal miss, which
+  // preserves the no-enumeration property. The per-email cap is the real control
+  // (IP is spoofable behind Vercel); the per-IP cap is supplementary.
+  const resetIp = ipFromHeaders(request.headers)
+  const [emailCheck, ipCheck] = await Promise.all([
+    checkRateLimit(supabase, `reset_pw_email:${email}`, 3600, 3),
+    resetIp
+      ? checkRateLimit(supabase, `reset_pw_ip:${resetIp}`, 3600, 10)
+      : Promise.resolve<RateLimitResult>({ allowed: true, count: 0 }),
+  ])
+  if (emailCheck.allowed !== true || ipCheck.allowed !== true) {
+    console.warn(`${LOG} reset throttled (fail-closed) email=${email} email_allowed=${emailCheck.allowed} ip_allowed=${ipCheck.allowed}`)
+    return NextResponse.json({ status: 'ok' }, { status: 200 })
+  }
 
   // listUsers doesn't support direct email filtering on every Supabase version,
   // so page through and match. With a small user base this is fine; replace with

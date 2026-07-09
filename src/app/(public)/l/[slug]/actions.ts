@@ -29,6 +29,7 @@ import { sendOrgTransactionalEmail } from '@/lib/email/send-org-email'
 import { constructInboundEmailAddress } from '@/lib/email/inbound-address'
 import { renderLeadConfirmationEmail } from '@/lib/email/templates/lead-confirmation'
 import { normalizeLeadQuestions, type LeadQuestion } from '@/lib/lead-questions'
+import { checkRateLimit, bestEffortIp, type RateLimitResult } from '@/lib/rate-limit'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const UUID_RE  = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -77,6 +78,15 @@ export async function captureLeadAction(
   if (!phone)                return { status: 'error', error: 'Phone is required' }
   if (!address)              return { status: 'error', error: 'Service address is required' }
   if (!appointmentAt)        return { status: 'error', error: 'Pick a date and time' }
+
+  // SEC-M5-2 input-length guards: a rate limit caps row COUNT, not per-row SIZE.
+  // Reject absurdly long free-text so a single submission can't bloat the leads
+  // row / metadata JSON. (Custom q_* answers are separately capped at 2000 chars
+  // × 20 entries where they're collected below.)
+  if (name.length    > 200) return { status: 'error', error: 'Name is too long' }
+  if (email.length   > 254) return { status: 'error', error: 'Enter a valid email address' }
+  if (phone.length   > 50)  return { status: 'error', error: 'Phone number is too long' }
+  if (address.length > 500) return { status: 'error', error: 'Service address is too long' }
 
   // datetime-local sends "YYYY-MM-DDTHH:MM" with no timezone. We treat the
   // value as UTC for storage simplicity in the sandbox; real production
@@ -322,18 +332,21 @@ export async function captureLeadAction(
 
     // Re-send confirmation to the prospect. appointmentTime carries the
     // booked time when a new appointment landed; otherwise the confirmation
-    // copy collapses to the no-appointment variant.
-    await dispatchLeadConfirmation({
-      org,
-      email,
-      firstName,
-      address,
-      phone,
-      customAnswersWithLabels,
-      appointmentTime: appointmentBooked ? formatAppointmentTime(apptIso) : null,
-      leadDisplayId:   existingLead.display_id,
-      leadId:          existingLead.id,
-    })
+    // copy collapses to the no-appointment variant. SEC-M5-2: the resubmission
+    // was already recorded above (fail-open); only the email is fail-CLOSED.
+    if (await leadConfirmationAllowed(supabase, slug, email)) {
+      await dispatchLeadConfirmation({
+        org,
+        email,
+        firstName,
+        address,
+        phone,
+        customAnswersWithLabels,
+        appointmentTime: appointmentBooked ? formatAppointmentTime(apptIso) : null,
+        leadDisplayId:   existingLead.display_id,
+        leadId:          existingLead.id,
+      })
+    }
 
     return { status: 'success' }
   }
@@ -455,18 +468,22 @@ export async function captureLeadAction(
   // Customer-facing confirmation. Non-fatal — the lead is already
   // captured, the Organization already has its alert; the only loss
   // here is the prospect's acknowledgment, which can be retried/resent
-  // out-of-band. Failures are logged inside the helper.
-  await dispatchLeadConfirmation({
-    org,
-    email,
-    firstName,
-    address,
-    phone,
-    customAnswersWithLabels,
-    appointmentTime: appointmentBooked ? formatAppointmentTime(apptIso) : null,
-    leadDisplayId:   lead?.display_id ?? null,
-    leadId:          lead.id,
-  })
+  // out-of-band. Failures are logged inside the helper. SEC-M5-2: the lead
+  // INSERT above is never gated (fail-open); only this email is fail-CLOSED,
+  // suppressed when limits are hit or the limiter errs.
+  if (await leadConfirmationAllowed(supabase, slug, email)) {
+    await dispatchLeadConfirmation({
+      org,
+      email,
+      firstName,
+      address,
+      phone,
+      customAnswersWithLabels,
+      appointmentTime: appointmentBooked ? formatAppointmentTime(apptIso) : null,
+      leadDisplayId:   lead?.display_id ?? null,
+      leadId:          lead.id,
+    })
+  }
 
   return { status: 'success' }
 }
@@ -613,6 +630,44 @@ type LeadConfirmationArgs = {
   appointmentTime:         string | null
   leadDisplayId:           string | null
   leadId:                  string
+}
+
+// SEC-M5-2 confirmation-email gate. FAIL-CLOSED: the prospect confirmation email
+// is only sent when EVERY rate-limit check is explicitly under its limit. Any
+// `allowed === false` (limit exceeded) OR `allowed === null` (RPC error) SUPPRESSES
+// the send — this is the email-bomb / open-relay control: an attacker submitting a
+// victim's address as `email` can't cause repeated mail to that victim. The lead
+// row is ALWAYS recorded (callers run the INSERT/UPDATE BEFORE this gate — the
+// write is never rate-limited / fail-open), so the org still sees the submissions.
+//   * per-slug ceiling — one landing page shouldn't legitimately fire 10 confirmation
+//     emails/min (60s window, max 10).
+//   * per-email cap    — the same address shouldn't be confirmation-emailed >3x/hr
+//     (3600s window, max 3) — the actual email-bomb control.
+//   * per-IP           — supplementary; spoofable behind Vercel, so skipped entirely
+//     when no forwarded IP is present (never a shared "unknown" bucket).
+async function leadConfirmationAllowed(
+  supabase: ReturnType<typeof createAdminClient>,
+  slug: string,
+  email: string,
+): Promise<boolean> {
+  const ip = await bestEffortIp()
+  const [slugCheck, emailCheck, ipCheck] = await Promise.all([
+    checkRateLimit(supabase, `lead_capture:${slug}`, 60, 10),
+    checkRateLimit(supabase, `lead_email:${email}`, 3600, 3),
+    ip
+      ? checkRateLimit(supabase, `lead_ip:${ip}`, 60, 10)
+      : Promise.resolve<RateLimitResult>({ allowed: true, count: 0 }),
+  ])
+  const allowed =
+    slugCheck.allowed === true &&
+    emailCheck.allowed === true &&
+    ipCheck.allowed === true
+  if (!allowed) {
+    console.warn(
+      `[lead-capture] confirmation email SUPPRESSED (rate-limited, fail-closed) slug=${slug} email=${email} slug_allowed=${slugCheck.allowed} email_allowed=${emailCheck.allowed} ip_allowed=${ipCheck.allowed}`,
+    )
+  }
+  return allowed
 }
 
 async function dispatchLeadConfirmation(args: LeadConfirmationArgs): Promise<void> {
