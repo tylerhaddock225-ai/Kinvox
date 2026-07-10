@@ -62,9 +62,9 @@ export default function InviteAcceptForm({
     setFinalizing(true)
 
     // Auto sign-in via the cookie-aware browser client (mirrors
-    // PendingInviteGate) so the middleware sorting hat sees the new session
+    // PendingInviteGate) so the proxy sorting hat sees the new session
     // and routes us to /${orgSlug}. The localStorage singleton in
-    // lib/supabase/client.ts is invisible to the server middleware.
+    // lib/supabase/client.ts is invisible to the server proxy.
     const supabase = createBrowserClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,

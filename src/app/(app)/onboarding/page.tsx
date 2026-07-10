@@ -6,11 +6,11 @@ import AcceptInviteForm from './AcceptInviteForm'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
-// The centralized middleware sorting hat routes HQ staff and
+// The centralized proxy sorting hat routes HQ staff and
 // merchants away from /onboarding before they reach this page.
 // Only invitees (auth.users.raw_user_meta_data.invited_to_org set)
 // land here. The page just fetches the invite payload to render
-// the accept screen; all role-based redirecting lives in middleware.
+// the accept screen; all role-based redirecting lives in the proxy.
 export default async function OnboardingPage() {
   const supabase = await createClient()
 
@@ -21,7 +21,7 @@ export default async function OnboardingPage() {
     .rpc('current_user_invited_org')
     .maybeSingle<{ org_id: string; org_name: string; org_slug: string }>()
 
-  // Defensive: if the invite row has vanished since middleware ran,
+  // Defensive: if the invite row has vanished since the proxy ran,
   // bounce back through / so the sorting hat can re-route.
   if (!invite) redirect('/')
 

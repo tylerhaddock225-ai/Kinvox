@@ -7,7 +7,7 @@
 // Response: see GenerateClaimResult in @/lib/claims.
 //   - `token` is the RAW value — caller hands it to Postmark, never logs it.
 //
-// Auth: middleware requires a session; we additionally verify
+// Auth: the proxy requires a session; we additionally verify
 // is_admin_hq() inside the handler so a tenant can never reach here
 // even if the URL allowlist changes.
 

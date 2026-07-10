@@ -5,7 +5,7 @@ import { Loader2, AlertCircle } from 'lucide-react'
 import { supabase } from '@/lib/supabase/client'
 
 // Redeem the claim, then hard-navigate to the new org dashboard so the
-// middleware sorting-hat re-evaluates with the fresh profile.organization_id
+// proxy sorting-hat re-evaluates with the fresh profile.organization_id
 // that the RPC just stamped. A client-side router.push() would keep the
 // stale session snapshot until the next full page load.
 export default function ClaimButton({
@@ -39,7 +39,7 @@ export default function ClaimButton({
       .eq('id', data as string)
       .single<{ slug: string | null }>()
 
-    // Hard navigation so middleware re-runs with the updated profile.
+    // Hard navigation so the proxy re-runs with the updated profile.
     window.location.href = org?.slug ? `/${org.slug}` : '/'
   }
 
