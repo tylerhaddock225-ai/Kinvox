@@ -5,7 +5,7 @@ import { createBrowserClient } from '@supabase/ssr'
 import PasswordInput from '@/components/PasswordInput'
 
 // HQ parallel of invite/[token]/InviteAcceptForm. Same flow — set password,
-// PATCH the redeem route, auto sign-in so the middleware sorting hat sees the
+// PATCH the redeem route, auto sign-in so the proxy sorting hat sees the
 // new session — but it targets /api/auth/hq-invite and routes to /hq (the new
 // HQ user has system_role NOT NULL + org NULL, which the sorting hat sends to
 // /hq). Copy is Kinvox-team branded (no org name).
@@ -66,7 +66,7 @@ export default function HqInviteAcceptForm({
     setFinalizing(true)
 
     // Auto sign-in via the cookie-aware browser client (mirrors InviteAcceptForm)
-    // so the middleware sorting hat sees the new session and routes us to /hq.
+    // so the proxy sorting hat sees the new session and routes us to /hq.
     const supabase = createBrowserClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,

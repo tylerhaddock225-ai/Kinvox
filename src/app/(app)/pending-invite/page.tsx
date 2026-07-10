@@ -7,10 +7,10 @@ import PendingInviteGate from './PendingInviteGate'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
-// The centralized middleware sorting hat guarantees that only
+// The centralized proxy sorting hat guarantees that only
 // authenticated users without an HQ role, without an org, and
 // without a pending invite reach this page. We only need to:
-//   • confirm the session (defensive — middleware already gated).
+//   • confirm the session (defensive — the proxy already gated).
 //   • render the "Pending invitation" UI, inside the client gate
 //     that re-checks role on the client for final flicker-proofing.
 export default async function PendingInvitePage() {
