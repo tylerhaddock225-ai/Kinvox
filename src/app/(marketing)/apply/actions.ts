@@ -1,28 +1,12 @@
 'use server'
 
-import { headers } from 'next/headers'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { checkRateLimit, bestEffortIp, type RateLimitResult } from '@/lib/rate-limit'
 
 export type ApplyState =
   | { ok: true; message: string }
   | { ok: false; error: string }
   | null
-
-const RATE_LIMIT_WINDOW_MS = 60_000
-const RATE_LIMIT_MAX = 3
-const bucket = new Map<string, { count: number; resetAt: number }>()
-
-function rateLimit(key: string): boolean {
-  const now = Date.now()
-  const entry = bucket.get(key)
-  if (!entry || entry.resetAt < now) {
-    bucket.set(key, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS })
-    return true
-  }
-  if (entry.count >= RATE_LIMIT_MAX) return false
-  entry.count += 1
-  return true
-}
 
 function normalizeWebsite(raw: string): string | null {
   const trimmed = raw.trim()
@@ -55,21 +39,35 @@ export async function submitApplication(
     return { ok: false, error: 'Please provide a valid website URL.' }
   }
 
-  const h = await headers()
-  const ip =
-    h.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-    h.get('x-real-ip') ||
-    'unknown'
-  if (!rateLimit(ip)) {
+  const admin = createAdminClient()
+
+  // SEC-M5-2: DB-backed limiter (replaces the old in-memory Map, which was
+  // per-serverless-instance and reset on every cold start — ineffective). IP is
+  // best-effort/spoofable, so the per-IP cap is paired with a global ceiling
+  // that still bites a spoofed-IP flood. FAIL-OPEN: a single low-severity insert
+  // with no email — only an explicit `allowed === false` blocks; an RPC error
+  // lets the insert through with a logged warning.
+  const ip = await bestEffortIp()
+  const [ipCheck, globalCheck] = await Promise.all([
+    ip
+      ? checkRateLimit(admin, `apply_ip:${ip}`, 60, 3)
+      : Promise.resolve<RateLimitResult>({ allowed: true, count: 0 }),
+    checkRateLimit(admin, 'apply_global', 60, 30),
+  ])
+  if (ipCheck.allowed === false || globalCheck.allowed === false) {
     return { ok: false, error: 'Too many submissions. Please try again in a minute.' }
   }
+  if (ipCheck.allowed === null || globalCheck.allowed === null) {
+    console.warn(
+      `[apply] rate-limit RPC unavailable — allowing submission (fail-open). ip_err=${ipCheck.error ?? ''} global_err=${globalCheck.error ?? ''}`,
+    )
+  }
 
-  const admin = createAdminClient()
   const { error } = await admin.from('applications').insert({
     business_name: businessName,
     email,
     website,
-    source_ip: ip === 'unknown' ? null : ip,
+    source_ip: ip,
   })
 
   if (error) {
