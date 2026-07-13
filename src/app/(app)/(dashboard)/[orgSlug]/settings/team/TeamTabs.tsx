@@ -19,11 +19,6 @@ import {
 import EmailVerificationPanel from '@/components/settings/EmailVerificationPanel'
 import InboundAddressRow from '@/components/settings/InboundAddressRow'
 import LeadSupportTab, { type LeadSupportState } from '@/components/settings/lead-support-tab'
-import SignalSettingsTab, { type SignalSettingsState } from '@/components/settings/signal-settings-tab'
-import SocialConnectionsTab, {
-  type CredentialRow,
-  type SocialBannerState,
-} from './SocialConnectionsTab'
 import { PERMISSION_KEYS, DEFAULT_PERMISSIONS, type Permissions } from '@/lib/permissions'
 import type { CatalogRow } from '@/lib/permissions/grouping'
 import GroupedPermissionGrid from '@/components/permissions/GroupedPermissionGrid'
@@ -615,8 +610,6 @@ const TABS = [
   { id: 'users',        label: 'User Administration' },
   { id: 'support',      label: 'Support Settings'    },
   { id: 'lead-support', label: 'Lead Settings'       },
-  { id: 'signal',       label: 'Signal Settings'     },
-  { id: 'social',       label: 'Social Connections'  },
 ] as const
 
 type TabId = typeof TABS[number]['id']
@@ -627,8 +620,6 @@ function isTabId(value: string | undefined): value is TabId {
   return value !== undefined && TAB_IDS.has(value as TabId)
 }
 
-export type { SignalSettingsState }
-
 export default function TeamTabs({
   members,
   roles,
@@ -638,9 +629,6 @@ export default function TeamTabs({
   pendingInvites,
   orgSettings,
   leadSupport,
-  signalSettings,
-  credentials,
-  socialBanner,
   initialTab,
 }: {
   members:           MemberRow[]
@@ -651,9 +639,6 @@ export default function TeamTabs({
   pendingInvites: PendingInviteRow[]
   orgSettings:    OrgSettings
   leadSupport:    LeadSupportState
-  signalSettings: SignalSettingsState
-  credentials:    CredentialRow[]
-  socialBanner:   SocialBannerState
   initialTab?:    string
 }) {
   const [activeTab, setActiveTab] = useState<TabId>(
@@ -717,14 +702,6 @@ export default function TeamTabs({
 
       {activeTab === 'lead-support' && (
         <LeadSupportTab state={leadSupport} />
-      )}
-
-      {activeTab === 'signal' && (
-        <SignalSettingsTab state={signalSettings} />
-      )}
-
-      {activeTab === 'social' && (
-        <SocialConnectionsTab credentials={credentials} banner={socialBanner} />
       )}
     </div>
   )

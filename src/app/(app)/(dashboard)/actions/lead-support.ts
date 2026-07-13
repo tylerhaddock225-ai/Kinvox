@@ -37,54 +37,6 @@ async function requireOrgAdmin(
   return { ok: true as const, userId: ctx.user.id, orgId: ctx.effectiveOrgId }
 }
 
-export async function setEngagementMode(_prev: State, formData: FormData): Promise<State> {
-  const supabase = await createClient()
-  const guard = await requireOrgAdmin(supabase, 'edit_signal_settings')
-  if (!guard.ok) return { status: 'error', error: guard.error }
-
-  const mode = String(formData.get('mode') ?? '').trim()
-  if (mode !== 'ai_draft' && mode !== 'manual') {
-    return { status: 'error', error: 'Invalid reply strategy' }
-  }
-
-  const { error } = await supabase
-    .from('organizations')
-    .update({ signal_engagement_mode: mode })
-    .eq('id', guard.orgId)
-
-  if (error) return { status: 'error', error: error.message }
-
-  revalidatePath('/[orgSlug]/settings/team', 'page')
-  revalidatePath('/[orgSlug]/signals', 'page')
-  return {
-    status:  'success',
-    message: mode === 'ai_draft'
-      ? 'Switched to AI-Draft Mode — new signals go to the Review Queue.'
-      : 'Switched to Manual Mode — new signals go straight to Leads.',
-  }
-}
-
-export async function setAiListeningEnabled(_prev: State, formData: FormData): Promise<State> {
-  const supabase = await createClient()
-  const guard = await requireOrgAdmin(supabase, 'edit_signal_settings')
-  if (!guard.ok) return { status: 'error', error: guard.error }
-
-  const enabled = formData.get('enabled') === 'on'
-
-  const { error } = await supabase
-    .from('organizations')
-    .update({ ai_listening_enabled: enabled })
-    .eq('id', guard.orgId)
-
-  if (error) return { status: 'error', error: error.message }
-
-  revalidatePath('/[orgSlug]/settings/team', 'page')
-  return {
-    status:  'success',
-    message: enabled ? 'Social listening enabled.' : 'Social listening paused.',
-  }
-}
-
 const MIN_PACKAGE = 10
 const MAX_PACKAGE = 10_000
 

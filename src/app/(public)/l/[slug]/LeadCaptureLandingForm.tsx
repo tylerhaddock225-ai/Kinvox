@@ -9,15 +9,12 @@ type Props = {
   slug:            string
   askHomestead:    boolean
   customQuestions: LeadQuestion[]
-  /** Optional signal id from `?sig=` — server validates again. */
-  signalId:        string | null
 }
 
 export default function LeadCaptureLandingForm({
   slug,
   askHomestead,
   customQuestions,
-  signalId,
 }: Props) {
   const [state, formAction, pending] = useActionState<CaptureLeadState, FormData>(
     captureLeadAction,
@@ -64,9 +61,6 @@ export default function LeadCaptureLandingForm({
       {/* Slug travels server-side via FormData; the action re-resolves it,
           so a tampered value can't write into someone else's tenant. */}
       <input type="hidden" name="slug" value={slug} readOnly />
-      {signalId && (
-        <input type="hidden" name="signal_id" value={signalId} readOnly />
-      )}
 
       {/* Locked platform-mandatory fields — Name, Email, Phone, Address. */}
       <Field label="Name"            name="name"    required autoComplete="name" />

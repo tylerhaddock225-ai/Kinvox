@@ -32,7 +32,6 @@ import { normalizeLeadQuestions, type LeadQuestion } from '@/lib/lead-questions'
 import { checkRateLimit, bestEffortIp, type RateLimitResult } from '@/lib/rate-limit'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-const UUID_RE  = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export type CaptureLeadState =
   | { status: 'success' }
@@ -69,8 +68,6 @@ export async function captureLeadAction(
   const phone           = String(formData.get('phone')          ?? '').trim()
   const address         = String(formData.get('address')        ?? '').trim()
   const appointmentAt   = String(formData.get('appointment_at') ?? '').trim()
-  const signalIdRaw     = String(formData.get('signal_id')      ?? '').trim()
-  const signalIdCandidate = UUID_RE.test(signalIdRaw) ? signalIdRaw : null
 
   if (!slug)                 return { status: 'error', error: 'Missing slug' }
   if (!name)                 return { status: 'error', error: 'Name is required' }
@@ -116,23 +113,6 @@ export async function captureLeadAction(
   if (!org)   return { status: 'error', error: 'This landing page is not available' }
   if (!isLeadCaptureLive(org)) {
     return { status: 'error', error: 'This landing page is not available' }
-  }
-
-  // Attribution: only honour the supplied signal_id if it actually points
-  // at a pending_signal that belongs to *this* org. A visitor pasting a
-  // ?sig=<other-tenant-uuid> in the URL must not write attribution into
-  // someone else's tenancy. Zero-Inference: the org id we compare against
-  // came from the slug lookup above, never from the form payload.
-  let attributedSignalId: string | null = null
-  if (signalIdCandidate) {
-    const { data: sig } = await supabase
-      .from('pending_signals')
-      .select('id, organization_id')
-      .eq('id', signalIdCandidate)
-      .maybeSingle<{ id: string; organization_id: string }>()
-    if (sig && sig.organization_id === org.id) {
-      attributedSignalId = sig.id
-    }
   }
 
   // Geofence is informational here — leads are captured regardless. The
@@ -188,9 +168,6 @@ export async function captureLeadAction(
   if (distanceMiles !== null)  metadata.distance_miles      = Number(distanceMiles.toFixed(2))
   if (homesteadRaw   !== null) metadata.homestead_exemption = homestead
   if (customAnswers.length)    metadata.custom_answers      = customAnswers
-  // Attribution trail: links the lead row back to the originating signal so
-  // the merchant (and HQ) can trace social-post → unlock → form submission.
-  if (attributedSignalId)      metadata.signal_id           = attributedSignalId
 
   // Label custom answers for both branches (new lead confirmation + resubmission
   // system message). Cheap join against the org's saved questionnaire.
