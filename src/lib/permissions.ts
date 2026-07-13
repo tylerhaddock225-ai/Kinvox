@@ -25,10 +25,6 @@ export const ORG_PERMISSION_KEYS = [
   { key: 'manage_team',       label: 'Manage Team'       },
   // ── Workstream K Stage 1 expansion ──────────────────────────────────────
   { key: 'edit_appointments',           label: 'Edit Appointments'         },
-  { key: 'view_signals',                label: 'View Signals'              },
-  { key: 'manage_signals',              label: 'Act on Signals'            },
-  { key: 'edit_signal_settings',        label: 'Edit Signal Settings'      },
-  { key: 'manage_social_connections',   label: 'Manage Social Connections' },
   { key: 'manage_lead_settings',        label: 'Manage Lead Settings'      },
   { key: 'manage_org_support_settings', label: 'Manage Support Settings'   },
   { key: 'manage_org_settings',         label: 'Manage Org Settings'       },
@@ -78,10 +74,6 @@ export const DEFAULT_ORG_PERMISSIONS: OrgPermissions = {
   // ── Workstream K Stage 1 expansion (new custom-role defaults: views/edits
   //    on, management gated — mirrors the manage_team:false convention) ──────
   edit_appointments:           true,
-  view_signals:                true,
-  manage_signals:              false,
-  edit_signal_settings:        true,
-  manage_social_connections:   false,
   manage_lead_settings:        false,
   manage_org_support_settings: false,
   manage_org_settings:         false,

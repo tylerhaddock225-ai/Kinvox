@@ -7,7 +7,6 @@ import type { Permissions } from '@/lib/permissions'
 import type { CatalogRow } from '@/lib/permissions/grouping'
 import { normalizeLeadQuestions } from '@/lib/lead-questions'
 import { constructInboundEmailAddress } from '@/lib/email/inbound-address'
-import type { CredentialRow } from './SocialConnectionsTab'
 
 // Base URL the lead-magnet URL row should render. Matches the HQ admin
 // org page convention (NEXT_PUBLIC_APP_URL, prod-host fallback so a
@@ -18,9 +17,7 @@ const LANDING_BASE =
 export const dynamic = 'force-dynamic'
 
 type SearchParams = {
-  tab?:    string
-  reddit?: string
-  detail?: string
+  tab?: string
 }
 
 export type MemberRow = {
@@ -81,12 +78,8 @@ export default async function TeamSettingsPage({
 
   const orgId    = ctx.effectiveOrgId
 
-  // Fetch members, roles, the org settings row, primary signal_configs,
-  // and the social credentials in parallel. signal_configs backs the
-  // Signal Settings tab; organization_credentials backs Social Connections.
-  // Column-level grants on organization_credentials hide secret_id from
-  // authenticated callers, so this is safe to project narrowly.
-  const [membersRes, rolesRes, orgRes, signalConfigRes, credsRes] = await Promise.all([
+  // Fetch members, roles, and the org settings row in parallel.
+  const [membersRes, rolesRes, orgRes] = await Promise.all([
     supabase
       .from('profiles')
       .select('id, full_name, role_id, roles(id, name)')
@@ -99,33 +92,10 @@ export default async function TeamSettingsPage({
       .order('name'),
     supabase
       .from('organizations')
-      .select('owner_id, inbound_email_tag, inbound_lead_email_tag, verified_support_email, verified_support_email_confirmed_at, verified_lead_email, verified_lead_email_confirmed_at, ai_listening_enabled, custom_lead_questions, signal_engagement_mode, vertical, lead_magnet_settings, lead_magnet_slug')
+      .select('owner_id, inbound_email_tag, inbound_lead_email_tag, verified_support_email, verified_support_email_confirmed_at, verified_lead_email, verified_lead_email_confirmed_at, custom_lead_questions, lead_magnet_settings, lead_magnet_slug')
       .eq('id', orgId)
       .single(),
-    supabase
-      .from('signal_configs')
-      .select('id, office_address, radius_miles, keywords')
-      .eq('organization_id', orgId)
-      .order('created_at', { ascending: true })
-      .limit(1)
-      .maybeSingle<{
-        id:             string
-        office_address: string | null
-        radius_miles:   number
-        keywords:       string[]
-      }>(),
-    supabase
-      .from('organization_credentials')
-      .select('platform, account_handle, status, expires_at')
-      .eq('organization_id', orgId)
-      .returns<CredentialRow[]>(),
   ])
-
-  const { data: creditsRow } = await supabase
-    .from('organization_credits')
-    .select('balance')
-    .eq('organization_id', orgId)
-    .maybeSingle<{ balance: number }>()
 
   // Workstream L — permission_catalog grouping metadata for the Roles editor.
   // Public-read to authenticated (RLS: permission_catalog_select_authenticated).
@@ -210,32 +180,9 @@ export default async function TeamSettingsPage({
     landing_base:                     LANDING_BASE,
   }
 
-  // Workstream I: ai_listening_enabled, signal_engagement_mode, and balance
-  // moved here from leadSupport so the Signal Settings tab owns the full
-  // signal-capture control set (toggle + reply mode + credit balance +
-  // hunting profile).
-  const signalSettings = {
-    ai_listening_enabled:   orgRes.data?.ai_listening_enabled                       ?? true,
-    signal_engagement_mode: (orgRes.data?.signal_engagement_mode ?? 'ai_draft')     as 'ai_draft' | 'manual',
-    balance:                creditsRow?.balance                                     ?? 0,
-    orgVertical:            orgRes.data?.vertical                                   ?? null,
-    initialAddress:         signalConfigRes.data?.office_address                    ?? null,
-    initialRadius:          signalConfigRes.data?.radius_miles                      ?? 25,
-    initialKeywords:        signalConfigRes.data?.keywords                          ?? [],
-  }
-
-  const credentials: CredentialRow[] = credsRes.data ?? []
-  const socialBanner = {
-    reddit: typeof sp.reddit === 'string' ? sp.reddit : undefined,
-    detail: typeof sp.detail === 'string' ? sp.detail : undefined,
-  }
-
-  // OAuth callback redirects back here with ?reddit=connected — auto-select
-  // the Social tab in that case so the success banner is visible. Otherwise
-  // honor an explicit ?tab=… or fall back to the default 'users'.
+  // Honor an explicit ?tab=… or fall back to the default 'users'.
   const initialTab =
-    sp.reddit ? 'social'
-              : (typeof sp.tab === 'string' && sp.tab.length > 0 ? sp.tab : undefined)
+    typeof sp.tab === 'string' && sp.tab.length > 0 ? sp.tab : undefined
 
   return (
     <div className="px-8 py-8 space-y-6 max-w-5xl">
@@ -257,9 +204,6 @@ export default async function TeamSettingsPage({
         }))}
         orgSettings={orgSettings}
         leadSupport={leadSupport}
-        signalSettings={signalSettings}
-        credentials={credentials}
-        socialBanner={socialBanner}
         initialTab={initialTab}
       />
     </div>

@@ -31,26 +31,14 @@ export default async function SidebarServer() {
 
   let orgName: string | null = null
   let orgSlug: string | null = null
-  let pendingSignalCount = 0
   if (effectiveOrgId) {
-    const [{ data: org }, { count }] = await Promise.all([
-      supabase
-        .from('organizations')
-        .select('name, slug')
-        .eq('id', effectiveOrgId)
-        .single<{ name: string | null; slug: string | null }>(),
-      // HEAD + count avoids shipping row data we don't render in the
-      // sidebar. RLS already scopes to the effective org; the
-      // organization_id filter is defense-in-depth.
-      supabase
-        .from('pending_signals')
-        .select('id', { count: 'exact', head: true })
-        .eq('organization_id', effectiveOrgId)
-        .eq('status', 'pending'),
-    ])
+    const { data: org } = await supabase
+      .from('organizations')
+      .select('name, slug')
+      .eq('id', effectiveOrgId)
+      .single<{ name: string | null; slug: string | null }>()
     orgName = org?.name ?? null
     orgSlug = org?.slug ?? null
-    pendingSignalCount = count ?? 0
   }
 
   const isHqAdmin = !!profile?.system_role
@@ -61,7 +49,6 @@ export default async function SidebarServer() {
       orgName={orgName}
       orgSlug={orgSlug}
       isHqAdmin={isHqAdmin}
-      pendingSignalCount={pendingSignalCount}
     />
   )
 }

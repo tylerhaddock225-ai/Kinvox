@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { ArrowLeft, ShieldAlert, Archive, RotateCcw, Sparkles, Megaphone, Mail, CheckCircle2, AlertCircle, Wallet, Radar, MapPin, Users, Crown, UserMinus, UserX } from 'lucide-react'
+import { ArrowLeft, ShieldAlert, Archive, RotateCcw, Sparkles, Megaphone, Mail, CheckCircle2, AlertCircle, Wallet, MapPin, Users, Crown, UserMinus, UserX } from 'lucide-react'
 import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
@@ -18,23 +18,17 @@ import ConfirmButton from '@/components/admin/ConfirmButton'
 import OrgAiStrategyForm from '@/components/admin/OrgAiStrategyForm'
 import OrgLeadCaptureForm from '@/components/admin/OrgLeadCaptureForm'
 import OrgCreditManager from '@/components/hq/org-credit-manager'
-import OrgApiKeyList from '@/components/hq/org-api-key-list'
-import OrgSignalConfigs from '@/components/hq/org-signal-configs'
-import OrgCaptureToggle from '@/components/admin/OrgCaptureToggle'
 import type { AiTemplate } from '@/lib/ai-templates'
 import type {
   OrganizationCredits,
-  OrganizationApiKey,
-  SignalConfig,
   Vertical,
 } from '@/lib/types/database.types'
 
-type TabKey = 'details' | 'members' | 'lead-capture' | 'signal-configs' | 'integrations-billing'
+type TabKey = 'details' | 'members' | 'lead-capture' | 'integrations-billing'
 const TABS: Array<{ key: TabKey; label: string; icon: typeof Sparkles }> = [
   { key: 'details',              label: 'Details',                icon: Sparkles },
   { key: 'members',              label: 'Members',                icon: Users },
   { key: 'lead-capture',         label: 'Lead Capture',           icon: Megaphone },
-  { key: 'signal-configs',       label: 'Signal Configs',         icon: Radar },
   { key: 'integrations-billing', label: 'Integrations & Billing', icon: Wallet },
 ]
 
@@ -94,7 +88,6 @@ export default async function AdminOrgDetailPage({
   const activeTab: TabKey =
     sp.tab === 'members'              ? 'members' :
     sp.tab === 'lead-capture'         ? 'lead-capture' :
-    sp.tab === 'signal-configs'       ? 'signal-configs' :
     sp.tab === 'integrations-billing' ? 'integrations-billing' :
                                         'details'
   const errorMessage = typeof sp.error === 'string' ? sp.error : null
@@ -104,11 +97,6 @@ export default async function AdminOrgDetailPage({
   const creditsAdded = typeof sp.credits_added === 'string' ? parseInt(sp.credits_added, 10) : null
   const creditsError = typeof sp.credits_error === 'string' ? sp.credits_error               : null
   const topUpSaved   = sp.topup_saved === '1'
-  const newKey       = typeof sp.new_key    === 'string' ? sp.new_key    : null
-  const keyError     = typeof sp.key_error  === 'string' ? sp.key_error  : null
-  const keyRevoked   = sp.key_revoked === '1'
-  const configSaved  = sp.config_saved === '1'
-  const configError  = typeof sp.config_error === 'string' ? sp.config_error : null
   const geofenceSaved = sp.geofence_saved === '1'
   const geofenceError = typeof sp.geofence_error === 'string' ? sp.geofence_error : null
   const ownerSaved    = sp.owner_saved === '1'
@@ -119,7 +107,7 @@ export default async function AdminOrgDetailPage({
 
   const { data: org } = await supabase
     .from('organizations')
-    .select('id, name, slug, vertical, status, plan, deleted_at, created_at, owner_id, ai_template_id, enabled_ai_features, ai_listening_enabled, lead_magnet_slug, lead_magnet_settings, website_url, latitude, longitude, signal_radius')
+    .select('id, name, slug, vertical, status, plan, deleted_at, created_at, owner_id, ai_template_id, enabled_ai_features, lead_magnet_slug, lead_magnet_settings, website_url, latitude, longitude, signal_radius')
     .eq('id', id)
     .single<{
       id:                    string
@@ -133,7 +121,6 @@ export default async function AdminOrgDetailPage({
       owner_id:              string | null
       ai_template_id:        string | null
       enabled_ai_features:   Record<string, boolean> | null
-      ai_listening_enabled:  boolean
       lead_magnet_slug:      string | null
       lead_magnet_settings:  { enabled?: boolean; headline?: string; features?: string[] } | null
       website_url:           string | null
@@ -164,8 +151,6 @@ export default async function AdminOrgDetailPage({
   // happy-path details view from paying for round-trips the user did
   // not ask for.
   let credits: OrganizationCredits | null = null
-  let apiKeys: OrganizationApiKey[] = []
-  let signalConfigs: SignalConfig[] = []
   let members: OrgMemberRow[] = []
   if (activeTab === 'members') {
     // Human members of this org (exclude the per-org lead-inbox bot). Read via
@@ -198,29 +183,12 @@ export default async function AdminOrgDetailPage({
       role_name:   (m.roles as unknown as { name: string } | null)?.name ?? null,
     }))
   } else if (activeTab === 'integrations-billing') {
-    const [{ data: c }, { data: k }] = await Promise.all([
-      supabase
-        .from('organization_credits')
-        .select('id, organization_id, balance, auto_top_up_enabled, top_up_threshold, top_up_amount, created_at, updated_at')
-        .eq('organization_id', org.id)
-        .maybeSingle<OrganizationCredits>(),
-      supabase
-        .from('organization_api_keys')
-        .select('id, organization_id, key_hash, label, created_by, last_used_at, revoked_at, created_at')
-        .eq('organization_id', org.id)
-        .order('created_at', { ascending: false })
-        .returns<OrganizationApiKey[]>(),
-    ])
-    credits = c ?? null
-    apiKeys = k ?? []
-  } else if (activeTab === 'signal-configs') {
-    const { data: configs } = await supabase
-      .from('signal_configs')
-      .select('id, organization_id, vertical, center_lat, center_long, radius_miles, keywords, is_active, created_at')
+    const { data: c } = await supabase
+      .from('organization_credits')
+      .select('id, organization_id, balance, auto_top_up_enabled, top_up_threshold, top_up_amount, created_at, updated_at')
       .eq('organization_id', org.id)
-      .order('created_at', { ascending: false })
-      .returns<SignalConfig[]>()
-    signalConfigs = configs ?? []
+      .maybeSingle<OrganizationCredits>()
+    credits = c ?? null
   }
 
   const isArchived = !!org.deleted_at
@@ -721,32 +689,6 @@ export default async function AdminOrgDetailPage({
         </section>
       )}
 
-      {activeTab === 'signal-configs' && (
-        <section className="rounded-xl border border-pvx-border bg-gray-900 p-5 space-y-5">
-          <div>
-            <div className="flex items-center gap-2">
-              <Radar className="w-4 h-4 text-violet-300" />
-              <h2 className="text-sm font-semibold text-white">Signal Configs</h2>
-            </div>
-            <p className="mt-1 text-xs text-gray-500">
-              Geofence + keyword configs routed by <span className="font-mono">/api/v1/signals/capture</span>. A signal must match at least one active config for this org to land in the review queue.
-            </p>
-          </div>
-
-          <OrgCaptureToggle
-            orgId={org.id}
-            initialEnabled={org.ai_listening_enabled}
-          />
-
-          <OrgSignalConfigs
-            orgId={org.id}
-            configs={signalConfigs}
-            verticals={verticalOptions}
-            flash={{ saved: configSaved, error: configError }}
-          />
-        </section>
-      )}
-
       {activeTab === 'integrations-billing' && (
         <>
           <section className="rounded-xl border border-pvx-border bg-gray-900 p-5">
@@ -755,7 +697,7 @@ export default async function AdminOrgDetailPage({
               <h2 className="text-sm font-semibold text-white">Credits</h2>
             </div>
             <p className="mt-1 text-xs text-gray-500">
-              Signal balance and ledger adjustments for this organization. Every change writes to <span className="font-mono">credit_ledger</span>.
+              Credit balance and ledger adjustments for this organization. Every change writes to <span className="font-mono">credit_ledger</span>.
             </p>
 
             <div className="mt-5">
@@ -780,28 +722,6 @@ export default async function AdminOrgDetailPage({
                   <span>No credits row for this organization yet — the provisioning trigger should backfill on next DB sync.</span>
                 </div>
               )}
-            </div>
-          </section>
-
-          <section className="rounded-xl border border-pvx-border bg-gray-900 p-5">
-            <div className="flex items-center gap-2">
-              <ShieldAlert className="w-4 h-4 text-violet-300" />
-              <h2 className="text-sm font-semibold text-white">Signal API Keys</h2>
-            </div>
-            <p className="mt-1 text-xs text-gray-500">
-              Keys authenticate external agents (Make.com, n8n) calling <span className="font-mono">POST /api/v1/signals/capture</span>. Raw keys are shown once at creation and never re-displayed.
-            </p>
-
-            <div className="mt-5">
-              <OrgApiKeyList
-                orgId={org.id}
-                keys={apiKeys}
-                flash={{
-                  newKey:  newKey,
-                  revoked: keyRevoked,
-                  error:   keyError,
-                }}
-              />
             </div>
           </section>
         </>

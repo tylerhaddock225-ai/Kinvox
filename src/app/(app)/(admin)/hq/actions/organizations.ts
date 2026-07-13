@@ -9,9 +9,8 @@ import type { HqPermissionKey } from '@/lib/permissions'
 
 type Plan = 'free' | 'pro' | 'enterprise'
 
-// K2b: routed through hqGate. The helper returns the Supabase client to all
-// six call sites (one of which — updateCaptureStatus — returns a discriminated
-// union), so on gate failure we preserve the helper's existing redirect
+// K2b: routed through hqGate. The helper returns the Supabase client to its
+// call sites, so on gate failure we preserve the helper's existing redirect
 // contract rather than returning a Forbidden object that callers can't consume.
 async function requireAdmin(permissionKey: HqPermissionKey) {
   const supabase = await createClient()
@@ -82,41 +81,6 @@ export async function restoreOrganization(formData: FormData) {
 
   revalidatePath(`/hq/organizations/${id}`)
   revalidatePath('/hq/organizations')
-}
-
-// Master kill switch for tenant signal capture. HQ-only — flips
-// organizations.ai_listening_enabled, which is the boolean both
-// /api/v1/signals/capture and /api/v1/signals/ingest gate on. When off,
-// the capture route returns 'feature_disabled_by_organization' (403)
-// and the ingest route excludes the org from fan-out.
-//
-// Returns a discriminated result so the client can revert an optimistic
-// flip without involving the redirect dance — needed for snappy switch UX.
-export async function updateCaptureStatus(
-  orgId: string,
-  enabled: boolean,
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  if (typeof orgId !== 'string' || orgId.length === 0) {
-    return { ok: false, error: 'Missing organization id' }
-  }
-  if (typeof enabled !== 'boolean') {
-    return { ok: false, error: 'Invalid toggle state' }
-  }
-
-  const supabase = await requireAdmin('manage_organizations')
-
-  const { error } = await supabase
-    .from('organizations')
-    .update({ ai_listening_enabled: enabled })
-    .eq('id', orgId)
-
-  if (error) return { ok: false, error: error.message }
-
-  // Bust the org detail server-render cache so a subsequent navigation
-  // shows the new state authoritatively. The optimistic UI handles the
-  // immediate visual flip.
-  revalidatePath(`/hq/organizations/${orgId}`)
-  return { ok: true }
 }
 
 const MAX_RADIUS_MILES = 500

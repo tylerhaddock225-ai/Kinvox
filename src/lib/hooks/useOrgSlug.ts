@@ -7,7 +7,7 @@ import { usePathname } from 'next/navigation'
 // one. If RESERVED_TOP changes in Sidebar.tsx, update this set in lockstep.
 // (Backlog: extract a shared constant when either file is touched again.)
 const RESERVED = new Set([
-  'leads', 'signals', 'settings', 'support',
+  'leads', 'settings', 'support',
   'login', 'signup', 'forgot-password', 'reset-password',
   'onboarding', 'admin', 'hq', 'api',
 ])

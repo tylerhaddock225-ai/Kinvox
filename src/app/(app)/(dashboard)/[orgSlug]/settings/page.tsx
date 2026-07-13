@@ -33,7 +33,7 @@ export default async function SettingsPage() {
     .maybeSingle<{ role_id: string | null; roles: { permissions: Record<string, boolean> | null } | null }>()
   const permissions = prof?.roles?.permissions ?? null
 
-  const settingsKeys = ['manage_team','manage_roles','manage_org_support_settings','manage_lead_settings','edit_signal_settings','manage_social_connections','manage_org_settings','manage_billing'] as const
+  const settingsKeys = ['manage_team','manage_roles','manage_org_support_settings','manage_lead_settings','manage_org_settings','manage_billing'] as const
   const hasAny = !!permissions && settingsKeys.some(k => permissions[k] === true)
   if (!ctx.impersonation.active && !hasAny) redirect('/')
 
@@ -56,7 +56,7 @@ export default async function SettingsPage() {
       <div>
         <h1 className="text-2xl font-bold text-white">Organization Settings</h1>
         <p className="text-sm text-gray-400 mt-1">
-          Configure your organization&apos;s branding and where it listens for signals.
+          Configure your organization&apos;s branding and service-area geofence.
         </p>
       </div>
 
