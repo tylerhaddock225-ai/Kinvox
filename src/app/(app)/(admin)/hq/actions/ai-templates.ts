@@ -9,6 +9,12 @@ import {
   type AiTemplate,
 } from '@/lib/ai-templates'
 
+// In-place HQ toggles write individual organizations.feature_flags keys. Only
+// these product-capability flags may be written — an allowlist so a caller can
+// never inject an arbitrary key into the jsonb.
+type FeatureFlagState = { status: 'success' } | { status: 'error'; error: string } | null
+const TOGGLEABLE_FLAGS = new Set(['ai_support_enabled', 'review_monitoring_enabled'])
+
 export async function setOrgAiStrategy(formData: FormData) {
   const orgId      = String(formData.get('org_id')      ?? '').trim()
   const templateId = String(formData.get('template_id') ?? '').trim()
@@ -71,4 +77,60 @@ export async function setOrgAiStrategy(formData: FormData) {
 
   revalidatePath(`/hq/organizations/${orgId}`)
   redirect(`/hq/organizations/${orgId}`)
+}
+
+/**
+ * In-place HQ toggle for a single `organizations.feature_flags` key. Mirrors
+ * setOrgAiStrategy's guard (regular createClient + hqGate 'manage_ai_templates')
+ * but returns State instead of redirecting (it's a settings toggle, not a wizard
+ * step). READ-MODIFY-WRITEs the jsonb so every other flag is preserved, and only
+ * ever writes an allowlisted key — it never touches ai_template_id,
+ * enabled_ai_features, or any other column.
+ */
+export async function setOrgFeatureFlag(
+  _prev:    FeatureFlagState,
+  formData: FormData,
+): Promise<FeatureFlagState> {
+  const orgId = String(formData.get('org_id') ?? '').trim()
+  const flag  = String(formData.get('flag')   ?? '').trim()
+  const value = String(formData.get('value')  ?? '').trim()
+
+  if (!orgId) return { status: 'error', error: 'Missing organization' }
+  if (!TOGGLEABLE_FLAGS.has(flag)) {
+    return { status: 'error', error: 'Invalid feature flag' }
+  }
+
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { status: 'error', error: 'Not authenticated' }
+
+  const gate = await hqGate(supabase, user.id, 'manage_ai_templates')
+  if (!gate.ok) return { status: 'error', error: 'Not authorized' }
+
+  // Read the current flags so the merge preserves every other key
+  // (lead_magnet_enabled, embed_enabled, …) — a wholesale write would wipe them.
+  const { data: org, error: readErr } = await supabase
+    .from('organizations')
+    .select('feature_flags')
+    .eq('id', orgId)
+    .single<{ feature_flags: Record<string, unknown> | null }>()
+
+  if (readErr || !org) {
+    return { status: 'error', error: 'Organization not found' }
+  }
+
+  // MERGE, never replace.
+  const next = { ...(org.feature_flags ?? {}), [flag]: value === 'true' }
+
+  const { error: updErr } = await supabase
+    .from('organizations')
+    .update({ feature_flags: next })
+    .eq('id', orgId)
+
+  if (updErr) {
+    return { status: 'error', error: updErr.message }
+  }
+
+  revalidatePath(`/hq/organizations/${orgId}`)
+  return { status: 'success' }
 }

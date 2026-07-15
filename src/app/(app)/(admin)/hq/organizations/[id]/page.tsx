@@ -16,6 +16,7 @@ import {
 import { sendOrganizationClaimInvite } from '@/app/(app)/(admin)/hq/actions/claim'
 import ConfirmButton from '@/components/admin/ConfirmButton'
 import OrgAiStrategyForm from '@/components/admin/OrgAiStrategyForm'
+import OrgFeatureToggles from '@/components/admin/OrgFeatureToggles'
 import OrgLeadCaptureForm from '@/components/admin/OrgLeadCaptureForm'
 import OrgCreditManager from '@/components/hq/org-credit-manager'
 import type { AiTemplate } from '@/lib/ai-templates'
@@ -107,7 +108,7 @@ export default async function AdminOrgDetailPage({
 
   const { data: org } = await supabase
     .from('organizations')
-    .select('id, name, slug, vertical, status, plan, deleted_at, created_at, owner_id, ai_template_id, enabled_ai_features, lead_magnet_slug, lead_magnet_settings, website_url, latitude, longitude, signal_radius')
+    .select('id, name, slug, vertical, status, plan, deleted_at, created_at, owner_id, ai_template_id, enabled_ai_features, feature_flags, lead_magnet_slug, lead_magnet_settings, website_url, latitude, longitude, signal_radius')
     .eq('id', id)
     .single<{
       id:                    string
@@ -121,6 +122,7 @@ export default async function AdminOrgDetailPage({
       owner_id:              string | null
       ai_template_id:        string | null
       enabled_ai_features:   Record<string, boolean> | null
+      feature_flags:         Record<string, unknown> | null
       lead_magnet_slug:      string | null
       lead_magnet_settings:  { enabled?: boolean; headline?: string; features?: string[] } | null
       website_url:           string | null
@@ -441,6 +443,10 @@ export default async function AdminOrgDetailPage({
             currentTemplateId={org.ai_template_id}
             enabledFeatures={org.enabled_ai_features ?? {}}
           />
+        </div>
+
+        <div className="mt-6 border-t border-pvx-border pt-5">
+          <OrgFeatureToggles orgId={org.id} featureFlags={org.feature_flags ?? {}} />
         </div>
       </section>
 
