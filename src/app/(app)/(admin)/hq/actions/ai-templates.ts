@@ -39,7 +39,7 @@ export async function setOrgAiStrategy(formData: FormData) {
       .eq('id', orgId)
 
     revalidatePath(`/hq/organizations/${orgId}`)
-    redirect(`/hq/organizations/${orgId}`)
+    redirect(`/hq/organizations/${orgId}?tab=ai-settings`)
   }
 
   const { data: template } = await supabase
@@ -51,7 +51,7 @@ export async function setOrgAiStrategy(formData: FormData) {
   if (!template) {
     // Template vanished between page load and submit — don't write a
     // dangling FK; bounce back so the user re-selects.
-    redirect(`/hq/organizations/${orgId}`)
+    redirect(`/hq/organizations/${orgId}?tab=ai-settings`)
   }
 
   // Build the toggle map from form fields. Checkbox semantics: only
@@ -76,7 +76,7 @@ export async function setOrgAiStrategy(formData: FormData) {
     .eq('id', orgId)
 
   revalidatePath(`/hq/organizations/${orgId}`)
-  redirect(`/hq/organizations/${orgId}`)
+  redirect(`/hq/organizations/${orgId}?tab=ai-settings`)
 }
 
 /**
