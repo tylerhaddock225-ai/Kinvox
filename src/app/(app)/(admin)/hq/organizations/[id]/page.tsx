@@ -25,9 +25,10 @@ import type {
   Vertical,
 } from '@/lib/types/database.types'
 
-type TabKey = 'details' | 'members' | 'lead-capture' | 'integrations-billing'
+type TabKey = 'details' | 'ai-settings' | 'members' | 'lead-capture' | 'integrations-billing'
 const TABS: Array<{ key: TabKey; label: string; icon: typeof Sparkles }> = [
   { key: 'details',              label: 'Details',                icon: Sparkles },
+  { key: 'ai-settings',          label: 'AI Settings',            icon: Sparkles },
   { key: 'members',              label: 'Members',                icon: Users },
   { key: 'lead-capture',         label: 'Lead Capture',           icon: Megaphone },
   { key: 'integrations-billing', label: 'Integrations & Billing', icon: Wallet },
@@ -87,6 +88,7 @@ export default async function AdminOrgDetailPage({
   const { id } = await params
   const sp     = await searchParams
   const activeTab: TabKey =
+    sp.tab === 'ai-settings'          ? 'ai-settings' :
     sp.tab === 'members'              ? 'members' :
     sp.tab === 'lead-capture'         ? 'lead-capture' :
     sp.tab === 'integrations-billing' ? 'integrations-billing' :
@@ -426,30 +428,6 @@ export default async function AdminOrgDetailPage({
         </form>
       </section>
 
-      {/* AI Strategy */}
-      <section className="rounded-xl border border-pvx-border bg-gray-900 p-5">
-        <div className="flex items-center gap-2">
-          <Sparkles className="w-4 h-4 text-violet-300" />
-          <h2 className="text-sm font-semibold text-white">AI Strategy</h2>
-        </div>
-        <p className="mt-1 text-xs text-gray-500">
-          Pick the prompt template this organization runs and toggle individual features on or off.
-        </p>
-
-        <div className="mt-5">
-          <OrgAiStrategyForm
-            orgId={org.id}
-            templates={templates ?? []}
-            currentTemplateId={org.ai_template_id}
-            enabledFeatures={org.enabled_ai_features ?? {}}
-          />
-        </div>
-
-        <div className="mt-6 border-t border-pvx-border pt-5">
-          <OrgFeatureToggles orgId={org.id} featureFlags={org.feature_flags ?? {}} />
-        </div>
-      </section>
-
       {/* Merchant claim invite */}
       <section className="rounded-xl border border-pvx-border bg-gray-900 p-5">
         <div className="flex items-center gap-2">
@@ -540,6 +518,31 @@ export default async function AdminOrgDetailPage({
         )}
       </section>
       </>}
+
+      {activeTab === 'ai-settings' && (
+        <section className="rounded-xl border border-pvx-border bg-gray-900 p-5">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-violet-300" />
+            <h2 className="text-sm font-semibold text-white">AI Strategy</h2>
+          </div>
+          <p className="mt-1 text-xs text-gray-500">
+            Pick the prompt template this organization runs and toggle individual features on or off.
+          </p>
+
+          <div className="mt-5">
+            <OrgAiStrategyForm
+              orgId={org.id}
+              templates={templates ?? []}
+              currentTemplateId={org.ai_template_id}
+              enabledFeatures={org.enabled_ai_features ?? {}}
+            />
+          </div>
+
+          <div className="mt-6 border-t border-pvx-border pt-5">
+            <OrgFeatureToggles orgId={org.id} featureFlags={org.feature_flags ?? {}} />
+          </div>
+        </section>
+      )}
 
       {activeTab === 'members' && (
         <section className="rounded-xl border border-pvx-border bg-gray-900 p-5">
