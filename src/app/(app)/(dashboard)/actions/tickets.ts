@@ -7,8 +7,25 @@ import { revalidatePath } from 'next/cache'
 import { constructInboundEmailAddress } from '@/lib/email/inbound-address'
 import { sendOrgTransactionalEmail } from '@/lib/email/send-org-email'
 import { renderConversationReply, type PriorMessage } from '@/lib/email/templates/reply'
+import { draftAiReply } from '@/lib/ai/draft-reply'
 
 type State = { status: 'success' } | { status: 'error'; error: string } | null
+
+// Distinct result shape for the AI-draft action: it returns text on success and
+// a typed error code on failure (the client maps codes to user-facing copy).
+export type DraftReplyResult =
+  | { ok: true;  text: string }
+  | {
+      ok: false
+      error:
+        | 'not_authenticated'
+        | 'no_organization'
+        | 'ticket_not_found'
+        | 'ai_support_disabled'
+        | 'no_customer_message'
+        | 'insufficient_credits'
+        | 'draft_failed'
+    }
 
 export async function createTicket(_prev: State, formData: FormData): Promise<State> {
   const supabase = await createClient()
@@ -321,6 +338,108 @@ export async function sendTicketMessage(_prev: State, formData: FormData): Promi
 
   await revalidateOrgPath(supabase, orgId, `/tickets/${ticket_id}`)
   return { status: 'success' }
+}
+
+// Human-triggered "Draft with AI" (Ticket Assist, Stage 2a). This drafts a reply
+// and returns the text — it does NOT insert a ticket_messages row or send email.
+// The agent reviews/edits the returned text and sends it through the normal
+// sendTicketMessage flow. Spends exactly the 1 credit draftAiReply deducts on
+// success; no spend on any gated/early-return path (Claude is not called).
+export async function draftTicketReply(ticketId: string): Promise<DraftReplyResult> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { ok: false, error: 'not_authenticated' }
+
+  // Same impersonation-correct org resolution sendTicketMessage uses.
+  const orgId = await resolveEffectiveOrgId(supabase, user.id)
+  if (!orgId) return { ok: false, error: 'no_organization' }
+
+  if (!ticketId) return { ok: false, error: 'ticket_not_found' }
+
+  // Confirm the ticket belongs to the effective org before doing anything.
+  const { data: ticket } = await supabase
+    .from('tickets')
+    .select('id, organization_id, subject, customer_id')
+    .eq('id', ticketId)
+    .single<{ id: string; organization_id: string; subject: string | null; customer_id: string | null }>()
+
+  if (!ticket || ticket.organization_id !== orgId) {
+    return { ok: false, error: 'ticket_not_found' }
+  }
+
+  // GATE: Ticket Assist requires the product flag on AND a template assigned
+  // (no template → resolveAiPromptForOrg yields an empty prompt, nothing to draft
+  // from). feature_flags is read via the RLS client for the effective org.
+  const { data: org } = await supabase
+    .from('organizations')
+    .select('feature_flags, ai_template_id')
+    .eq('id', orgId)
+    .single<{ feature_flags: Record<string, unknown> | null; ai_template_id: string | null }>()
+
+  const aiSupportEnabled = org?.feature_flags?.ai_support_enabled === true
+  if (!aiSupportEnabled || !org?.ai_template_id) {
+    return { ok: false, error: 'ai_support_disabled' }
+  }
+
+  // userContent = the latest INBOUND customer message (system-authored inbound
+  // rows have sender_id = null). Nothing to reply to if there isn't one.
+  const { data: inbound } = await supabase
+    .from('ticket_messages')
+    .select('body')
+    .eq('ticket_id', ticketId)
+    .is('sender_id', null)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle<{ body: string }>()
+
+  if (!inbound?.body?.trim()) {
+    return { ok: false, error: 'no_customer_message' }
+  }
+
+  // knownIdentifiers for redactPii: the customer's contact fields + explicit
+  // recipient emails on the ticket. Every non-null value is passed for redaction.
+  const identifiers = new Set<string>()
+  if (ticket.customer_id) {
+    const { data: customer } = await supabase
+      .from('customers')
+      .select('first_name, last_name, email, phone')
+      .eq('id', ticket.customer_id)
+      .maybeSingle<{ first_name: string | null; last_name: string | null; email: string | null; phone: string | null }>()
+    for (const v of [customer?.first_name, customer?.last_name, customer?.email, customer?.phone]) {
+      if (v) identifiers.add(v)
+    }
+  }
+  const { data: recipients } = await supabase
+    .from('ticket_recipients')
+    .select('email')
+    .eq('ticket_id', ticketId)
+  for (const r of (recipients ?? []) as Array<{ email: string | null }>) {
+    if (r.email) identifiers.add(r.email)
+  }
+
+  // Strip any [tk_…] tag from the subject before using it as (redacted) context.
+  const subject = (ticket.subject ?? '').replace(/\[tk_[a-z0-9]+\]\s*/gi, '').trim()
+
+  try {
+    const result = await draftAiReply({
+      orgId,
+      action:           'ticket_reply',
+      referenceId:      ticketId,
+      systemContext:    subject ? `Support ticket subject: ${subject}` : undefined,
+      userContent:      inbound.body,
+      knownIdentifiers: Array.from(identifiers),
+      createdBy:        user.id,
+    })
+    if (!result.ok) {
+      return { ok: false, error: 'insufficient_credits' }
+    }
+    return { ok: true, text: result.text }
+  } catch (err) {
+    // Missing ANTHROPIC_API_KEY, transport error, etc. — fail gracefully so the
+    // composer shows a friendly message instead of a crashed action.
+    console.error(`[ticket-draft] draftAiReply failed ticket=${ticketId} org=${orgId}: ${err instanceof Error ? err.message : String(err)}`)
+    return { ok: false, error: 'draft_failed' }
+  }
 }
 
 type DispatchArgs = {
