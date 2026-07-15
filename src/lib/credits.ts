@@ -2,7 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import type { OrganizationCredits } from '@/lib/types/database.types'
 
-// Signals are indivisible — all credit amounts are whole numbers.
+// Credits are indivisible — all credit amounts are whole numbers.
 export type DeductCreditResult =
   | { ok: true;  balance: number }
   | { ok: false; reason: 'insufficient_credits'; requested: number }
@@ -28,15 +28,19 @@ export async function getOrgCredits(
 /**
  * Invokes the `deduct_credit` RPC with service-role credentials. Execution
  * is locked down to `service_role` at the database layer, so this helper
- * must only be called from trusted server paths (AI signal worker, HQ
+ * must only be called from trusted server paths (AI drafting primitive, HQ
  * route handlers). Returns a discriminated union so callers can route
  * an 'insufficient_credits' result into the Top-Up flow instead of
  * treating it as an unexpected error.
+ *
+ * `reason` flows into `credit_ledger.type` so each spend is labelled by what
+ * consumed it (e.g. the AI action name); defaults to 'ai_reply'.
  */
 export async function deductCredit(
   organizationId: string,
   amount: number,
   referenceId: string,
+  reason: string = 'ai_reply',
 ): Promise<DeductCreditResult> {
   if (!Number.isInteger(amount) || amount <= 0) {
     throw new Error('deductCredit: amount must be a positive integer')
@@ -44,9 +48,10 @@ export async function deductCredit(
 
   const admin = createAdminClient()
   const { data, error } = await admin.rpc('deduct_credit', {
-    org_id: organizationId,
+    org_id:   organizationId,
     amount,
-    ref_id: referenceId,
+    ref_id:   referenceId,
+    p_reason: reason,
   })
 
   if (error) {
