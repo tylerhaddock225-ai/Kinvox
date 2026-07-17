@@ -60,7 +60,7 @@ export default async function TicketDetailPage({ params }: { params: Promise<{ o
 
   const ticket = ticketData as Pick<Ticket, 'id' | 'display_id' | 'subject' | 'description' | 'status' | 'priority' | 'created_at' | 'organization_id'>
 
-  const [messagesRes, recipientsRes] = await Promise.all([
+  const [messagesRes, recipientsRes, draftRes] = await Promise.all([
     supabase
       .from('ticket_messages')
       .select('id, body, type, created_at, sender_id, inbound_email_from, profiles!ticket_messages_sender_id_fkey(full_name)')
@@ -71,9 +71,27 @@ export default async function TicketDetailPage({ params }: { params: Promise<{ o
       .select('id, kind, user_id, email, added_at, profiles!ticket_recipients_user_id_fkey(full_name)')
       .eq('ticket_id', ticket.id)
       .order('added_at', { ascending: true }),
+    // AD Stage 5 — the stored AI draft (RLS SELECT covers own-org + HQ).
+    supabase
+      .from('ai_ticket_drafts')
+      .select('body, source_message_id')
+      .eq('ticket_id', id)
+      .maybeSingle(),
   ])
 
   const messages = (messagesRes.data ?? []) as unknown as MessageRow[]
+
+  // AD Stage 5 — pre-fill the composer from the stored AI draft, but ONLY when it
+  // answers the CURRENT latest inbound message (source_message_id match). A stale
+  // draft (a newer customer message arrived since) is not shown — the webhook
+  // already deletes stale drafts, this is belt-and-braces.
+  const draftRow = draftRes.data as { body: string; source_message_id: string | null } | null
+  const latestInboundId =
+    [...messages].reverse().find(m => m.sender_id === null)?.id ?? null
+  const initialDraft =
+    draftRow && latestInboundId && draftRow.source_message_id === latestInboundId
+      ? draftRow.body
+      : undefined
 
   const rawRecipients = (recipientsRes.data ?? []) as unknown as RecipientQueryRow[]
   const recipients: RecipientRow[] = rawRecipients.map(r => ({
@@ -173,7 +191,7 @@ export default async function TicketDetailPage({ params }: { params: Promise<{ o
           </section>
 
           <section className="rounded-xl border border-pvx-border bg-pvx-surface p-4">
-            <ReplyBox ticketId={ticket.id} />
+            <ReplyBox ticketId={ticket.id} initialDraft={initialDraft} />
           </section>
         </div>
       </div>

@@ -92,7 +92,7 @@ export default async function TeamSettingsPage({
       .order('name'),
     supabase
       .from('organizations')
-      .select('owner_id, inbound_email_tag, inbound_lead_email_tag, verified_support_email, verified_support_email_confirmed_at, verified_lead_email, verified_lead_email_confirmed_at, custom_lead_questions, lead_magnet_settings, lead_magnet_slug')
+      .select('owner_id, inbound_email_tag, inbound_lead_email_tag, verified_support_email, verified_support_email_confirmed_at, verified_lead_email, verified_lead_email_confirmed_at, custom_lead_questions, lead_magnet_settings, lead_magnet_slug, ai_drafting_mode, feature_flags')
       .eq('id', orgId)
       .single(),
   ])
@@ -180,6 +180,17 @@ export default async function TeamSettingsPage({
     landing_base:                     LANDING_BASE,
   }
 
+  // Workstream AD Stage 4 — AI Settings tab state. ai_support_enabled is HQ's
+  // master switch (feature_flags jsonb); ai_drafting_mode is the org's preference.
+  const aiSettings = {
+    ai_drafting_mode:
+      ((orgRes.data?.ai_drafting_mode as string | null) === 'auto_draft'
+        ? 'auto_draft'
+        : 'manual') as 'manual' | 'auto_draft',
+    ai_support_enabled:
+      (orgRes.data?.feature_flags as { ai_support_enabled?: boolean } | null)?.ai_support_enabled === true,
+  }
+
   // Honor an explicit ?tab=… or fall back to the default 'users'.
   const initialTab =
     typeof sp.tab === 'string' && sp.tab.length > 0 ? sp.tab : undefined
@@ -204,6 +215,7 @@ export default async function TeamSettingsPage({
         }))}
         orgSettings={orgSettings}
         leadSupport={leadSupport}
+        aiSettings={aiSettings}
         initialTab={initialTab}
       />
     </div>

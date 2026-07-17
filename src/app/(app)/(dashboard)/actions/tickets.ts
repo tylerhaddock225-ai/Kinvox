@@ -171,6 +171,18 @@ export async function updateTicketStatus(formData: FormData): Promise<void> {
   }
 
   if (status === 'closed' && prior && prior.status !== 'closed') {
+    // AD Stage 5 — a closed ticket has no pending reply, so drop any stored AI
+    // draft (service-role-write-only → admin client). Best-effort; harmless no-op
+    // for tickets that never had a draft (e.g. HQ platform-support tickets).
+    const admin = createAdminClient()
+    const { error: draftDelErr } = await admin
+      .from('ai_ticket_drafts')
+      .delete()
+      .eq('ticket_id', ticket_id)
+    if (draftDelErr) {
+      console.error(`[ticket-draft] discard-on-close failed ticket=${ticket_id}: ${draftDelErr.message}`)
+    }
+
     const { data: closerProfile } = await supabase
       .from('profiles')
       .select('full_name')
@@ -324,6 +336,18 @@ export async function sendTicketMessage(_prev: State, formData: FormData): Promi
   revalidatePath('/[orgSlug]/hq-support/[id]', 'page')
 
   if (type === 'public') {
+    // AD Stage 5 — a sent public reply supersedes any stored AI draft. Delete it
+    // (ai_ticket_drafts is service-role-write-only → admin client). Best-effort;
+    // the org-ownership check above already scoped this ticket to the caller's org.
+    const admin = createAdminClient()
+    const { error: draftDelErr } = await admin
+      .from('ai_ticket_drafts')
+      .delete()
+      .eq('ticket_id', ticket_id)
+    if (draftDelErr) {
+      console.error(`[ticket-draft] discard-on-send failed ticket=${ticket_id}: ${draftDelErr.message}`)
+    }
+
     await dispatchOutboundEmail({
       supabase,
       orgId,
