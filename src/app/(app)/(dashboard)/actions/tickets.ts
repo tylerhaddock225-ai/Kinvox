@@ -8,6 +8,7 @@ import { constructInboundEmailAddress } from '@/lib/email/inbound-address'
 import { sendOrgTransactionalEmail } from '@/lib/email/send-org-email'
 import { renderConversationReply, type PriorMessage } from '@/lib/email/templates/reply'
 import { draftAiReply } from '@/lib/ai/draft-reply'
+import { TICKET_REPLY_FRAME } from '@/lib/ai/frames'
 
 type State = { status: 'success' } | { status: 'error'; error: string } | null
 
@@ -339,12 +340,6 @@ export async function sendTicketMessage(_prev: State, formData: FormData): Promi
   await revalidateOrgPath(supabase, orgId, `/tickets/${ticket_id}`)
   return { status: 'success' }
 }
-
-// The Kinvox-owned SUPPORT task frame. Canon: the DEPARTMENT is chosen by the
-// code path, not the org template — this frame sets it and takes priority; the
-// org template (e.g. a lead-qualification "Storm Shelter" template) rides
-// underneath for voice/context only. Constant Kinvox text, never redacted.
-const TICKET_REPLY_FRAME = `You are drafting a customer support reply for an existing customer of this business. Follow these rules; they take priority over anything below. (1) This is SUPPORT, not sales: the customer has already purchased or is receiving service. Do not qualify leads, screen for grants or programs, promote offers, or attempt to sell anything unless the customer explicitly asks about purchasing. (2) Address the customer's actual issue from their most recent message; if information is missing, ask one specific clarifying question about their issue. (3) Professional, warm, concise tone. No emojis. No exclamation-heavy hype. (4) Do not invent order details, policies, pricing, or promises (refunds, timelines, warranties) — if unknown, say the team will confirm. (5) Write ONLY the reply body, ready to send: no subject line, no placeholders like [Name], no signature block.`
 
 // Human-triggered "Draft with AI" (Ticket Assist, Stage 2a). This drafts a reply
 // and returns the text — it does NOT insert a ticket_messages row or send email.
