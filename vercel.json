@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/jobs/ai-drafts",
+      "schedule": "0 6 * * *"
+    }
+  ]
+}

@@ -9,7 +9,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { resolveAiPromptForOrg } from '@/lib/ai-runtime'
 import { generateClaudeReply } from '@/lib/ai/claude'
 import { redactPii } from '@/lib/ai/redact'
-import { deductCredit, getOrgCredits } from '@/lib/credits'
+import { deductCredit } from '@/lib/credits'
 
 export type DraftAiReplyArgs = {
   // The tenant org. The CALLER resolves this (via resolveEffectiveOrgId, so it
@@ -40,7 +40,7 @@ export type DraftAiReplyArgs = {
 }
 
 export type DraftAiReplyResult =
-  | { ok: true;  text: string; balance: number }
+  | { ok: true;  text: string; balance: number; model: string }
   | { ok: false; error: 'insufficient_credits' }
 
 /**
@@ -63,6 +63,11 @@ export async function draftAiReply(args: DraftAiReplyArgs): Promise<DraftAiReply
     createdBy = null,
   } = args
 
+  // Service-role client — draftAiReply runs in session-less contexts too (inbound
+  // webhook, auto-draft drainer, cron), so every DB touch here goes through the
+  // admin client, never an RLS session read.
+  const admin = createAdminClient()
+
   // 1) Resolve the org's assigned template → final system prompt (template IP,
   //    not PII — left un-redacted).
   const resolved = await resolveAiPromptForOrg(orgId)
@@ -78,12 +83,18 @@ export async function draftAiReply(args: DraftAiReplyArgs): Promise<DraftAiReply
   // frame leads so its rules take priority; orgs can never override the frame.
   const systemPrompt      = [taskFrame, resolved.prompt, safeSystemContext].filter(Boolean).join('\n\n')
 
-  // 3) Balance pre-check (optimization only): skip the Claude call entirely when
-  //    the org clearly can't pay, so a zero-balance org never incurs a real API
-  //    charge. deduct_credit's atomic `balance >= amount` guard below remains the
+  // 3) Balance pre-check (optimization only): skip the Claude call when the org
+  //    clearly can't pay. Read via the service-role admin client, NOT an RLS
+  //    session read — draftAiReply runs session-less (webhook / drainer / cron)
+  //    where an RLS read returns null and would yield a false insufficient_credits.
+  //    deduct_credit's atomic `balance >= amount` guard below remains the
   //    authoritative source of truth against concurrent drains.
-  const credits = await getOrgCredits(orgId)
-  if (!credits || credits.balance < 1) {
+  const { data: creditRow } = await admin
+    .from('organization_credits')
+    .select('balance')
+    .eq('organization_id', orgId)
+    .maybeSingle<{ balance: number }>()
+  if (!creditRow || creditRow.balance < 1) {
     return { ok: false, error: 'insufficient_credits' }
   }
 
@@ -93,7 +104,6 @@ export async function draftAiReply(args: DraftAiReplyArgs): Promise<DraftAiReply
   // 5) Log usage BEFORE deducting. Service-role write (bypasses the fail-closed
   //    RLS on ai_usage_log). Best-effort: an audit-log hiccup must not sink the
   //    draft the tenant already paid Claude for.
-  const admin = createAdminClient()
   const { error: logError } = await admin.from('ai_usage_log').insert({
     organization_id: orgId,
     action,
@@ -116,5 +126,5 @@ export async function draftAiReply(args: DraftAiReplyArgs): Promise<DraftAiReply
     return { ok: false, error: 'insufficient_credits' }
   }
 
-  return { ok: true, text: reply.text, balance: deduct.balance }
+  return { ok: true, text: reply.text, balance: deduct.balance, model: reply.model }
 }

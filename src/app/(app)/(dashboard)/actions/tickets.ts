@@ -9,6 +9,7 @@ import { sendOrgTransactionalEmail } from '@/lib/email/send-org-email'
 import { renderConversationReply, type PriorMessage } from '@/lib/email/templates/reply'
 import { draftAiReply } from '@/lib/ai/draft-reply'
 import { TICKET_REPLY_FRAME } from '@/lib/ai/frames'
+import { buildTicketDraftInputs } from '@/lib/ai/ticket-draft-inputs'
 
 type State = { status: 'success' } | { status: 'error'; error: string } | null
 
@@ -355,71 +356,12 @@ export async function draftTicketReply(ticketId: string): Promise<DraftReplyResu
   const orgId = await resolveEffectiveOrgId(supabase, user.id)
   if (!orgId) return { ok: false, error: 'no_organization' }
 
-  if (!ticketId) return { ok: false, error: 'ticket_not_found' }
-
-  // Confirm the ticket belongs to the effective org before doing anything.
-  const { data: ticket } = await supabase
-    .from('tickets')
-    .select('id, organization_id, subject, customer_id')
-    .eq('id', ticketId)
-    .single<{ id: string; organization_id: string; subject: string | null; customer_id: string | null }>()
-
-  if (!ticket || ticket.organization_id !== orgId) {
-    return { ok: false, error: 'ticket_not_found' }
-  }
-
-  // GATE: Ticket Assist requires the product flag on AND a template assigned
-  // (no template → resolveAiPromptForOrg yields an empty prompt, nothing to draft
-  // from). feature_flags is read via the RLS client for the effective org.
-  const { data: org } = await supabase
-    .from('organizations')
-    .select('feature_flags, ai_template_id')
-    .eq('id', orgId)
-    .single<{ feature_flags: Record<string, unknown> | null; ai_template_id: string | null }>()
-
-  const aiSupportEnabled = org?.feature_flags?.ai_support_enabled === true
-  if (!aiSupportEnabled || !org?.ai_template_id) {
-    return { ok: false, error: 'ai_support_disabled' }
-  }
-
-  // userContent = the latest INBOUND customer message (system-authored inbound
-  // rows have sender_id = null). Nothing to reply to if there isn't one.
-  const { data: inbound } = await supabase
-    .from('ticket_messages')
-    .select('body')
-    .eq('ticket_id', ticketId)
-    .is('sender_id', null)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle<{ body: string }>()
-
-  if (!inbound?.body?.trim()) {
-    return { ok: false, error: 'no_customer_message' }
-  }
-
-  // knownIdentifiers for redactPii: the customer's contact fields + explicit
-  // recipient emails on the ticket. Every non-null value is passed for redaction.
-  const identifiers = new Set<string>()
-  if (ticket.customer_id) {
-    const { data: customer } = await supabase
-      .from('customers')
-      .select('first_name, last_name, email, phone')
-      .eq('id', ticket.customer_id)
-      .maybeSingle<{ first_name: string | null; last_name: string | null; email: string | null; phone: string | null }>()
-    for (const v of [customer?.first_name, customer?.last_name, customer?.email, customer?.phone]) {
-      if (v) identifiers.add(v)
-    }
-  }
-  const { data: recipients } = await supabase
-    .from('ticket_recipients')
-    .select('email')
-    .eq('ticket_id', ticketId)
-  for (const r of (recipients ?? []) as Array<{ email: string | null }>) {
-    if (r.email) identifiers.add(r.email)
-  }
-
-  // Strip any [tk_…] tag from the subject before using it as (redacted) context.
-  const subject = (ticket.subject ?? '').replace(/\[tk_[a-z0-9]+\]\s*/gi, '').trim()
+  // Load ticket → master gate → latest inbound customer message → PII
+  // identifiers, via the shared builder (also used by the auto-draft drainer).
+  // Here it runs on the RLS client (org-scoped by policy); the drainer passes
+  // the admin client. Error codes are unchanged vs. the previous inline logic.
+  const inputs = await buildTicketDraftInputs(supabase, orgId, ticketId)
+  if (!inputs.ok) return { ok: false, error: inputs.error }
 
   try {
     const result = await draftAiReply({
@@ -427,9 +369,9 @@ export async function draftTicketReply(ticketId: string): Promise<DraftReplyResu
       action:           'ticket_reply',
       referenceId:      ticketId,
       taskFrame:        TICKET_REPLY_FRAME,
-      systemContext:    subject ? `Support ticket subject: ${subject}` : undefined,
-      userContent:      inbound.body,
-      knownIdentifiers: Array.from(identifiers),
+      systemContext:    inputs.subject ? `Support ticket subject: ${inputs.subject}` : undefined,
+      userContent:      inputs.inboundBody,
+      knownIdentifiers: inputs.knownIdentifiers,
       createdBy:        user.id,
     })
     if (!result.ok) {
