@@ -436,8 +436,16 @@ export async function draftTicketReply(ticketId: string): Promise<DraftReplyResu
     return { ok: true, text: result.text }
   } catch (err) {
     // Missing ANTHROPIC_API_KEY, transport error, etc. — fail gracefully so the
-    // composer shows a friendly message instead of a crashed action.
-    console.error(`[ticket-draft] draftAiReply failed ticket=${ticketId} org=${orgId}: ${err instanceof Error ? err.message : String(err)}`)
+    // composer shows a friendly message instead of a crashed action. Serialize
+    // robustly: a non-Error throw (PostgrestError-shaped object, SDK error
+    // variant) stringifies to "[object Object]" and hides the cause.
+    let detail = err instanceof Error
+      ? `${err.name}: ${err.message}${(err as any).status ? ` (status ${(err as any).status})` : ''}`
+      : (() => { try { return JSON.stringify(err) } catch { return String(err) } })()
+    if (err instanceof Error && err.cause) {
+      try { detail += ` cause=${JSON.stringify(err.cause)}` } catch { /* non-serializable cause */ }
+    }
+    console.error(`[ticket-draft] draftAiReply failed ticket=${ticketId} org=${orgId}: ${detail}`)
     return { ok: false, error: 'draft_failed' }
   }
 }

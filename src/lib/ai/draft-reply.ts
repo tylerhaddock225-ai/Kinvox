@@ -92,7 +92,10 @@ export async function draftAiReply(args: DraftAiReplyArgs): Promise<DraftAiReply
     created_by:      createdBy,
   })
   if (logError) {
-    console.error(`[ai-draft] ai_usage_log insert failed org=${orgId} action=${action}: ${logError.message}`)
+    const detail = logError instanceof Error
+      ? `${logError.name}: ${logError.message}${(logError as any).status ? ` (status ${(logError as any).status})` : ''}`
+      : (() => { try { return JSON.stringify(logError) } catch { return String(logError) } })()
+    console.error(`[ai-draft] ai_usage_log insert failed org=${orgId} action=${action}: ${detail}`)
   }
 
   // 6) Spend one credit, tagging the ledger row with the action.
