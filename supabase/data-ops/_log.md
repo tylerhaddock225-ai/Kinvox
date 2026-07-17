@@ -39,6 +39,14 @@ Append-only. Each row records a single `scripts/run-data-op.mjs` execution.
 > transaction guards passed; post-op verified: dual_positive=0, Tyler intact + decoupled (org_id NULL), demo org present
 > with customers=8/leads=9 unchanged. Linked to prod for the op, then **relinked back to sandbox**.
 > **STILL PENDING for prod:** migrations `20260625120000` + `20260625130000` (Turn 3) and code merge to `main` (Turn 4).
+| 2026-07-17 21:09:56Z | sandbox | 20260717150000_enable_autodraft_niko_sandbox.sql | ahjab | ok (1 row; ai_drafting_mode manual→auto_draft) |
+
+> **2026-07-17 — AD Stage 2 sandbox test enablement (SANDBOX ONLY).** File: `sandbox/20260717150000_enable_autodraft_niko_sandbox.sql`.
+> Purpose: flip Niko's Storm Protection (`6fe9db41-…`) to `ai_drafting_mode='auto_draft'` so inbound customer messages
+> auto-generate drafts for Tyler's live test of AD Stage 2. Applied via the **Management API** (sandbox ref
+> `ntwimeqxyyvjyrisqofl`), NOT `run-data-op.mjs` — the Supabase CLI can't run non-interactively here (no DB password).
+> Post-op gate state verified: `ai_drafting_mode=auto_draft`, `ai_support_enabled=true`, `ai_template_id=7b7f21ca-…`,
+> `organization_credits.balance=16` → full auto-draft gate passes. Sandbox only; no-op on prod (different org id there).
 | 2026-06-30 15:41:02Z | prod | 20260630140000_k2c_remediate_alex_org_admin.sql | ahjab | ok |
 
 > **2026-06-30 — K2c Stage A prod prerequisite (PRODUCTION).** File: `prod/20260630140000_k2c_remediate_alex_org_admin.sql`.
