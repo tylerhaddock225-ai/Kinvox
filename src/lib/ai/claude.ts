@@ -2,16 +2,19 @@
 // Kinvox app talks to Claude — every AI feature goes through here so the model
 // string, token accounting, and API-key handling live in one place.
 //
-// Model is pinned to Haiku 4.5 (claude-haiku-4-5) per the locked AI pricing.
-// Haiku 4.5 does not support adaptive thinking or the effort parameter, so we
-// send a plain non-thinking, non-streaming request with a modest max_tokens —
-// reply drafts are short, and non-streaming keeps this a single awaited call.
+// Model is pinned to Sonnet 5 (claude-sonnet-5) — the production default for
+// customer-facing prose (Sonnet 5 released 2026-06-30; intro pricing runs
+// through 2026-08-31). Sonnet 5 runs ADAPTIVE thinking whenever the `thinking`
+// field is omitted, which adds latency to short completions — so we explicitly
+// DISABLE thinking here: support/review drafts are short and snappy UX is the
+// priority. Non-streaming with a modest max_tokens keeps this a single awaited
+// call. Haiku 4.5 remains the future high-volume / classification tier.
 
 import 'server-only'
 import Anthropic from '@anthropic-ai/sdk'
 
 // Locked model + a sensible cap for a single support/review reply draft.
-const CLAUDE_MODEL = 'claude-haiku-4-5'
+const CLAUDE_MODEL = 'claude-sonnet-5'
 const MAX_TOKENS   = 1024
 
 export type ClaudeReply = {
@@ -40,6 +43,9 @@ export async function generateClaudeReply(
   const response = await client.messages.create({
     model:      CLAUDE_MODEL,
     max_tokens: MAX_TOKENS,
+    // Sonnet 5 defaults to adaptive thinking when omitted; disable it so short
+    // customer-facing drafts stay snappy. ('disabled' is accepted on Sonnet 5.)
+    thinking:   { type: 'disabled' },
     system:     systemPrompt,
     messages:   [{ role: 'user', content: userContent }],
   })

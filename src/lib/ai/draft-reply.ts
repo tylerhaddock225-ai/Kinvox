@@ -21,6 +21,12 @@ export type DraftAiReplyArgs = {
   action:            string
   // The domain object the draft is for (ticket/review/lead) — Manifest #7.
   referenceId:       string
+  // The Kinvox-owned task frame that sets the DEPARTMENT for this draft (e.g.
+  // the support-reply rules). The CODE PATH chooses the department by passing
+  // this — the org template rides underneath for voice/context only and can
+  // never override the frame. This is constant, Kinvox-authored text (no user
+  // or customer content), so it is NOT passed through redactPii.
+  taskFrame?:        string
   // Optional caller-supplied free-text context appended to the org template
   // prompt. PII-redacted before it reaches Claude.
   systemContext?:    string
@@ -50,6 +56,7 @@ export async function draftAiReply(args: DraftAiReplyArgs): Promise<DraftAiReply
     orgId,
     action,
     referenceId,
+    taskFrame,
     systemContext,
     userContent,
     knownIdentifiers = [],
@@ -62,9 +69,14 @@ export async function draftAiReply(args: DraftAiReplyArgs): Promise<DraftAiReply
 
   // 2) Redact PII from everything the caller provides (Manifest #8): the
   //    free-text systemContext and the userContent both pass through the guard.
+  //    The taskFrame is Kinvox-authored constant text (no user/customer
+  //    content) and is deliberately NOT redacted.
   const safeSystemContext = systemContext ? redactPii(systemContext, knownIdentifiers) : ''
   const safeUserContent   = redactPii(userContent, knownIdentifiers)
-  const systemPrompt      = [resolved.prompt, safeSystemContext].filter(Boolean).join('\n\n')
+  // Layering (canon): task frame FIRST (Kinvox task authority — the department),
+  // then the org template (org voice/context), then any caller context last. The
+  // frame leads so its rules take priority; orgs can never override the frame.
+  const systemPrompt      = [taskFrame, resolved.prompt, safeSystemContext].filter(Boolean).join('\n\n')
 
   // 3) Balance pre-check (optimization only): skip the Claude call entirely when
   //    the org clearly can't pay, so a zero-balance org never incurs a real API
@@ -92,7 +104,10 @@ export async function draftAiReply(args: DraftAiReplyArgs): Promise<DraftAiReply
     created_by:      createdBy,
   })
   if (logError) {
-    console.error(`[ai-draft] ai_usage_log insert failed org=${orgId} action=${action}: ${logError.message}`)
+    const detail = logError instanceof Error
+      ? `${logError.name}: ${logError.message}${(logError as any).status ? ` (status ${(logError as any).status})` : ''}`
+      : (() => { try { return JSON.stringify(logError) } catch { return String(logError) } })()
+    console.error(`[ai-draft] ai_usage_log insert failed org=${orgId} action=${action}: ${detail}`)
   }
 
   // 6) Spend one credit, tagging the ledger row with the action.

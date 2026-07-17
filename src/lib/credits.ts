@@ -58,7 +58,9 @@ export async function deductCredit(
     if (error.message?.includes('insufficient_credits')) {
       return { ok: false, reason: 'insufficient_credits', requested: amount }
     }
-    throw error
+    // Supabase RPC errors are plain objects, not Error instances — re-throwing
+    // the raw value stringifies to "[object Object]" upstream. Wrap it.
+    throw new Error(`deduct_credit failed: ${error.message ?? JSON.stringify(error)}`)
   }
 
   return { ok: true, balance: data as number }
