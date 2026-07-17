@@ -112,7 +112,12 @@ export async function updateSession(request: NextRequest) {
   // Stage 2). Same public-facing redeem flow; the redeem API itself lives under
   // /api/auth/hq-invite and is already covered by isAuthApi above.
   const isHqInvite   = pathname.startsWith('/hq-invite/')
-  const isPublic     = isAuthRoute || isWebhook || isAuthApi || isLeadMagnet || isPublicApi || isClaim || isInvite || isHqInvite || pathname.startsWith('/_next') || pathname === '/favicon.ico'
+  // Background-job endpoints (AD auto-draft drainer + daily cron backstop). No
+  // session cookie: the cron / after() kick authenticates with a CRON_SECRET
+  // Bearer inside the route handler, so they must bypass the login gate like
+  // the webhooks do.
+  const isCronJob    = pathname.startsWith('/api/jobs/')
+  const isPublic     = isAuthRoute || isWebhook || isAuthApi || isLeadMagnet || isPublicApi || isClaim || isInvite || isHqInvite || isCronJob || pathname.startsWith('/_next') || pathname === '/favicon.ico'
 
   // ── Gate 0: login-first ────────────────────────────────────
   // Every protected route bounces unauthenticated requests to /login.
