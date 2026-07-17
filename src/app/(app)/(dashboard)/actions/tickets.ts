@@ -340,6 +340,12 @@ export async function sendTicketMessage(_prev: State, formData: FormData): Promi
   return { status: 'success' }
 }
 
+// The Kinvox-owned SUPPORT task frame. Canon: the DEPARTMENT is chosen by the
+// code path, not the org template — this frame sets it and takes priority; the
+// org template (e.g. a lead-qualification "Storm Shelter" template) rides
+// underneath for voice/context only. Constant Kinvox text, never redacted.
+const TICKET_REPLY_FRAME = `You are drafting a customer support reply for an existing customer of this business. Follow these rules; they take priority over anything below. (1) This is SUPPORT, not sales: the customer has already purchased or is receiving service. Do not qualify leads, screen for grants or programs, promote offers, or attempt to sell anything unless the customer explicitly asks about purchasing. (2) Address the customer's actual issue from their most recent message; if information is missing, ask one specific clarifying question about their issue. (3) Professional, warm, concise tone. No emojis. No exclamation-heavy hype. (4) Do not invent order details, policies, pricing, or promises (refunds, timelines, warranties) — if unknown, say the team will confirm. (5) Write ONLY the reply body, ready to send: no subject line, no placeholders like [Name], no signature block.`
+
 // Human-triggered "Draft with AI" (Ticket Assist, Stage 2a). This drafts a reply
 // and returns the text — it does NOT insert a ticket_messages row or send email.
 // The agent reviews/edits the returned text and sends it through the normal
@@ -425,6 +431,7 @@ export async function draftTicketReply(ticketId: string): Promise<DraftReplyResu
       orgId,
       action:           'ticket_reply',
       referenceId:      ticketId,
+      taskFrame:        TICKET_REPLY_FRAME,
       systemContext:    subject ? `Support ticket subject: ${subject}` : undefined,
       userContent:      inbound.body,
       knownIdentifiers: Array.from(identifiers),
