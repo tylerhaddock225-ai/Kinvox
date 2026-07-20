@@ -72,6 +72,23 @@ export default async function HQTicketDetailPage({ params }: { params: Promise<{
     'id' | 'display_id' | 'subject' | 'description' | 'status' | 'priority' | 'created_at' | 'organization_id' | 'is_platform_support' | 'hq_category' | 'screenshot_url' | 'affected_tab' | 'record_id'
   > & { organizations: { name: string } | null }
 
+  // AD Stage 3b — record this HQ admin's view so the /hq/tickets unseen dot
+  // clears. ticket_views "insert/update hq_admin" RLS arm passes for an HQ admin
+  // (is_admin_hq() AND user_id = auth.uid()). The page didn't previously need the
+  // auth user, so fetch it here. Non-fatal — a badge miss must never block render.
+  const { data: { user } } = await supabase.auth.getUser()
+  if (user) {
+    const { error: viewErr } = await supabase
+      .from('ticket_views')
+      .upsert(
+        { ticket_id: id, user_id: user.id, last_viewed_at: new Date().toISOString() },
+        { onConflict: 'ticket_id,user_id' },
+      )
+    if (viewErr) {
+      console.error(`[hq/tickets/${id}] ticket_views upsert failed:`, viewErr.message)
+    }
+  }
+
   const [messagesRes, recipientsRes, membersRes] = await Promise.all([
     supabase
       .from('ticket_messages')

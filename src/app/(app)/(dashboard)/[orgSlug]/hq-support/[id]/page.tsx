@@ -69,6 +69,19 @@ export default async function HQSupportDetailPage({
   const ticket = ticketRes.data as Pick<Ticket, 'id' | 'display_id' | 'subject' | 'description' | 'status' | 'priority' | 'created_at' | 'organization_id'>
   const orgName = orgRes.data?.name ?? null
 
+  // AD Stage 3b — record this view so the hq-support grid unseen dot clears for
+  // this viewer. ticket_views RLS: an org member passes the "own" arm (ticket in
+  // their org), an impersonating HQ admin passes the "hq_admin" arm. Non-fatal.
+  const { error: viewErr } = await supabase
+    .from('ticket_views')
+    .upsert(
+      { ticket_id: id, user_id: user.id, last_viewed_at: new Date().toISOString() },
+      { onConflict: 'ticket_id,user_id' },
+    )
+  if (viewErr) {
+    console.error(`[hq-support/${id}] ticket_views upsert failed:`, viewErr.message)
+  }
+
   const { data: messagesData } = await supabase
     .from('ticket_messages')
     .select('id, body, type, created_at, sender_id, profiles!ticket_messages_sender_id_fkey(full_name)')

@@ -36,7 +36,11 @@ const CATEGORY_STYLE: Record<HQCategory, string> = {
   question:         'border-sky-500/30 bg-sky-500/10 text-sky-300',
 }
 
-type Row = Pick<Ticket, 'id' | 'display_id' | 'subject' | 'status' | 'created_at' | 'updated_at' | 'hq_category'>
+type Row = Pick<Ticket, 'id' | 'display_id' | 'subject' | 'status' | 'created_at' | 'updated_at' | 'hq_category'> & {
+  // AD-0 column not yet in the generated Ticket type — declared here (client is
+  // untyped; the grid casts). Drives the unseen-dot compare.
+  last_ticket_activity_at: string | null
+}
 
 function formatRelative(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime()
@@ -113,7 +117,7 @@ export default async function HQSupportPage({
 
   let ticketsQ = supabase
     .from('tickets')
-    .select('id, display_id, subject, status, created_at, updated_at, hq_category')
+    .select('id, display_id, subject, status, created_at, updated_at, last_ticket_activity_at, hq_category')
     .eq('organization_id', orgId)
     .eq('is_platform_support', true)
     .is('deleted_at', null)
@@ -160,6 +164,32 @@ export default async function HQSupportPage({
   const closedCount = closedCountRes.count ?? 0
   const orgName     = orgRes.data?.name ?? null
 
+  // AD Stage 3b — unseen dot. ONE batched .in() for this viewer's ticket_views
+  // over the listed tickets (no ai_ticket_drafts lookup: platform-support tickets
+  // never hold AI drafts — auto-draft gates on org mode + the webhook producer,
+  // neither of which applies here — so no sparkle on this grid).
+  const viewMap = new Map<string, string>()
+  if (rows.length > 0) {
+    const { data: views } = await supabase
+      .from('ticket_views')
+      .select('ticket_id, last_viewed_at')
+      .eq('user_id', user.id)
+      .in('ticket_id', rows.map(t => t.id))
+    for (const v of (views ?? []) as { ticket_id: string; last_viewed_at: string }[]) {
+      viewMap.set(v.ticket_id, v.last_viewed_at)
+    }
+  }
+
+  // Unseen = a customer-originated event (here: the org's own create/reply, which
+  // bump last_ticket_activity_at) landed since this viewer last opened the ticket.
+  // Epoch-ms compare (mixed precision) — mirrors the tenant tickets grid.
+  function hasUnseenActivity(t: Row): boolean {
+    if (!t.last_ticket_activity_at) return false
+    const lastViewed = viewMap.get(t.id)
+    if (!lastViewed) return true
+    return new Date(t.last_ticket_activity_at).getTime() > new Date(lastViewed).getTime()
+  }
+
   return (
     <div className="px-8 py-8 space-y-6">
       <div className="flex items-start justify-between gap-4">
@@ -192,7 +222,8 @@ export default async function HQSupportPage({
           <table className="w-full text-sm">
             <thead>
               <tr className="text-xs text-gray-500 border-b border-pvx-border bg-pvx-bg/40">
-                <th className="pl-6 pr-3 py-3 text-left font-medium w-28">ID</th>
+                <th className="pl-6 pr-1 py-3 w-9" aria-hidden="true" />
+                <th className="pl-3 pr-3 py-3 text-left font-medium w-28">ID</th>
                 <th className="px-3 py-3 text-left font-medium">Subject</th>
                 <th className="px-3 py-3 text-left font-medium">Category</th>
                 <th className="px-3 py-3 text-left font-medium">Status</th>
@@ -202,8 +233,8 @@ export default async function HQSupportPage({
             </thead>
             <tbody className="divide-y divide-pvx-border">
               {rows.map(t => (
-                <TicketRow key={t.id} href={`/${orgSlug}/hq-support/${t.id}`}>
-                  <td className="pl-6 pr-3 py-3 text-xs">
+                <TicketRow key={t.id} href={`/${orgSlug}/hq-support/${t.id}`} unseen={hasUnseenActivity(t)}>
+                  <td className="pl-3 pr-3 py-3 text-xs">
                     <CopyId id={t.display_id} />
                   </td>
                   <td className="px-3 py-3 text-gray-200 font-medium max-w-md">

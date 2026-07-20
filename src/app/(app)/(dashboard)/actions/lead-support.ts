@@ -69,6 +69,9 @@ export async function requestTopUp(_prev: State, formData: FormData): Promise<St
       channel:             'portal',
       is_platform_support: true,
       hq_category:         'billing',
+      // AD Stage 3b — new org-originated platform-support request = unseen HQ
+      // activity: seed last_ticket_activity_at so the HQ grids show the dot.
+      last_ticket_activity_at: new Date().toISOString(),
     })
 
   if (error) return { status: 'error', error: error.message }
