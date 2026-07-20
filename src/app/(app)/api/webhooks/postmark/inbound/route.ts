@@ -560,20 +560,32 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: insErr.message }, { status: 500 })
     }
 
-    // Auto-reopen: a customer reply on a closed ticket bounces it back to
-    // the Active queue so the team sees it again.
-    let reopened = false
-    if (matchedTicket.status === 'closed') {
-      const { error: reopenErr } = await supabase
-        .from('tickets')
-        .update({ status: 'open' })
-        .eq('id', matchedTicket.id)
-      if (reopenErr) {
-        console.error(`${LOG} auto-reopen failed for ticket=${matchedTicket.displayLabel}:`, reopenErr.message)
-      } else {
-        reopened = true
-        console.log(`${LOG} auto-reopened ticket ${matchedTicket.displayLabel} on inbound reply`)
-      }
+    // AD Stage 3 — activity bump + auto-reopen, folded into one UPDATE.
+    // A customer reply is a customer-originated event: bump
+    // last_ticket_activity_at so the tickets-grid unseen dot shows until a
+    // user opens the ticket (mirrors leads.last_lead_activity_at). The
+    // set_tickets_updated_at BEFORE-UPDATE trigger refreshes updated_at as a
+    // side effect, so the existing updated_at-desc sort floats the ticket up.
+    // When the ticket is closed we fold the auto-reopen (status → open) into
+    // the same write so the team sees it back in the Active queue. Non-fatal:
+    // the customer message already persisted; a badge/reopen miss must never
+    // reject a real reply.
+    const nowIso    = new Date().toISOString()
+    const reopening = matchedTicket.status === 'closed'
+    let   reopened  = false
+    const { error: bumpErr } = await supabase
+      .from('tickets')
+      .update(
+        reopening
+          ? { last_ticket_activity_at: nowIso, status: 'open' }
+          : { last_ticket_activity_at: nowIso },
+      )
+      .eq('id', matchedTicket.id)
+    if (bumpErr) {
+      console.error(`${LOG} activity bump${reopening ? '/auto-reopen' : ''} failed for ticket=${matchedTicket.displayLabel}:`, bumpErr.message)
+    } else if (reopening) {
+      reopened = true
+      console.log(`${LOG} auto-reopened ticket ${matchedTicket.displayLabel} on inbound reply`)
     }
 
     // TODO: persist payload.Attachments to Supabase Storage and link rows
@@ -689,6 +701,17 @@ export async function POST(request: NextRequest) {
     console.error(`${LOG} initial message insert failed ticket=${newTicket.id}:`, msgErr.message)
     // Ticket exists; surface as 500 so the provider retries the whole thing.
     return NextResponse.json({ error: msgErr.message }, { status: 500 })
+  }
+
+  // AD Stage 3 — a brand-new customer ticket is unseen activity: bump
+  // last_ticket_activity_at so the tickets-grid dot shows until a user opens
+  // it (updated_at is already fresh from the create above). Non-fatal.
+  const { error: bumpErr } = await supabase
+    .from('tickets')
+    .update({ last_ticket_activity_at: new Date().toISOString() })
+    .eq('id', newTicket.id)
+  if (bumpErr) {
+    console.error(`${LOG} Path C: activity bump failed ticket=${newTicket.id}:`, bumpErr.message)
   }
 
   // Workstream AD Stage 2: auto-draft on the new ticket's first inbound.

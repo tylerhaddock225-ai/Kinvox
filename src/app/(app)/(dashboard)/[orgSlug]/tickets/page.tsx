@@ -16,6 +16,10 @@ type TicketRow = Pick<
   Ticket,
   'id' | 'display_id' | 'subject' | 'status' | 'priority' | 'created_at' | 'updated_at' | 'assigned_to' | 'customer_id'
 > & {
+  // last_ticket_activity_at is an AD-0 column not yet in the generated Ticket
+  // type — declare it here. The grid query casts via `as unknown as TicketRow[]`,
+  // so this drives the field's type end-to-end (the client is untyped anyway).
+  last_ticket_activity_at: string | null
   profiles: { full_name: string | null } | null
   customer: { first_name: string | null; last_name: string | null; email: string | null } | null
 }
@@ -180,7 +184,7 @@ export default async function TicketsPage({
 
   let ticketsQ = supabase
     .from('tickets')
-    .select('id, display_id, subject, status, priority, created_at, updated_at, assigned_to, customer_id, profiles!tickets_assigned_to_fkey(full_name), customer:customers(first_name, last_name, email)')
+    .select('id, display_id, subject, status, priority, created_at, updated_at, last_ticket_activity_at, assigned_to, customer_id, profiles!tickets_assigned_to_fkey(full_name), customer:customers(first_name, last_name, email)')
     .eq('organization_id', orgId)
     .eq('is_platform_support', false)
     .is('deleted_at', null)
@@ -269,6 +273,44 @@ export default async function TicketsPage({
     }
   }
 
+  // AD Stage 3 — grid markers. Two batched .in() queries keyed to the visible
+  // rows (no per-row round trips): the current user's ticket_views for the
+  // unseen dot, and ai_ticket_drafts existence for the draft-ready sparkle
+  // (RLS SELECT scopes both to own-org). Mirrors the leads activity-badge lookup.
+  const viewMap  = new Map<string, string>()
+  const draftSet = new Set<string>()
+  if (rows.length > 0) {
+    const ticketIds = rows.map(t => t.id)
+    const [viewsRes, draftsRes] = await Promise.all([
+      supabase
+        .from('ticket_views')
+        .select('ticket_id, last_viewed_at')
+        .eq('user_id', user.id)
+        .in('ticket_id', ticketIds),
+      supabase
+        .from('ai_ticket_drafts')
+        .select('ticket_id, source_message_id')
+        .in('ticket_id', ticketIds),
+    ])
+    for (const v of (viewsRes.data ?? []) as { ticket_id: string; last_viewed_at: string }[]) {
+      viewMap.set(v.ticket_id, v.last_viewed_at)
+    }
+    for (const d of (draftsRes.data ?? []) as { ticket_id: string }[]) {
+      draftSet.add(d.ticket_id)
+    }
+  }
+
+  // Unseen = a customer-originated event landed since this user last opened the
+  // ticket. Timestamp precision can differ (µs backfill vs JS ms), so parse to
+  // epoch ms before comparing rather than string-comparing — mirrors the leads
+  // activity badge.
+  function hasUnseenActivity(t: TicketRow): boolean {
+    if (!t.last_ticket_activity_at) return false
+    const lastViewed = viewMap.get(t.id)
+    if (!lastViewed) return true
+    return new Date(t.last_ticket_activity_at).getTime() > new Date(lastViewed).getTime()
+  }
+
   return (
     <div className="px-8 py-8 space-y-6">
       <div className="flex items-start justify-between gap-4">
@@ -315,7 +357,8 @@ export default async function TicketsPage({
           <table className="w-full text-sm">
             <thead>
               <tr className="text-xs text-gray-500 border-b border-pvx-border bg-pvx-bg/40">
-                <th className="pl-6 pr-3 py-3 text-left font-medium w-28">
+                <th className="pl-6 pr-1 py-3 w-9" aria-hidden="true" />
+                <th className="pl-3 pr-3 py-3 text-left font-medium w-28">
                   <SortableHeader label="ID" sortKey="id" defaultOrder="asc" />
                 </th>
                 <th className="px-3 py-3 text-left font-medium">Subject</th>
@@ -337,8 +380,13 @@ export default async function TicketsPage({
             </thead>
             <tbody className="divide-y divide-pvx-border">
               {rows.map(t => (
-                <TicketRow key={t.id} href={`/${orgSlug}/tickets/${t.id}`}>
-                  <td className="pl-6 pr-3 py-3 text-xs">
+                <TicketRow
+                  key={t.id}
+                  href={`/${orgSlug}/tickets/${t.id}`}
+                  unseen={hasUnseenActivity(t)}
+                  draftReady={draftSet.has(t.id)}
+                >
+                  <td className="pl-3 pr-3 py-3 text-xs">
                     <CopyId id={t.display_id} />
                   </td>
                   <td className="px-3 py-3 text-gray-200 font-medium">

@@ -60,6 +60,21 @@ export default async function TicketDetailPage({ params }: { params: Promise<{ o
 
   const ticket = ticketData as Pick<Ticket, 'id' | 'display_id' | 'subject' | 'description' | 'status' | 'priority' | 'created_at' | 'organization_id'>
 
+  // AD Stage 3 — record this view so the tickets-grid unseen dot clears for
+  // this user. Mirrors leads/[id] (lead_views). We await because the query
+  // builder is a deferred thenable — no await = no HTTP request. RLS enforces
+  // org scoping via the ticket_id → org chain (safe under HQ impersonation).
+  // Non-fatal: a badge-state miss must never block render.
+  const { error: viewErr } = await supabase
+    .from('ticket_views')
+    .upsert(
+      { ticket_id: id, user_id: user.id, last_viewed_at: new Date().toISOString() },
+      { onConflict: 'ticket_id,user_id' },
+    )
+  if (viewErr) {
+    console.error(`[tickets/${id}] ticket_views upsert failed:`, viewErr.message)
+  }
+
   const [messagesRes, recipientsRes, draftRes] = await Promise.all([
     supabase
       .from('ticket_messages')
