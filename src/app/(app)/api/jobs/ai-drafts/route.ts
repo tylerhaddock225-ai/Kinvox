@@ -35,6 +35,11 @@ async function handle(request: NextRequest): Promise<NextResponse> {
   const denied = authorize(request)
   if (denied) return denied
 
+  // Scope: this backstop DRAINS the queue only. It does NOT run the AD-6 refill
+  // sweep — sweeps are event-driven (fired from the Stripe webhook + HQ addCredits
+  // on a balance increase), so there's no per-org backlog scan here. A ticket that
+  // was skipped at zero balance is re-enqueued by the next refill event, then this
+  // (or the refill's own after()-kick) drains it.
   const summary = await drainDraftJobs(10)
   console.log(`${LOG} drained`, summary)
   return NextResponse.json({ ok: true, ...summary }, { status: 200 })

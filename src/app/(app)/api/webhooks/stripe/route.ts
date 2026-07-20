@@ -10,10 +10,11 @@
 // Route handlers do NOT inherit (app)/layout.tsx, so this stays unauthenticated
 // as Stripe expects; the shared-secret is the stripe-signature header.
 
-import { NextResponse, type NextRequest } from 'next/server'
+import { NextResponse, after, type NextRequest } from 'next/server'
 import type Stripe from 'stripe'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { stripe } from '@/lib/stripe'
+import { sweepUnansweredTickets, drainDraftJobs } from '@/lib/ai/auto-draft'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -99,6 +100,18 @@ export async function POST(request: NextRequest) {
     console.log(`${LOG} session=${session.id} org=${orgId} — duplicate, no-op`)
   } else {
     console.log(`${LOG} session=${session.id} org=${orgId} credited=${credits} new_balance=${balance}`)
+    // AD Stage 6 — a real top-up may unblock tickets whose auto-draft was skipped
+    // at zero balance. Sweep the unanswered backlog + drain, AFTER the 200 so
+    // Stripe's fast-ack expectation is never blocked by Claude latency. Skipped
+    // on duplicate replays (idempotent RPC → no balance change). Best-effort.
+    after(async () => {
+      try {
+        await sweepUnansweredTickets(orgId)
+        await drainDraftJobs(10)
+      } catch (err) {
+        console.error(`${LOG} [refill-sweep] sweep/drain failed org=${orgId}:`, err)
+      }
+    })
   }
 
   return NextResponse.json({ received: true, credited: !duplicate, balance }, { status: 200 })

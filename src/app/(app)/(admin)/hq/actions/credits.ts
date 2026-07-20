@@ -1,9 +1,11 @@
 'use server'
 
+import { after } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { hqGate } from '@/lib/permissions/gates'
+import { sweepUnansweredTickets, drainDraftJobs } from '@/lib/ai/auto-draft'
 
 type LedgerType = 'purchase' | 'refund' | 'adjustment'
 const LEDGER_TYPES: readonly LedgerType[] = ['purchase', 'refund', 'adjustment']
@@ -77,6 +79,22 @@ export async function addCredits(formData: FormData) {
     // Balance already mutated; surface the ledger-side error without
     // rolling back — HQ can reconcile manually if this ever fires.
     redirect(integrationsTab(orgId, 'credits_error=' + encodeURIComponent('Balance updated but ledger insert failed: ' + ledgerErr.message)))
+  }
+
+  // AD Stage 6 — a positive grant may unblock tickets whose auto-draft was skipped
+  // at zero balance. Sweep the unanswered backlog + drain after the response (a
+  // negative refund/adjustment never triggers this). Registered BEFORE the redirect
+  // below, which throws NEXT_REDIRECT to unwind — after() still fires post-response.
+  // Best-effort; a sweep hiccup must never surface as a credit-grant failure.
+  if (amount > 0) {
+    after(async () => {
+      try {
+        await sweepUnansweredTickets(orgId)
+        await drainDraftJobs(10)
+      } catch (err) {
+        console.error(`[refill-sweep] hq addCredits sweep/drain failed org=${orgId}:`, err)
+      }
+    })
   }
 
   revalidatePath(`/hq/organizations/${orgId}`)
