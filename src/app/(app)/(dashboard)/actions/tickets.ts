@@ -126,6 +126,12 @@ export async function createHQSupportTicket(_prev: State, formData: FormData): P
     status:              'open',
     channel:             'portal',
     is_platform_support: true,
+    // AD Stage 3b — a new platform-support request is unseen activity from HQ's
+    // perspective (the org user is the "customer"). Seed last_ticket_activity_at
+    // at create time so the /hq/tickets + hq-support grids show the unseen dot
+    // until an HQ admin opens it. Folded into the insert (atomic, no extra
+    // round-trip); the set_tickets_updated_at trigger keeps updated_at fresh too.
+    last_ticket_activity_at: new Date().toISOString(),
     hq_category:         category as HQCategory,
     screenshot_url:      screenshot_url?.trim() || null,
     affected_tab:        normalizedTab,
@@ -171,6 +177,18 @@ export async function updateTicketStatus(formData: FormData): Promise<void> {
   }
 
   if (status === 'closed' && prior && prior.status !== 'closed') {
+    // AD Stage 5 — a closed ticket has no pending reply, so drop any stored AI
+    // draft (service-role-write-only → admin client). Best-effort; harmless no-op
+    // for tickets that never had a draft (e.g. HQ platform-support tickets).
+    const admin = createAdminClient()
+    const { error: draftDelErr } = await admin
+      .from('ai_ticket_drafts')
+      .delete()
+      .eq('ticket_id', ticket_id)
+    if (draftDelErr) {
+      console.error(`[ticket-draft] discard-on-close failed ticket=${ticket_id}: ${draftDelErr.message}`)
+    }
+
     const { data: closerProfile } = await supabase
       .from('profiles')
       .select('full_name')
@@ -284,7 +302,7 @@ export async function sendTicketMessage(_prev: State, formData: FormData): Promi
   // fast gives a friendlier error than a constraint violation.
   const { data: ticket } = await supabase
     .from('tickets')
-    .select('id, organization_id, display_id, subject, lead_id, customer_id')
+    .select('id, organization_id, display_id, subject, lead_id, customer_id, is_platform_support')
     .eq('id', ticket_id)
     .single()
 
@@ -324,6 +342,36 @@ export async function sendTicketMessage(_prev: State, formData: FormData): Promi
   revalidatePath('/[orgSlug]/hq-support/[id]', 'page')
 
   if (type === 'public') {
+    // AD Stage 5 — a sent public reply supersedes any stored AI draft. Delete it
+    // (ai_ticket_drafts is service-role-write-only → admin client). Best-effort;
+    // the org-ownership check above already scoped this ticket to the caller's org.
+    const admin = createAdminClient()
+    const { error: draftDelErr } = await admin
+      .from('ai_ticket_drafts')
+      .delete()
+      .eq('ticket_id', ticket_id)
+    if (draftDelErr) {
+      console.error(`[ticket-draft] discard-on-send failed ticket=${ticket_id}: ${draftDelErr.message}`)
+    }
+
+    // AD Stage 3b — on a PLATFORM-SUPPORT ticket, a public reply from the org
+    // side is a customer-originated event (org → HQ): bump last_ticket_activity_at
+    // so the /hq/tickets + hq-support grids surface the unseen dot until an HQ
+    // admin opens it. A regular tenant ticket is the agent→customer direction, so
+    // an org-side reply there must NOT bump (mirrors AD-3; internal notes never
+    // enter this public-only block). RLS client — the base "Org members can update
+    // tickets" policy covers the org author, matching the sibling ticket updates;
+    // the set_tickets_updated_at trigger refreshes updated_at. Non-fatal.
+    if (ticket.is_platform_support) {
+      const { error: bumpErr } = await supabase
+        .from('tickets')
+        .update({ last_ticket_activity_at: new Date().toISOString() })
+        .eq('id', ticket_id)
+      if (bumpErr) {
+        console.error(`[ticket-activity] platform-support reply bump failed ticket=${ticket_id}: ${bumpErr.message}`)
+      }
+    }
+
     await dispatchOutboundEmail({
       supabase,
       orgId,

@@ -16,20 +16,27 @@ const DRAFT_ERROR_LABELS: Record<string, string> = {
 
 const INITIAL = null as ReturnType<typeof useActionState<Awaited<ReturnType<typeof sendTicketMessage>>, FormData>>[0]
 
-export default function ReplyBox({ ticketId }: { ticketId: string }) {
+export default function ReplyBox({ ticketId, initialDraft }: { ticketId: string; initialDraft?: string }) {
   const [type, setType] = useState<MessageType>('public')
   const [state, action, isPending] = useActionState(sendTicketMessage, INITIAL)
   const formRef     = useRef<HTMLFormElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [isDrafting, setIsDrafting] = useState(false)
   const [draftError, setDraftError] = useState<string | null>(null)
+  // AD Stage 5 — marker shown when the composer was pre-filled from a stored
+  // auto-draft. Cleared once the reply is sent.
+  const [showDraftMarker, setShowDraftMarker] = useState(Boolean(initialDraft))
 
   useEffect(() => {
     if (state?.status !== 'success') return
     formRef.current?.reset()
+    setShowDraftMarker(false)
     // Hold focus on the reply area so the page never jumps after revalidation.
     const ta = textareaRef.current
     if (ta) {
+      // reset() restores the textarea to its defaultValue (the pre-filled
+      // draft); clear it explicitly so a sent reply doesn't repopulate.
+      ta.value = ''
       ta.focus({ preventScroll: true })
       ta.scrollIntoView({ block: 'nearest' })
     }
@@ -108,11 +115,19 @@ export default function ReplyBox({ ticketId }: { ticketId: string }) {
         <p className="text-xs text-amber-400">{draftError}</p>
       )}
 
+      {showDraftMarker && !isInternal && (
+        <div className="flex items-center gap-1.5 text-xs text-violet-300">
+          <Sparkles className="w-3.5 h-3.5" />
+          <span>AI draft ready — review and edit before sending</span>
+        </div>
+      )}
+
       <textarea
         ref={textareaRef}
         name="body"
         required
         rows={4}
+        defaultValue={initialDraft}
         placeholder={isInternal ? 'Write a private note for your team…' : 'Write a reply to the customer…'}
         className={`w-full rounded-lg border px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 resize-none transition-colors ${
           isInternal

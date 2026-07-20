@@ -46,12 +46,16 @@ export default async function AdminTicketsPage({
 }) {
   const supabase = await createClient()
 
+  // Viewer's auth id for the per-user seen-tracking lookup (Part D). The
+  // hq/layout gate guarantees an authenticated HQ admin here.
+  const { data: { user } } = await supabase.auth.getUser()
+
   const params = await searchParams
   const queue: Queue = params.queue === 'closed' ? 'closed' : 'active'
 
   let listingQ = supabase
     .from('tickets')
-    .select('id, display_id, subject, status, priority, created_at, organization_id, is_platform_support, hq_category, organizations(name), reporter:profiles!tickets_created_by_fkey(full_name)')
+    .select('id, display_id, subject, status, priority, created_at, last_ticket_activity_at, organization_id, is_platform_support, hq_category, organizations(name), reporter:profiles!tickets_created_by_fkey(full_name)')
     .eq('is_platform_support', true)
     .is('deleted_at', null)
     .order('created_at', { ascending: false })
@@ -70,6 +74,7 @@ export default async function AdminTicketsPage({
         status:               TicketStatus
         priority:             TicketPriority
         created_at:           string
+        last_ticket_activity_at: string | null
         organization_id:      string
         is_platform_support:  boolean
         hq_category:          HQCategory | null
@@ -83,6 +88,44 @@ export default async function AdminTicketsPage({
 
   const tickets = listingRes.data
   const error   = listingRes.error
+
+  // AD Stage 3b — grid markers. Two batched .in() queries keyed to the listed
+  // tickets (no per-row round trips): this HQ admin's ticket_views for the unseen
+  // dot (RLS "select hq_admin" arm), and ai_ticket_drafts existence for the
+  // draft-ready sparkle (RLS "read own org or hq" → HQ sees all orgs' drafts, so
+  // the sparkle flags which orgs' tickets have an AI draft awaiting approval).
+  const viewMap  = new Map<string, string>()
+  const draftSet = new Set<string>()
+  if (user && tickets && tickets.length > 0) {
+    const ticketIds = tickets.map(t => t.id)
+    const [viewsRes, draftsRes] = await Promise.all([
+      supabase
+        .from('ticket_views')
+        .select('ticket_id, last_viewed_at')
+        .eq('user_id', user.id)
+        .in('ticket_id', ticketIds),
+      supabase
+        .from('ai_ticket_drafts')
+        .select('ticket_id')
+        .in('ticket_id', ticketIds),
+    ])
+    for (const v of (viewsRes.data ?? []) as { ticket_id: string; last_viewed_at: string }[]) {
+      viewMap.set(v.ticket_id, v.last_viewed_at)
+    }
+    for (const d of (draftsRes.data ?? []) as { ticket_id: string }[]) {
+      draftSet.add(d.ticket_id)
+    }
+  }
+
+  // Unseen = a customer-originated event (org create/reply on a platform-support
+  // ticket, or inbound customer email on a regular ticket) landed since this HQ
+  // admin last opened it. Epoch-ms compare — mirrors the tenant tickets grid.
+  function hasUnseenActivity(t: { id: string; last_ticket_activity_at: string | null }): boolean {
+    if (!t.last_ticket_activity_at) return false
+    const lastViewed = viewMap.get(t.id)
+    if (!lastViewed) return true
+    return new Date(t.last_ticket_activity_at).getTime() > new Date(lastViewed).getTime()
+  }
 
   return (
     <div className="space-y-6">
@@ -116,7 +159,8 @@ export default async function AdminTicketsPage({
         <table className="w-full text-sm">
           <thead className="bg-pvx-surface/80 border-b border-pvx-border">
             <tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-gray-400">
-              <th className="px-5 py-3 w-32">ID</th>
+              <th className="pl-6 pr-1 py-3 w-9" aria-hidden="true" />
+              <th className="pl-3 pr-5 py-3 w-32">ID</th>
               <th className="px-5 py-3">Organization</th>
               <th className="px-5 py-3">Subject</th>
               <th className="px-5 py-3">From</th>
@@ -129,8 +173,8 @@ export default async function AdminTicketsPage({
           <tbody className="divide-y divide-pvx-border">
             {tickets?.length ? (
               tickets.map((t) => (
-                <TicketRow key={t.id} href={`/hq/tickets/${t.id}`}>
-                  <td className="px-5 py-4 text-xs">
+                <TicketRow key={t.id} href={`/hq/tickets/${t.id}`} unseen={hasUnseenActivity(t)} draftReady={draftSet.has(t.id)}>
+                  <td className="pl-3 pr-5 py-4 text-xs">
                     <CopyId id={t.display_id} />
                   </td>
                   <td className="px-5 py-4 text-gray-100 font-medium">
@@ -169,7 +213,7 @@ export default async function AdminTicketsPage({
               ))
             ) : (
               <tr>
-                <td colSpan={8} className="px-5 py-10 text-center text-sm text-gray-500">
+                <td colSpan={9} className="px-5 py-10 text-center text-sm text-gray-500">
                   {queue === 'closed' ? 'No closed tickets.' : 'No active tickets.'}
                 </td>
               </tr>

@@ -386,3 +386,38 @@ export async function refreshLeadEmailStatus(): Promise<RefreshLeadEmailResult> 
   revalidatePath('/[orgSlug]/settings/team', 'page')
   return { status: 'success', message: `${leadEmail} is verified.` }
 }
+
+// ── AI drafting mode (Workstream AD Stage 4) ────────────────────────────────
+//
+// Sets organizations.ai_drafting_mode (manual | auto_draft). Written via the RLS
+// client — so the gate key MUST match the organizations UPDATE policy, which
+// checks `manage_org_settings` (NOT the support-settings key). Gating on the
+// support key would pass the app check but the RLS write would silently affect
+// zero rows. HQ master flag (feature_flags.ai_support_enabled) still governs
+// whether auto-drafting actually runs — this only records the org's preference.
+export async function setOrgDraftingMode(_prev: State, formData: FormData): Promise<State> {
+  const supabase = await createClient()
+
+  const guard = await requireSettingsAdmin(supabase, 'manage_org_settings')
+  if (!guard.ok) return { status: 'error', error: guard.error }
+
+  const mode = (formData.get('mode') as string | null)?.trim() ?? ''
+  if (mode !== 'manual' && mode !== 'auto_draft') {
+    return { status: 'error', error: 'Invalid drafting mode' }
+  }
+
+  const { error: updErr } = await supabase
+    .from('organizations')
+    .update({ ai_drafting_mode: mode })
+    .eq('id', guard.orgId)
+
+  if (updErr) return { status: 'error', error: updErr.message }
+
+  revalidatePath('/[orgSlug]/settings/team', 'page')
+  return {
+    status:  'success',
+    message: mode === 'auto_draft'
+      ? 'Auto-draft enabled — new customer messages will get an AI draft.'
+      : 'Switched to manual drafting.',
+  }
+}

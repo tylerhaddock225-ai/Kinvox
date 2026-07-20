@@ -15,6 +15,7 @@ import {
   updateSupportEmail,
   initializeInboundEmail,
   refreshSupportEmailStatus,
+  setOrgDraftingMode,
 } from '@/app/(app)/(dashboard)/actions/org-settings'
 import EmailVerificationPanel from '@/components/settings/EmailVerificationPanel'
 import InboundAddressRow from '@/components/settings/InboundAddressRow'
@@ -604,12 +605,94 @@ function SupportSettingsPanel({ settings }: { settings: OrgSettings }) {
   )
 }
 
+// ── AI Settings panel (Workstream AD Stage 4) ────────────────────────────────
+
+export type AiSettingsState = {
+  ai_drafting_mode:   'manual' | 'auto_draft'
+  ai_support_enabled: boolean
+}
+
+const DRAFTING_OPTIONS = [
+  {
+    value: 'manual',
+    title: 'Manual',
+    desc:  'Agents click “Draft with AI” when they want help.',
+  },
+  {
+    value: 'auto_draft',
+    title: 'Auto-draft',
+    desc:  'Every new customer message gets a draft prepared automatically; agents review and send. Each draft uses 1 AI credit.',
+  },
+] as const
+
+function AiSettingsPanel({ aiSettings }: { aiSettings: AiSettingsState }) {
+  const [state, action, pending] = useActionState(setOrgDraftingMode, null)
+  const formRef = useRef<HTMLFormElement>(null)
+  const [, startTransition] = useTransition()
+  const disabled = !aiSettings.ai_support_enabled
+
+  return (
+    <div className="space-y-5 max-w-2xl">
+      <div>
+        <h3 className="text-sm font-semibold text-white">AI Drafting Mode</h3>
+        <p className="text-sm text-gray-400 mt-1">
+          Choose how AI reply drafts are prepared for support tickets.
+        </p>
+      </div>
+
+      {disabled && (
+        <p className="text-sm text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
+          AI support is not enabled for your organization — contact Kinvox.
+        </p>
+      )}
+
+      <form ref={formRef} action={action} className="space-y-3">
+        {DRAFTING_OPTIONS.map(opt => (
+          <label
+            key={opt.value}
+            className={`flex items-start gap-3 rounded-xl border px-4 py-3 transition-colors ${
+              disabled
+                ? 'opacity-50 cursor-not-allowed border-pvx-border'
+                : 'cursor-pointer border-pvx-border hover:border-violet-500/50'
+            }`}
+          >
+            <input
+              type="radio"
+              name="mode"
+              value={opt.value}
+              defaultChecked={aiSettings.ai_drafting_mode === opt.value}
+              disabled={disabled || pending}
+              onChange={() => startTransition(() => formRef.current?.requestSubmit())}
+              className="mt-0.5 accent-violet-500"
+            />
+            <div>
+              <div className="text-sm font-medium text-white">{opt.title}</div>
+              <div className="text-xs text-gray-400 mt-0.5">{opt.desc}</div>
+            </div>
+          </label>
+        ))}
+      </form>
+
+      <div className="min-h-[1rem] text-xs">
+        {pending && <span className="text-gray-500">Saving…</span>}
+        {!pending && state?.status === 'success' && (
+          <span className="text-emerald-300">{state.message ?? 'Saved.'}</span>
+        )}
+        {!pending && state?.status === 'error' && (
+          <span className="text-red-400">{state.error}</span>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ── Main export ──────────────────────────────────────────────────────────────
 
 const TABS = [
   { id: 'users',        label: 'User Administration' },
   { id: 'support',      label: 'Support Settings'    },
   { id: 'lead-support', label: 'Lead Settings'       },
+  { id: 'ai',           label: 'AI Settings'         },
 ] as const
 
 type TabId = typeof TABS[number]['id']
@@ -629,6 +712,7 @@ export default function TeamTabs({
   pendingInvites,
   orgSettings,
   leadSupport,
+  aiSettings,
   initialTab,
 }: {
   members:           MemberRow[]
@@ -639,6 +723,7 @@ export default function TeamTabs({
   pendingInvites: PendingInviteRow[]
   orgSettings:    OrgSettings
   leadSupport:    LeadSupportState
+  aiSettings:     AiSettingsState
   initialTab?:    string
 }) {
   const [activeTab, setActiveTab] = useState<TabId>(
@@ -702,6 +787,10 @@ export default function TeamTabs({
 
       {activeTab === 'lead-support' && (
         <LeadSupportTab state={leadSupport} />
+      )}
+
+      {activeTab === 'ai' && (
+        <AiSettingsPanel aiSettings={aiSettings} />
       )}
     </div>
   )

@@ -54,6 +54,96 @@ export async function enqueueDraftJob(args: {
   }
 }
 
+// ── Workstream AD Stage 6 — refill sweep ─────────────────────────────────────
+// When an org's credit balance INCREASES (Stripe top-up or an HQ manual grant),
+// any inbound customer message whose auto-draft was skipped at zero balance is
+// now draftable. sweepUnansweredTickets finds that backlog and re-enqueues jobs;
+// the drainer (kicked right after by the call site) does the drafting until the
+// balance exhausts again — its insufficient_credits skip handles running dry.
+//
+// A DB trigger can't call Claude, so this runs in app code at BOTH credit-increase
+// call sites (they both already run through app code: the Stripe webhook route and
+// the HQ addCredits action). No migration. Revisit only if a third live
+// balance-increase path ever appears.
+const SWEEP_ENQUEUE_CAP = 25   // safety: at most this many jobs per sweep event
+const SWEEP_CANDIDATE_SCAN = 100  // bound the ticket pre-scan before the latest-message check
+
+/**
+ * Enqueue refill-sweep draft jobs for an org's unanswered ticket backlog, oldest
+ * first. Gated identically to the inbound producer (auto_draft mode + master gate
+ * + template). "Unanswered" = an open/pending, non-deleted, non-platform-support
+ * ticket whose LATEST message is inbound (sender_id IS NULL), with no stored draft
+ * and no live (pending/processing) job. All queries are batched (no per-row loops).
+ * Best-effort per ticket via enqueueDraftJob (never throws). Returns the count
+ * enqueued.
+ */
+export async function sweepUnansweredTickets(orgId: string): Promise<{ swept: number }> {
+  const admin = createAdminClient()
+
+  // 1) Gate — mirrors maybeEnqueueAutoDraft in the inbound webhook. Any miss → no-op.
+  const { data: org } = await admin
+    .from('organizations')
+    .select('ai_drafting_mode, feature_flags, ai_template_id')
+    .eq('id', orgId)
+    .maybeSingle<{ ai_drafting_mode: string | null; feature_flags: Record<string, unknown> | null; ai_template_id: string | null }>()
+  const autoDraft        = org?.ai_drafting_mode === 'auto_draft'
+  const aiSupportEnabled = org?.feature_flags?.ai_support_enabled === true
+  if (!autoDraft || !aiSupportEnabled || !org?.ai_template_id) return { swept: 0 }
+
+  // 2) Candidate open/pending tickets, oldest first (non-deleted, non-platform).
+  //    Bounded scan — the cap below limits enqueues anyway.
+  const { data: ticketRows } = await admin
+    .from('tickets')
+    .select('id')
+    .eq('organization_id', orgId)
+    .eq('is_platform_support', false)
+    .is('deleted_at', null)
+    .in('status', ['open', 'pending'])
+    .order('created_at', { ascending: true })
+    .limit(SWEEP_CANDIDATE_SCAN)
+  const candidateIds = ((ticketRows ?? []) as { id: string }[]).map(t => t.id)
+  if (candidateIds.length === 0) return { swept: 0 }
+
+  // Drop tickets that already have a stored draft or a live job (two batched
+  // anti-join lookups keyed to the candidate ids).
+  const [draftsRes, jobsRes] = await Promise.all([
+    admin.from('ai_ticket_drafts').select('ticket_id').in('ticket_id', candidateIds),
+    admin.from('ai_draft_jobs').select('ticket_id').in('ticket_id', candidateIds).in('status', ['pending', 'processing']),
+  ])
+  const skip = new Set<string>()
+  for (const d of (draftsRes.data ?? []) as { ticket_id: string }[]) skip.add(d.ticket_id)
+  for (const j of (jobsRes.data  ?? []) as { ticket_id: string }[]) skip.add(j.ticket_id)
+  const eligibleIds = candidateIds.filter(id => !skip.has(id))
+  if (eligibleIds.length === 0) return { swept: 0 }
+
+  // 3) Latest message per eligible ticket — ONE batched fetch, newest first;
+  //    keep the first row seen per ticket (= its latest). Uses the existing
+  //    (ticket_id, created_at) index. Unanswered = that latest message is inbound.
+  const { data: msgRows } = await admin
+    .from('ticket_messages')
+    .select('ticket_id, id, sender_id, created_at')
+    .in('ticket_id', eligibleIds)
+    .order('created_at', { ascending: false })
+  const latestByTicket = new Map<string, { id: string; senderId: string | null }>()
+  for (const m of (msgRows ?? []) as { ticket_id: string; id: string; sender_id: string | null }[]) {
+    if (!latestByTicket.has(m.ticket_id)) latestByTicket.set(m.ticket_id, { id: m.id, senderId: m.sender_id })
+  }
+
+  // 4) Enqueue oldest-first (eligibleIds preserves the ticket scan's created_at asc
+  //    order), capped. Skip tickets with no messages or an agent-authored latest.
+  let swept = 0
+  for (const ticketId of eligibleIds) {
+    if (swept >= SWEEP_ENQUEUE_CAP) break
+    const latest = latestByTicket.get(ticketId)
+    if (!latest || latest.senderId !== null) continue
+    await enqueueDraftJob({ orgId, ticketId, sourceMessageId: latest.id, reason: 'refill_sweep' })
+    swept++
+  }
+
+  if (swept > 0) console.log(`${LOG} refill sweep enqueued ${swept} job(s) org=${orgId}`)
+  return { swept }
+}
+
 function serializeErr(err: unknown): string {
   if (err instanceof Error) {
     return `${err.name}: ${err.message}${(err as any).status ? ` (status ${(err as any).status})` : ''}`
