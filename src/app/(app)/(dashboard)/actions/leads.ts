@@ -7,6 +7,7 @@ import type { Lead } from '@/lib/types/database.types'
 import { sendOrgTransactionalEmail, type OrgEmailContext } from '@/lib/email/send-org-email'
 import { constructInboundEmailAddress } from '@/lib/email/inbound-address'
 import { renderConversationReply, type PriorMessage } from '@/lib/email/templates/reply'
+import { normalizeToE164 } from '@/lib/phone'
 
 export type CreateLeadState =
   | { status: 'success' }
@@ -132,12 +133,15 @@ export async function updateLead(
 
   const orgId = await resolveEffectiveOrgId(supabase, user.id)
 
+  // Fail-open: normalize to E.164 for the SMS rail; store raw if it won't parse.
+  const phoneRaw = ((formData.get('phone') as string) ?? '').trim()
+
   const { error } = await supabase.from('leads').update({
     first_name: firstName,
     last_name:  ((formData.get('last_name') as string) ?? '').trim() || null,
     company:    ((formData.get('company')   as string) ?? '').trim() || null,
     email:      ((formData.get('email')     as string) ?? '').trim() || null,
-    phone:      ((formData.get('phone')     as string) ?? '').trim() || null,
+    phone:      phoneRaw ? (normalizeToE164(phoneRaw) ?? phoneRaw) : null,
     source,
   }).eq('id', leadId)
 

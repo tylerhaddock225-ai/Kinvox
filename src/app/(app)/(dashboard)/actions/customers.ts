@@ -3,6 +3,7 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { resolveEffectiveOrgId, resolveOrgSlug, revalidateOrgPath } from '@/lib/impersonation'
+import { normalizeToE164 } from '@/lib/phone'
 
 // ── Types (shared with client components) ───────────────────────────────────
 
@@ -42,13 +43,17 @@ export async function createNewCustomer(
   const firstName = ((formData.get('first_name') as string) ?? '').trim()
   if (!firstName) return { status: 'error', error: 'First name is required' }
 
+  // Fail-open: normalize to E.164 for the SMS rail, but never reject on a bad
+  // phone — store the raw trimmed input when it won't parse.
+  const phoneRaw = ((formData.get('phone') as string) ?? '').trim()
+
   const { data: inserted, error } = await supabase.from('customers').insert({
     organization_id: orgId,
     first_name: firstName,
     last_name:  ((formData.get('last_name') as string) ?? '').trim() || null,
     company:    ((formData.get('company')   as string) ?? '').trim() || null,
     email:      ((formData.get('email')     as string) ?? '').trim() || null,
-    phone:      ((formData.get('phone')     as string) ?? '').trim() || null,
+    phone:      phoneRaw ? (normalizeToE164(phoneRaw) ?? phoneRaw) : null,
   }).select('id').single()
 
   if (error) return { status: 'error', error: error.message }
@@ -83,12 +88,15 @@ export async function updateCustomer(
 
   const orgId = await resolveEffectiveOrgId(supabase, user.id)
 
+  // Fail-open E.164 normalization (see createNewCustomer).
+  const phoneRaw = ((formData.get('phone') as string) ?? '').trim()
+
   const { error } = await supabase.from('customers').update({
     first_name: firstName,
     last_name:  ((formData.get('last_name') as string) ?? '').trim() || null,
     company:    ((formData.get('company')   as string) ?? '').trim() || null,
     email:      ((formData.get('email')     as string) ?? '').trim() || null,
-    phone:      ((formData.get('phone')     as string) ?? '').trim() || null,
+    phone:      phoneRaw ? (normalizeToE164(phoneRaw) ?? phoneRaw) : null,
   }).eq('id', customerId)
 
   if (error) return { status: 'error', error: error.message }

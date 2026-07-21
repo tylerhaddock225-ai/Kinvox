@@ -30,6 +30,7 @@ import { constructInboundEmailAddress } from '@/lib/email/inbound-address'
 import { renderLeadConfirmationEmail } from '@/lib/email/templates/lead-confirmation'
 import { normalizeLeadQuestions, type LeadQuestion } from '@/lib/lead-questions'
 import { checkRateLimit, bestEffortIp, type RateLimitResult } from '@/lib/rate-limit'
+import { normalizeToE164 } from '@/lib/phone'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -329,6 +330,12 @@ export async function captureLeadAction(
   }
   // ── End resubmission branch ──────────────────────────────────────────────
 
+  // Fail-open E.164 normalization for the stored lead row only. `phone` is
+  // required (validated above), so no null case here. The raw `phone` is left
+  // untouched for the confirmation email / merchant alert / system-message
+  // bodies below — store canonical, show what the prospect typed.
+  const phoneForStore = normalizeToE164(phone) ?? phone
+
   const { data: lead, error: insertErr } = await supabase
     .from('leads')
     .insert({
@@ -336,7 +343,7 @@ export async function captureLeadAction(
       first_name:            firstName || 'Unknown',
       last_name:             lastName,
       email,
-      phone,
+      phone:                 phoneForStore,
       status:                'new',
       source:                'web',
       metadata,
