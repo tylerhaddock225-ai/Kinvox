@@ -1,7 +1,8 @@
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, MessageSquare } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
+import { normalizeToE164, formatPhoneDisplay } from '@/lib/phone'
 import type { Ticket, TicketMessage } from '@/lib/types/database.types'
 import CopyId from '@/components/CopyId'
 import EditableSubject from '@/components/EditableSubject'
@@ -11,6 +12,8 @@ import TicketPrioritySelect from '@/components/TicketPrioritySelect'
 import TicketRecipientsSection, { type RecipientRow } from '@/components/TicketRecipientsSection'
 
 type MessageRow = Pick<TicketMessage, 'id' | 'body' | 'type' | 'created_at' | 'sender_id' | 'inbound_email_from'> & {
+  // SMS-1: channel discriminator (schema default 'email'). Drives the thread badge.
+  channel:  'email' | 'sms' | null
   profiles: { full_name: string | null } | null
 }
 
@@ -37,7 +40,7 @@ export default async function TicketDetailPage({ params }: { params: Promise<{ o
 
   const { data: ticketData } = await supabase
     .from('tickets')
-    .select('id, display_id, subject, description, status, priority, created_at, organization_id, is_platform_support, organizations(slug)')
+    .select('id, display_id, subject, description, status, priority, created_at, organization_id, is_platform_support, customer_id, organizations(slug, sms_support_number), customers(phone)')
     .eq('id', id)
     .is('deleted_at', null)
     .single()
@@ -60,6 +63,20 @@ export default async function TicketDetailPage({ params }: { params: Promise<{ o
 
   const ticket = ticketData as Pick<Ticket, 'id' | 'display_id' | 'subject' | 'description' | 'status' | 'priority' | 'created_at' | 'organization_id'>
 
+  // SMS-1 — resolve SMS availability for the composer toggle (server-authoritative;
+  // the send action re-resolves the recipient from the DB, this is display-only).
+  // SMS is offered only when the org has a support number AND the ticket's linked
+  // customer has a parseable phone.
+  const smsData = ticketData as unknown as {
+    organizations: { sms_support_number: string | null } | { sms_support_number: string | null }[] | null
+    customers:     { phone: string | null } | { phone: string | null }[] | null
+  }
+  const orgEmbed  = Array.isArray(smsData.organizations) ? smsData.organizations[0] : smsData.organizations
+  const custEmbed = Array.isArray(smsData.customers)     ? smsData.customers[0]     : smsData.customers
+  const smsSupportNumber   = orgEmbed?.sms_support_number ?? null
+  const normalizedRecipient = custEmbed?.phone ? normalizeToE164(custEmbed.phone) : null
+  const smsRecipientDisplay = normalizedRecipient ? formatPhoneDisplay(normalizedRecipient) : null
+
   // AD Stage 3 — record this view so the tickets-grid unseen dot clears for
   // this user. Mirrors leads/[id] (lead_views). We await because the query
   // builder is a deferred thenable — no await = no HTTP request. RLS enforces
@@ -78,7 +95,7 @@ export default async function TicketDetailPage({ params }: { params: Promise<{ o
   const [messagesRes, recipientsRes, draftRes] = await Promise.all([
     supabase
       .from('ticket_messages')
-      .select('id, body, type, created_at, sender_id, inbound_email_from, profiles!ticket_messages_sender_id_fkey(full_name)')
+      .select('id, body, type, created_at, sender_id, inbound_email_from, channel, profiles!ticket_messages_sender_id_fkey(full_name)')
       .eq('ticket_id', id)
       .order('created_at', { ascending: true }),
     supabase
@@ -193,9 +210,20 @@ export default async function TicketDetailPage({ params }: { params: Promise<{ o
                             </span>
                           )}
                         </div>
-                        <time className="text-xs text-gray-500">
-                          {new Date(m.created_at).toLocaleString()}
-                        </time>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {m.channel === 'sms' && (
+                            <span
+                              className="inline-flex items-center gap-1 text-[10px] font-medium text-gray-500"
+                              title="Sent by SMS"
+                            >
+                              <MessageSquare className="w-3 h-3" aria-hidden="true" />
+                              SMS
+                            </span>
+                          )}
+                          <time className="text-xs text-gray-500">
+                            {new Date(m.created_at).toLocaleString()}
+                          </time>
+                        </div>
                       </div>
                       <div className="text-sm text-gray-200 whitespace-pre-wrap">{m.body}</div>
                     </li>
@@ -206,7 +234,12 @@ export default async function TicketDetailPage({ params }: { params: Promise<{ o
           </section>
 
           <section className="rounded-xl border border-pvx-border bg-pvx-surface p-4">
-            <ReplyBox ticketId={ticket.id} initialDraft={initialDraft} />
+            <ReplyBox
+              ticketId={ticket.id}
+              initialDraft={initialDraft}
+              smsSupportNumber={smsSupportNumber}
+              smsRecipientDisplay={smsRecipientDisplay}
+            />
           </section>
         </div>
       </div>

@@ -58,3 +58,12 @@ Append-only. Each row records a single `scripts/run-data-op.mjs` execution.
 > guards passed; post-op verified: Alex `role_id=ddaff626…` with manage_org_settings/manage_roles/manage_team=true, and
 > the fallback-dependent-users count = 0 (the invariant Stage A's RLS removal requires). Linked to prod for the op, then
 > relinked back to sandbox. Migrations `20260630120000` (B) + `20260630130000` (A) pushed to prod immediately after.
+| 2026-07-21 15:00:00Z | sandbox | 20260721130000_set_niko_sandbox_sms_numbers.sql | ahjab | ok (1 row; sms_support_number → +17372324091) |
+
+> **2026-07-21 — SMS-1 sandbox test enablement (SANDBOX ONLY).** File: `sandbox/20260721130000_set_niko_sandbox_sms_numbers.sql`.
+> Purpose: give Niko's Storm Protection (`6fe9db41-…`) an SMS support sending number (`+17372324091`, the Twilio trial
+> number) so Tyler can live-test the ticket-reply SMS toggle. `sms_lead_number` left NULL (lead rail is a later stage;
+> trial account has one number). Applied via the **Management API** (sandbox ref `ntwimeqxyyvjyrisqofl`), NOT
+> `run-data-op.mjs` — the Supabase CLI can't run `db query` non-interactively here (no DB password), same constraint as
+> the AD Stage 2 op above. Transaction-guarded; post-op verified: `sms_support_number=+17372324091`, `sms_lead_number=NULL`,
+> and exactly 1 org holds the number (partial-unique-index sanity). Sandbox only; NO-OP on prod (different org id there).

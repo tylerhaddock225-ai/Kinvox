@@ -10,6 +10,8 @@ import { renderConversationReply, type PriorMessage } from '@/lib/email/template
 import { draftAiReply } from '@/lib/ai/draft-reply'
 import { TICKET_REPLY_FRAME } from '@/lib/ai/frames'
 import { buildTicketDraftInputs } from '@/lib/ai/ticket-draft-inputs'
+import { sendOrgSms } from '@/lib/sms/send-org-sms'
+import { normalizeToE164 } from '@/lib/phone'
 
 type State = { status: 'success' } | { status: 'error'; error: string } | null
 
@@ -287,9 +289,14 @@ export async function sendTicketMessage(_prev: State, formData: FormData): Promi
     .eq('id', user.id)
     .single<{ full_name: string | null }>()
 
-  const ticket_id = formData.get('ticket_id') as string
-  const body      = formData.get('body')      as string
-  const type      = formData.get('type')      as string
+  const ticket_id   = formData.get('ticket_id') as string
+  const body        = formData.get('body')      as string
+  const type        = formData.get('type')      as string
+  // SMS-1: reply channel. Absent/unknown → 'email' so every existing caller
+  // (and internal notes) keeps its exact prior behavior. Only public replies
+  // can be SMS; internal notes are never sent anywhere.
+  const channelRaw  = formData.get('channel') as string | null
+  const channel: 'email' | 'sms' = channelRaw === 'sms' ? 'sms' : 'email'
 
   if (!ticket_id) return { status: 'error', error: 'Ticket is required' }
   if (!body?.trim()) return { status: 'error', error: 'Message cannot be empty' }
@@ -312,12 +319,29 @@ export async function sendTicketMessage(_prev: State, formData: FormData): Promi
 
   const trimmed = body.trim()
 
+  // SMS-1 pre-flight: for an SMS public reply, resolve the recipient phone from
+  // the ticket's linked customer BEFORE writing anything, so a missing/unusable
+  // number fails cleanly with nothing persisted. The customer's stored phone is
+  // canonical E.164 (SMS-0 normalize-on-write), but normalize again defensively
+  // for legacy rows written before SMS-0.
+  let smsTo: string | null = null
+  if (type === 'public' && channel === 'sms') {
+    if (!ticket.customer_id) return { status: 'error', error: 'no_recipient_phone' }
+    const { data: cust } = await supabase
+      .from('customers')
+      .select('phone')
+      .eq('id', ticket.customer_id)
+      .maybeSingle<{ phone: string | null }>()
+    smsTo = cust?.phone ? normalizeToE164(cust.phone) : null
+    if (!smsTo) return { status: 'error', error: 'no_recipient_phone' }
+  }
+
   // Resolve the prior public message BEFORE inserting this one so the
   // quoted block can never accidentally include the in-flight message.
   // Falls through to ticket.description on first reply (handled in
-  // dispatchOutboundEmail).
+  // dispatchOutboundEmail). Email-only — the SMS body is the raw reply text.
   let priorPublic: { body: string; created_at: string; sender_id: string | null } | null = null
-  if (type === 'public') {
+  if (type === 'public' && channel === 'email') {
     const { data } = await supabase
       .from('ticket_messages')
       .select('body, created_at, sender_id')
@@ -329,13 +353,17 @@ export async function sendTicketMessage(_prev: State, formData: FormData): Promi
     priorPublic = data ?? null
   }
 
-  const { error } = await supabase.from('ticket_messages').insert({
+  // Persist the message row FIRST (mirrors the email ordering: row is the source
+  // of truth; the outbound send is best-effort after). channel tags the row so
+  // the thread can badge it; internal notes stay 'email' (never sent).
+  const { data: inserted, error } = await supabase.from('ticket_messages').insert({
     ticket_id,
     org_id:    orgId,
     sender_id: user.id,
     body:      trimmed,
     type,
-  })
+    channel:   type === 'public' ? channel : 'email',
+  }).select('id').single<{ id: string }>()
 
   if (error) return { status: 'error', error: error.message }
 
@@ -372,18 +400,53 @@ export async function sendTicketMessage(_prev: State, formData: FormData): Promi
       }
     }
 
-    await dispatchOutboundEmail({
-      supabase,
-      orgId,
-      senderName:       senderProfile?.full_name ?? null,
-      ticketId:         ticket.id,
-      ticketLeadId:     ticket.lead_id,
-      ticketCustomerId: ticket.customer_id,
-      ticketSubject:    ticket.subject,
-      ticketDisplayId:  ticket.display_id,
-      body:             trimmed,
-      priorPublic,
-    })
+    if (channel === 'sms') {
+      // SMS-1 — outbound over the support rail. The row is already persisted;
+      // the send is best-effort like email, but unlike email we surface a send
+      // failure to the caller so the agent isn't left unaware. No email
+      // machinery (Reply-To / subject / template) on this path — the SMS body
+      // is the raw reply text.
+      const { data: org } = await supabase
+        .from('organizations')
+        .select('id, sms_support_number')
+        .eq('id', orgId)
+        .single<{ id: string; sms_support_number: string | null }>()
+
+      const sendRes = org
+        ? await sendOrgSms({ org, rail: 'support', to: smsTo as string, body: trimmed })
+        : { ok: false as const, error: 'org_not_found' }
+
+      if (sendRes.ok) {
+        // Store the provider SID on external_message_id (SMS-0 dual-use
+        // convention). Service-role update — mirrors the draft-discard client.
+        const { error: sidErr } = await admin
+          .from('ticket_messages')
+          .update({ external_message_id: sendRes.providerMessageId })
+          .eq('id', inserted.id)
+        if (sidErr) {
+          console.error(`[ticket-sms] provider-id write failed ticket=${ticket_id} msg=${inserted.id}: ${sidErr.message}`)
+        }
+      } else {
+        console.error(`[ticket-sms] send failed ticket=${ticket_id}: ${sendRes.error}`)
+        // Non-fatal: the row persists and the thread refreshes, but tell the UI
+        // so the agent knows delivery didn't go through.
+        await revalidateOrgPath(supabase, orgId, `/tickets/${ticket_id}`)
+        return { status: 'error', error: 'sms_send_failed' }
+      }
+    } else {
+      await dispatchOutboundEmail({
+        supabase,
+        orgId,
+        senderName:       senderProfile?.full_name ?? null,
+        ticketId:         ticket.id,
+        ticketLeadId:     ticket.lead_id,
+        ticketCustomerId: ticket.customer_id,
+        ticketSubject:    ticket.subject,
+        ticketDisplayId:  ticket.display_id,
+        body:             trimmed,
+        priorPublic,
+      })
+    }
   }
 
   await revalidateOrgPath(supabase, orgId, `/tickets/${ticket_id}`)
