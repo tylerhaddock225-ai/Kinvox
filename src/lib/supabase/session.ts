@@ -102,6 +102,9 @@ export async function updateSession(request: NextRequest) {
   // These must be reachable without a session on the app host.
   const isLeadMagnet = pathname.startsWith('/l/')
   const isPublicApi  = pathname.startsWith('/api/v1/')
+  // Public SMS opt-in landing (SMS Stage 2a). Customer-facing, reached from a
+  // link in a confirmation email — must resolve without a session, like /l/.
+  const isSmsOptIn   = pathname.startsWith('/sms-opt-in/')
   // Claim landing is public-facing: unauthenticated visitors see a
   // "Sign in to claim" CTA, signed-in users see the confirmation UI.
   const isClaim      = pathname.startsWith('/claim/')
@@ -117,7 +120,7 @@ export async function updateSession(request: NextRequest) {
   // Bearer inside the route handler, so they must bypass the login gate like
   // the webhooks do.
   const isCronJob    = pathname.startsWith('/api/jobs/')
-  const isPublic     = isAuthRoute || isWebhook || isAuthApi || isLeadMagnet || isPublicApi || isClaim || isInvite || isHqInvite || isCronJob || pathname.startsWith('/_next') || pathname === '/favicon.ico'
+  const isPublic     = isAuthRoute || isWebhook || isAuthApi || isLeadMagnet || isPublicApi || isSmsOptIn || isClaim || isInvite || isHqInvite || isCronJob || pathname.startsWith('/_next') || pathname === '/favicon.ico'
 
   // ── Gate 0: login-first ────────────────────────────────────
   // Every protected route bounces unauthenticated requests to /login.

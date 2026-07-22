@@ -9,10 +9,15 @@
 // Skipped when the sender looks like an auto-responder (noreply / mailer-daemon
 // / postmaster / bounces) — see isLikelyAutoResponder in the webhook.
 
+import { renderSmsOptInEmailSection } from './sms-opt-in-section'
+
 export type TicketConfirmationContext = {
   orgName:         string
   ticketDisplayId: string
   originalSubject: string | null
+  // SMS Stage 2a — public opt-in URL for the ticket's customer, or null when
+  // none was minted (customerless ticket, already opted in, or mint failed).
+  smsOptInUrl?:    string | null
 }
 
 export type RenderedTicketConfirmation = {
@@ -61,6 +66,10 @@ export function renderTicketConfirmationEmail(
     ? `[${ctx.ticketDisplayId}] Re: ${stripped}`
     : `[${ctx.ticketDisplayId}] We received your message`
 
+  // SMS Stage 2a — optional "prefer text messages?" opt-in section, appended to
+  // both bodies. Empty strings when no URL was minted, so this is a no-op then.
+  const smsSection = renderSmsOptInEmailSection(ctx.smsOptInUrl)
+
   const textBody = [
     'Hi there,',
     '',
@@ -69,7 +78,7 @@ export function renderTicketConfirmationEmail(
     `Your reference: [${ctx.ticketDisplayId}]`,
     '',
     `— The ${ctx.orgName} team`,
-  ].join('\n')
+  ].join('\n') + smsSection.text
 
   const orgNameSafe   = escapeHtml(ctx.orgName)
   const displayIdSafe = escapeHtml(ctx.ticketDisplayId)
@@ -78,7 +87,7 @@ export function renderTicketConfirmationEmail(
     `<p>Thanks for reaching out to <strong>${orgNameSafe}</strong>. We've received your message and someone from our team will follow up shortly.</p>`,
     `<p>Your reference: <strong>[${displayIdSafe}]</strong></p>`,
     `<p>— The ${orgNameSafe} team</p>`,
-  ].join('\n')
+  ].join('\n') + smsSection.html
 
   const htmlBody = wrapHtmlDocument(subject, htmlInner)
   return { subject, htmlBody, textBody }

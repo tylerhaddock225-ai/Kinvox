@@ -8,6 +8,8 @@
 // arbitrary-expression evaluation. HTML escaping is applied to the HTML
 // render path so user-supplied custom_answers can't inject markup.
 
+import { renderSmsOptInEmailSection } from './sms-opt-in-section'
+
 const DEFAULT_SUBJECT = 'We got your request — {orgName}'
 
 const DEFAULT_BODY = `Hi {firstName},
@@ -36,6 +38,10 @@ export type LeadConfirmationContext = {
   // "[ld_<displayId>] …" so inbound replies route back to this lead via
   // the postmark-inbound webhook — same convention Tickets uses.
   leadDisplayId:   string | null
+  // SMS Stage 2a — public opt-in URL for this lead, or null when none was
+  // minted (already opted in, or minting failed). When present a short
+  // "prefer text messages?" section is appended to both bodies.
+  smsOptInUrl?:    string | null
   override?: {
     subject: string | null
     body:    string | null
@@ -198,7 +204,7 @@ export function renderLeadConfirmationEmail(
   const subject = ctx.leadDisplayId
     ? `[${ctx.leadDisplayId}] ${interpolatedSubject}`
     : interpolatedSubject
-  const textBody = interpolate(bodyTemplate, textValues)
+  const interpolatedTextBody = interpolate(bodyTemplate, textValues)
 
   // HTML render path:
   //  - default body: bespoke HTML with proper paragraph/list elements
@@ -206,9 +212,14 @@ export function renderLeadConfirmationEmail(
   //    text override still arrives as presentable HTML
   const htmlInner = usingDefaultBody
     ? renderDefaultHtmlBody(textValues, ctx)
-    : textToHtmlParagraphs(textBody)
+    : textToHtmlParagraphs(interpolatedTextBody)
 
-  const htmlBody = wrapHtmlDocument(subject, htmlInner)
+  // SMS Stage 2a — append the "prefer text messages?" opt-in section to BOTH
+  // bodies (path-agnostic: works for default and override templates alike).
+  // Empty strings when no URL was minted, so this is a no-op then.
+  const smsSection = renderSmsOptInEmailSection(ctx.smsOptInUrl)
+  const textBody   = interpolatedTextBody + smsSection.text
+  const htmlBody   = wrapHtmlDocument(subject, htmlInner + smsSection.html)
 
   return { subject, htmlBody, textBody }
 }

@@ -28,6 +28,7 @@ import { isLeadCaptureLive } from '@/lib/lead-magnet'
 import { sendOrgTransactionalEmail } from '@/lib/email/send-org-email'
 import { constructInboundEmailAddress } from '@/lib/email/inbound-address'
 import { renderLeadConfirmationEmail } from '@/lib/email/templates/lead-confirmation'
+import { mintSmsOptInToken } from '@/lib/sms/opt-in'
 import { normalizeLeadQuestions, type LeadQuestion } from '@/lib/lead-questions'
 import { checkRateLimit, bestEffortIp, type RateLimitResult } from '@/lib/rate-limit'
 import { normalizeToE164 } from '@/lib/phone'
@@ -661,6 +662,11 @@ async function dispatchLeadConfirmation(args: LeadConfirmationArgs): Promise<voi
         body:    args.org.confirmation_email_template.body    ?? null,
       }
     : null
+  // SMS Stage 2a — mint a public opt-in link for this lead so the confirmation
+  // email can offer "prefer text messages?". Fail-open: null (mint failed, or the
+  // lead is already opted in) → the email sends without the SMS link.
+  const smsOptInUrl = await mintSmsOptInToken('lead', args.leadId)
+
   const rendered = renderLeadConfirmationEmail({
     orgName:         args.org.name,
     firstName:       args.firstName || 'there',
@@ -669,6 +675,7 @@ async function dispatchLeadConfirmation(args: LeadConfirmationArgs): Promise<voi
     appointmentTime: args.appointmentTime,
     customAnswers:   args.customAnswersWithLabels,
     leadDisplayId:   args.leadDisplayId,
+    smsOptInUrl,
     override:        overrideTemplate,
   })
   // Reply-To routes the prospect's reply through Postmark's plus-addressed

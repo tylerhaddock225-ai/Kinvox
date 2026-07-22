@@ -185,6 +185,39 @@ export async function restoreCustomer(formData: FormData): Promise<void> {
 }
 
 
+// ── setCustomerSmsOptIn ─────────────────────────────────────────────────────
+//
+// SMS Stage 2a — org-side manual consent toggle (for verbal "just text me"
+// consent, e.g. over the phone). Same gating as the edit modals: auth + RLS
+// (the "Org members can update customers" policy scopes the write to the org).
+// Turning ON records consent + a timestamp and nulls any pending opt-in token;
+// turning OFF clears both and the token. NOTHING is sent — this is consent state
+// only.
+
+export async function setCustomerSmsOptIn(customerId: string, optIn: boolean): Promise<void> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return
+
+  const orgId = await resolveEffectiveOrgId(supabase, user.id)
+
+  const patch = optIn
+    ? { sms_opt_in: true,  sms_opted_in_at: new Date().toISOString(), sms_opt_in_token: null }
+    : { sms_opt_in: false, sms_opted_in_at: null,                     sms_opt_in_token: null }
+
+  const { error } = await supabase.from('customers').update(patch).eq('id', customerId)
+  if (error) {
+    console.error(`[customer-sms-optin] update failed customer=${customerId}: ${error.message}`)
+    return
+  }
+
+  if (orgId) {
+    await revalidateOrgPath(supabase, orgId, `/customers/${customerId}`)
+    await revalidateOrgPath(supabase, orgId, '/customers')
+  }
+}
+
+
 // ── addCustomerNote ─────────────────────────────────────────────────────────
 
 export async function addCustomerNote(

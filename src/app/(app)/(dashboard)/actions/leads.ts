@@ -154,6 +154,36 @@ export async function updateLead(
   return { status: 'success' }
 }
 
+// ── setLeadSmsOptIn ─────────────────────────────────────────────────────────
+//
+// SMS Stage 2a — org-side manual consent toggle (for verbal "just text me"
+// consent). Mirrors setCustomerSmsOptIn: same gating as updateLead (auth + RLS).
+// ON records consent + timestamp and nulls any pending token; OFF clears both.
+// Consent state only — nothing is sent.
+
+export async function setLeadSmsOptIn(leadId: string, optIn: boolean): Promise<void> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return
+
+  const orgId = await resolveEffectiveOrgId(supabase, user.id)
+
+  const patch = optIn
+    ? { sms_opt_in: true,  sms_opted_in_at: new Date().toISOString(), sms_opt_in_token: null }
+    : { sms_opt_in: false, sms_opted_in_at: null,                     sms_opt_in_token: null }
+
+  const { error } = await supabase.from('leads').update(patch).eq('id', leadId)
+  if (error) {
+    console.error(`[lead-sms-optin] update failed lead=${leadId}: ${error.message}`)
+    return
+  }
+
+  if (orgId) {
+    await revalidateOrgPath(supabase, orgId, `/leads/${leadId}`)
+  }
+  revalidatePath('/[orgSlug]/leads', 'page')
+}
+
 const LEAD_STATUSES: Lead['status'][] = ['new', 'contacted', 'qualified', 'lost', 'converted']
 
 export type UpdateLeadStatusState =

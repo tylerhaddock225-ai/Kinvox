@@ -7,6 +7,7 @@ import LeadStatusSelect from '@/components/LeadStatusSelect'
 import LeadConversationPanel from '@/components/leads/LeadConversationPanel'
 import { type ConversationMessage } from '@/components/conversation/ConversationThread'
 import EditLeadModal from '@/components/EditLeadModal'
+import SmsOptInToggle from '@/components/SmsOptInToggle'
 import CopyId from '@/components/CopyId'
 import QuickScheduleModal from '@/components/QuickScheduleModal'
 import ConfirmButton from '@/components/admin/ConfirmButton'
@@ -205,6 +206,14 @@ export default async function LeadDetailPage({
               )}
             </div>
           </div>
+
+          {/* SMS Stage 2a — org-side manual consent toggle. */}
+          <SmsOptInToggle
+            kind="lead"
+            id={l.id}
+            optedIn={Boolean((l as unknown as { sms_opt_in?: boolean }).sms_opt_in)}
+            optedInAt={(l as unknown as { sms_opted_in_at?: string | null }).sms_opted_in_at ?? null}
+          />
 
           {l.tags && l.tags.length > 0 && (
             <div className="rounded-xl border border-pvx-border bg-pvx-surface p-5">

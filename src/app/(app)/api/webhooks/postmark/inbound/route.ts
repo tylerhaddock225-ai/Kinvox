@@ -6,6 +6,7 @@ import { renderLeadChannelBounce } from '@/lib/email/templates/lead-channel-boun
 import { renderTicketConfirmationEmail } from '@/lib/email/templates/ticket-confirmation'
 import { constructInboundEmailAddress } from '@/lib/email/inbound-address'
 import { enqueueDraftJob, drainDraftJobs } from '@/lib/ai/auto-draft'
+import { mintSmsOptInToken } from '@/lib/sms/opt-in'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -744,10 +745,17 @@ export async function POST(request: NextRequest) {
   // Postmark would retry the entire webhook and duplicate the ticket.
   const ticketDisplayId = newTicket.display_id ?? newTicket.id
   if (!isLikelyAutoResponder(fromEmail)) {
+    // SMS Stage 2a — offer "prefer text messages?" only when this ticket has a
+    // customer row to attach consent to. A customerless ticket (customerId null)
+    // has nowhere to record opt-in, so the link is skipped. Fail-open: a null URL
+    // (mint failed, or the customer already opted in) just omits the link.
+    const smsOptInUrl = customerId ? await mintSmsOptInToken('customer', customerId) : null
+
     const { subject: confSubject, htmlBody, textBody } = renderTicketConfirmationEmail({
       orgName:         org.name,
       ticketDisplayId,
       originalSubject: subject.trim() || null,
+      smsOptInUrl,
     })
 
     const threadingId = `<${ticketDisplayId}@kinvox.com>`

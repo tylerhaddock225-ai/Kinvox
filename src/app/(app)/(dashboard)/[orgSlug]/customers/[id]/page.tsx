@@ -7,6 +7,7 @@ import CustomerStatusSelect from '@/components/CustomerStatusSelect'
 import CustomerNotesForm from '@/components/CustomerNotesForm'
 import LeadActivityList, { type Activity } from '@/components/LeadActivityList'
 import EditCustomerModal from '@/components/EditCustomerModal'
+import SmsOptInToggle from '@/components/SmsOptInToggle'
 import CopyId from '@/components/CopyId'
 import QuickScheduleModal from '@/components/QuickScheduleModal'
 import ConfirmButton from '@/components/admin/ConfirmButton'
@@ -177,6 +178,14 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
               <Field icon={Calendar}   label="Created" value={new Date(c.created_at).toLocaleDateString()} />
             </div>
           </div>
+
+          {/* SMS Stage 2a — org-side manual consent toggle. */}
+          <SmsOptInToggle
+            kind="customer"
+            id={c.id}
+            optedIn={Boolean((c as unknown as { sms_opt_in?: boolean }).sms_opt_in)}
+            optedInAt={(c as unknown as { sms_opted_in_at?: string | null }).sms_opted_in_at ?? null}
+          />
 
           {/* Related records — kept condensed in left column */}
           {(tickets.length > 0 || appts.length > 0) && (
