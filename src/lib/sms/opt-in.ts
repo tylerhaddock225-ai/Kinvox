@@ -17,6 +17,7 @@
 import 'server-only'
 import { randomBytes } from 'node:crypto'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { logLeadSmsSystemNote } from '@/lib/sms/consent-note'
 import { normalizeToE164 } from '@/lib/phone'
 
 export type OptInKind = 'customer' | 'lead'
@@ -157,9 +158,9 @@ export async function confirmSmsOptIn(
 
   const { data: row, error: readErr } = await admin
     .from(table)
-    .select('id, phone')
+    .select('id, phone, organization_id')
     .eq('sms_opt_in_token', token)
-    .maybeSingle<{ id: string; phone: string | null }>()
+    .maybeSingle<{ id: string; phone: string | null; organization_id: string }>()
   if (readErr || !row) return { ok: false, error: 'link_invalid' }
 
   // Resolve the number to store: a supplied/corrected value wins (normalized);
@@ -182,6 +183,17 @@ export async function confirmSmsOptIn(
   if (updErr) {
     console.error(`${LOG} confirm store failed ${kind}=${row.id}: ${updErr.message}`)
     return { ok: false, error: 'store_failed' }
+  }
+
+  // SMS-2b — audit the consent on the LEAD conversation thread (author_kind
+  // 'system'). The customer rail has no system-note surface (see consent-note),
+  // so it's intentionally skipped here. Fail-open.
+  if (kind === 'lead') {
+    await logLeadSmsSystemNote(admin, {
+      leadId: row.id,
+      orgId:  row.organization_id,
+      body:   'Opted in to SMS messaging via email link.',
+    })
   }
 
   console.log(`${LOG} consent recorded ${kind}=${row.id}`)

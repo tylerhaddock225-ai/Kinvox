@@ -1,25 +1,22 @@
-import { NextResponse, after, type NextRequest } from 'next/server'
+import { NextResponse, type NextRequest } from 'next/server'
 import { timingSafeEqual } from 'node:crypto'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { sendOrgTransactionalEmail } from '@/lib/email/send-org-email'
 import { renderLeadChannelBounce } from '@/lib/email/templates/lead-channel-bounce'
 import { renderTicketConfirmationEmail } from '@/lib/email/templates/ticket-confirmation'
 import { constructInboundEmailAddress } from '@/lib/email/inbound-address'
-import { enqueueDraftJob, drainDraftJobs } from '@/lib/ai/auto-draft'
+import { maybeEnqueueAutoDraft } from '@/lib/ai/auto-draft'
 import { mintSmsOptInToken } from '@/lib/sms/opt-in'
+import { TICKET_TAG_RE, LEAD_TAG_RE } from '@/lib/conversation/tags'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 const LOG = '[postmark-inbound]'
 
-// Matches `[tk_<id>]` (case-insensitive) anywhere in the subject line.
-const TICKET_TAG_RE = /\[(tk_[a-z0-9]+)\]/i
-
-// Lead-conversation tag — same shape as TICKET_TAG_RE, scoped to the
-// lead-magnet confirmation + lead public reply pipeline. Routed into
-// public.lead_messages instead of ticket_messages.
-const LEAD_TAG_RE   = /\[(ld_[a-z0-9]+)\]/i
+// Ticket + lead routing tags (`[tk_X]` / `[ld_X]`) now live in the shared
+// @/lib/conversation/tags module so the Twilio SMS inbound webhook reuses the
+// exact same patterns.
 
 // Appointment-confirmation tag — Workstream F Hotfix #6. On the lead
 // channel, resolves to the appointment's linked lead (alias-safe vs.
@@ -108,62 +105,6 @@ function composeInboundAutoRestoreBody(args: {
     lines.push(`Subject: ${args.subject.trim()}`)
   }
   return lines.join('\n')
-}
-
-// ── Workstream AD Stage 2 — auto-draft producer ──────────────────────────────
-// Called after a customer inbound message is persisted (reply-to-existing and
-// new-ticket paths). For auto-mode orgs it enqueues a draft job and kicks the
-// drainer AFTER the response (via next/server after()), so the webhook never
-// pays the ~3-8s Claude latency. Purely additive + best-effort: it never throws
-// and never changes the webhook's ticketing result. `supabase` is the route's
-// service-role admin client.
-async function maybeEnqueueAutoDraft(
-  supabase: ReturnType<typeof createAdminClient>,
-  orgId: string,
-  ticketId: string,
-  sourceMessageId: string,
-): Promise<void> {
-  try {
-    // Gate: auto mode on AND master flag on AND a template assigned. Any miss →
-    // no-op (mirrors draftTicketReply's gate; the drainer re-checks at drain
-    // time too, so a race here is harmless).
-    const { data: org } = await supabase
-      .from('organizations')
-      .select('ai_drafting_mode, feature_flags, ai_template_id')
-      .eq('id', orgId)
-      .maybeSingle<{ ai_drafting_mode: string | null; feature_flags: Record<string, unknown> | null; ai_template_id: string | null }>()
-
-    const autoDraft        = org?.ai_drafting_mode === 'auto_draft'
-    const aiSupportEnabled = org?.feature_flags?.ai_support_enabled === true
-    if (!autoDraft || !aiSupportEnabled || !org?.ai_template_id) return
-
-    // Staleness: if a stored draft answers an OLDER inbound, drop it now. On
-    // success the drain UPSERTs a fresh draft (onConflict ticket_id) — but if the
-    // drain later SKIPS (e.g. zero balance at drain time), a stored draft
-    // answering a superseded message is worse than none, so remove it up front.
-    const { data: existingDraft } = await supabase
-      .from('ai_ticket_drafts')
-      .select('source_message_id')
-      .eq('ticket_id', ticketId)
-      .maybeSingle<{ source_message_id: string | null }>()
-    if (existingDraft && existingDraft.source_message_id !== sourceMessageId) {
-      await supabase.from('ai_ticket_drafts').delete().eq('ticket_id', ticketId)
-    }
-
-    // Enqueue (idempotent per ticket via the partial-unique live-job index;
-    // never throws) then kick the drainer post-response.
-    await enqueueDraftJob({ orgId, ticketId, sourceMessageId, reason: 'inbound_message' })
-    after(async () => {
-      try {
-        await drainDraftJobs(3)
-      } catch (err) {
-        console.error(`${LOG} [auto-draft-kick] drain failed ticket=${ticketId}:`, err)
-      }
-    })
-  } catch (err) {
-    // Defensive: the auto-draft hook must NEVER fail the webhook.
-    console.error(`${LOG} [auto-draft-kick] enqueue hook failed ticket=${ticketId}:`, err)
-  }
 }
 
 export async function POST(request: NextRequest) {

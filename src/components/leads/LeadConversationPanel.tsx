@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useEffect, useRef, useState, useActionState } from 'react'
-import { AlertTriangle, ExternalLink, Lock } from 'lucide-react'
+import { AlertTriangle, ExternalLink, Lock, Mail, MessageSquare } from 'lucide-react'
 import {
   postLeadInternalNote,
   postLeadPublicReply,
@@ -12,16 +12,40 @@ import ConversationThread, {
   type ConversationMessage,
 } from '@/components/conversation/ConversationThread'
 
-type Mode = 'public' | 'internal'
+type Mode    = 'public' | 'internal'
+type Channel = 'email' | 'sms'
+
+// Maps the postLeadPublicReply SMS-2b typed error codes to user-facing copy.
+// Unknown values (e.g. a raw DB message) render as-is.
+const SEND_ERROR_LABELS: Record<string, string> = {
+  no_recipient_phone: 'This lead has no phone number on file — add one to send by SMS.',
+  not_opted_in:       "This lead hasn't opted in to SMS.",
+  sms_send_failed:    'Message saved, but the SMS could not be delivered. Try again.',
+}
+
+// SMS segment boundary for the char-count warning: >2 segments (>320 chars).
+const SMS_SEGMENT_WARN = 320
 
 type Props = {
   leadId:     string
   orgSlug:    string                 // for the "verify your lead notifications email" deep-link
   messages:   ConversationMessage[]
   leadStatus: string                 // gates the Public Reply composer when 'converted'
+  // SMS-2b — lead-rail SMS availability for the composer toggle (all optional).
+  smsLeadNumber?:       string | null // org's lead sending number, or null
+  smsRecipientDisplay?: string | null // lead phone, pretty-formatted, or null
+  smsOptedIn?:          boolean        // lead consented to SMS?
 }
 
-export default function LeadConversationPanel({ leadId, orgSlug, messages, leadStatus }: Props) {
+export default function LeadConversationPanel({
+  leadId,
+  orgSlug,
+  messages,
+  leadStatus,
+  smsLeadNumber,
+  smsRecipientDisplay,
+  smsOptedIn,
+}: Props) {
   // Terminal leads (currently only 'converted') are read-only for the
   // public channel — customer-facing replies are blocked end-to-end (UI
   // here, server action in postLeadPublicReply, and inbound webhook in
@@ -30,6 +54,8 @@ export default function LeadConversationPanel({ leadId, orgSlug, messages, leadS
   const publicDisabled = leadStatus === 'converted'
 
   const [mode, setMode] = useState<Mode>(publicDisabled ? 'internal' : 'public')
+  const [channel, setChannel] = useState<Channel>('email')
+  const [charCount, setCharCount] = useState(0)
 
   // Two server actions, two action handles. Switching tabs only flips
   // which action the form invokes — the textarea state survives the flip.
@@ -47,6 +73,7 @@ export default function LeadConversationPanel({ leadId, orgSlug, messages, leadS
     const last = mode === 'public' ? publicState : internalState
     if (last?.status !== 'success') return
     formRef.current?.reset()
+    setCharCount(0)
     const ta = textareaRef.current
     if (ta) {
       ta.focus({ preventScroll: true })
@@ -59,6 +86,24 @@ export default function LeadConversationPanel({ leadId, orgSlug, messages, leadS
   const pending    = isInternal ? internalPending : publicPending
   const state      = isInternal ? internalState   : publicState
 
+  // SMS offered only with a lead number AND a usable phone AND consent. Tooltip
+  // names the missing piece (precedence: org number → phone → consent).
+  const smsReady = Boolean(smsLeadNumber) && Boolean(smsRecipientDisplay) && Boolean(smsOptedIn)
+  const smsDisabledReason = !smsLeadNumber
+    ? 'This organization has no SMS number configured.'
+    : !smsRecipientDisplay
+      ? 'This lead has no phone number on file.'
+      : "This lead hasn't opted in to SMS."
+
+  const segClass = (active: boolean, disabled = false) =>
+    `px-3 py-1.5 text-xs font-medium rounded-md transition-colors inline-flex items-center gap-1.5 ${
+      disabled
+        ? 'text-gray-600 cursor-not-allowed'
+        : active
+          ? 'bg-violet-600 text-white'
+          : 'text-gray-400 hover:text-white'
+    }`
+
   return (
     <div className="space-y-4">
       <ConversationThread
@@ -68,6 +113,9 @@ export default function LeadConversationPanel({ leadId, orgSlug, messages, leadS
 
       <section className="rounded-xl border border-pvx-border bg-pvx-surface p-4">
         <form ref={formRef} action={action} className="space-y-3">
+          {/* Only public replies are sent; internal notes force email so nothing sends. */}
+          <input type="hidden" name="channel" value={isInternal ? 'email' : channel} />
+
           <div className="flex items-center gap-1 rounded-lg border border-pvx-border bg-pvx-surface p-1 w-fit">
             <button
               type="button"
@@ -96,6 +144,43 @@ export default function LeadConversationPanel({ leadId, orgSlug, messages, leadS
             </button>
           </div>
 
+          {/* SMS-2b — channel toggle. Public replies only (internal notes never send). */}
+          {!isInternal && !publicDisabled && (
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="flex items-center gap-1 rounded-lg border border-pvx-border bg-pvx-surface p-1 w-fit">
+                <button type="button" onClick={() => setChannel('email')} className={segClass(channel === 'email')}>
+                  <Mail className="w-3.5 h-3.5" />
+                  Email
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { if (smsReady) setChannel('sms') }}
+                  disabled={!smsReady}
+                  title={smsReady ? undefined : smsDisabledReason}
+                  className={segClass(channel === 'sms', !smsReady)}
+                >
+                  <MessageSquare className="w-3.5 h-3.5" />
+                  SMS
+                </button>
+              </div>
+
+              {channel === 'sms' && smsRecipientDisplay && (
+                <span className="text-xs text-gray-500">
+                  To {smsRecipientDisplay}
+                  {' · '}
+                  <span className={charCount > SMS_SEGMENT_WARN ? 'text-amber-400' : 'text-gray-500'}>
+                    {charCount} char{charCount === 1 ? '' : 's'}
+                  </span>
+                </span>
+              )}
+
+              {/* An SMS reply also emails a copy so the inbox holds the full thread. */}
+              {channel === 'sms' && (
+                <span className="w-full text-xs text-gray-500">An email copy will also be sent.</span>
+              )}
+            </div>
+          )}
+
           {publicDisabled && !isInternal && (
             <div className="flex items-start gap-2 text-xs text-gray-400 bg-gray-900/40 border border-pvx-border rounded-lg px-3 py-2">
               <Lock className="w-3.5 h-3.5 mt-0.5 shrink-0" />
@@ -109,6 +194,7 @@ export default function LeadConversationPanel({ leadId, orgSlug, messages, leadS
             required
             rows={4}
             disabled={!isInternal && publicDisabled}
+            onChange={(e) => setCharCount(e.target.value.length)}
             placeholder={isInternal ? 'Write a private note for your team…' : 'Write a reply to the lead…'}
             className={`w-full rounded-lg border px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 resize-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
               isInternal
@@ -126,7 +212,7 @@ export default function LeadConversationPanel({ leadId, orgSlug, messages, leadS
 
           {state?.status === 'error' && (
             <div className="text-xs text-red-400 space-y-1">
-              <p>{state.error}</p>
+              <p>{SEND_ERROR_LABELS[state.error] ?? state.error}</p>
               {state.needs_lead_email_verification && (
                 <Link
                   href={`/${orgSlug}/settings/team?tab=lead-support`}
@@ -151,7 +237,9 @@ export default function LeadConversationPanel({ leadId, orgSlug, messages, leadS
             >
               {pending
                 ? 'Sending…'
-                : isInternal ? 'Add Note' : 'Send Reply'}
+                : isInternal
+                  ? 'Add Note'
+                  : channel === 'sms' ? 'Send SMS' : 'Send Reply'}
             </button>
           </div>
         </form>

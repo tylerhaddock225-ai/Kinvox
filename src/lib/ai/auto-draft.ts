@@ -1,4 +1,5 @@
 import 'server-only'
+import { after } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { buildTicketDraftInputs } from '@/lib/ai/ticket-draft-inputs'
 import { draftAiReply } from '@/lib/ai/draft-reply'
@@ -51,6 +52,62 @@ export async function enqueueDraftJob(args: {
   // 23505 = a live job already exists for this ticket (partial unique) → fine.
   if (error && error.code !== '23505') {
     console.error(`${LOG} enqueue failed ticket=${args.ticketId} reason=${args.reason}: ${error.message}`)
+  }
+}
+
+// ── Workstream AD Stage 2 — inbound auto-draft producer ──────────────────────
+// Shared by BOTH inbound webhooks (postmark email + twilio SMS). Called after a
+// customer inbound message is persisted. For auto-mode orgs it enqueues a draft
+// job and kicks the drainer AFTER the response (next/server after()), so the
+// webhook never pays the ~3-8s Claude latency. Purely additive + best-effort: it
+// never throws and never changes the webhook's routing result. `supabase` is the
+// caller's service-role admin client.
+export async function maybeEnqueueAutoDraft(
+  supabase: ReturnType<typeof createAdminClient>,
+  orgId: string,
+  ticketId: string,
+  sourceMessageId: string,
+): Promise<void> {
+  try {
+    // Gate: auto mode on AND master flag on AND a template assigned. Any miss →
+    // no-op (mirrors draftTicketReply's gate; the drainer re-checks at drain
+    // time too, so a race here is harmless).
+    const { data: org } = await supabase
+      .from('organizations')
+      .select('ai_drafting_mode, feature_flags, ai_template_id')
+      .eq('id', orgId)
+      .maybeSingle<{ ai_drafting_mode: string | null; feature_flags: Record<string, unknown> | null; ai_template_id: string | null }>()
+
+    const autoDraft        = org?.ai_drafting_mode === 'auto_draft'
+    const aiSupportEnabled = org?.feature_flags?.ai_support_enabled === true
+    if (!autoDraft || !aiSupportEnabled || !org?.ai_template_id) return
+
+    // Staleness: if a stored draft answers an OLDER inbound, drop it now. On
+    // success the drain UPSERTs a fresh draft (onConflict ticket_id) — but if the
+    // drain later SKIPS (e.g. zero balance at drain time), a stored draft
+    // answering a superseded message is worse than none, so remove it up front.
+    const { data: existingDraft } = await supabase
+      .from('ai_ticket_drafts')
+      .select('source_message_id')
+      .eq('ticket_id', ticketId)
+      .maybeSingle<{ source_message_id: string | null }>()
+    if (existingDraft && existingDraft.source_message_id !== sourceMessageId) {
+      await supabase.from('ai_ticket_drafts').delete().eq('ticket_id', ticketId)
+    }
+
+    // Enqueue (idempotent per ticket via the partial-unique live-job index;
+    // never throws) then kick the drainer post-response.
+    await enqueueDraftJob({ orgId, ticketId, sourceMessageId, reason: 'inbound_message' })
+    after(async () => {
+      try {
+        await drainDraftJobs(3)
+      } catch (err) {
+        console.error(`${LOG} [auto-draft-kick] drain failed ticket=${ticketId}:`, err)
+      }
+    })
+  } catch (err) {
+    // Defensive: the auto-draft hook must NEVER fail the webhook.
+    console.error(`${LOG} [auto-draft-kick] enqueue hook failed ticket=${ticketId}:`, err)
   }
 }
 

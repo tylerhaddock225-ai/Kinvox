@@ -19,6 +19,7 @@ const DRAFT_ERROR_LABELS: Record<string, string> = {
 // Unknown values (e.g. a raw DB message) render as-is.
 const SEND_ERROR_LABELS: Record<string, string> = {
   no_recipient_phone: 'This customer has no phone number on file — add one to send by SMS.',
+  not_opted_in:       "This customer hasn't opted in to SMS.",
   sms_send_failed:    'Message saved, but the SMS could not be delivered. Try again.',
 }
 
@@ -32,12 +33,14 @@ export default function ReplyBox({
   initialDraft,
   smsSupportNumber,
   smsRecipientDisplay,
+  smsOptedIn,
 }: {
   ticketId: string
   initialDraft?: string
-  // SMS-1 (both optional so non-SMS callers — e.g. hq-support — keep working).
+  // SMS-1/2b (all optional so non-SMS callers — e.g. hq-support — keep working).
   smsSupportNumber?: string | null    // org's support sending number, or null
   smsRecipientDisplay?: string | null // recipient phone, pretty-formatted, or null
+  smsOptedIn?: boolean                // customer consented to SMS?
 }) {
   const [type, setType] = useState<MessageType>('public')
   const [channel, setChannel] = useState<Channel>('email')
@@ -52,11 +55,15 @@ export default function ReplyBox({
   const [showDraftMarker, setShowDraftMarker] = useState(Boolean(initialDraft))
 
   // SMS is offered only when the org has a sending number AND the ticket's
-  // customer has a usable phone. Otherwise the option is disabled with a reason.
-  const smsReady = Boolean(smsSupportNumber) && Boolean(smsRecipientDisplay)
+  // customer has a usable phone AND the customer opted in. Otherwise the option
+  // is disabled with a tooltip naming the missing piece (precedence: org number →
+  // phone → consent).
+  const smsReady = Boolean(smsSupportNumber) && Boolean(smsRecipientDisplay) && Boolean(smsOptedIn)
   const smsDisabledReason = !smsSupportNumber
     ? 'This organization has no SMS number configured.'
-    : 'This customer has no phone number on file.'
+    : !smsRecipientDisplay
+      ? 'This customer has no phone number on file.'
+      : "This customer hasn't opted in to SMS."
 
   useEffect(() => {
     if (state?.status !== 'success') return
@@ -183,6 +190,11 @@ export default function ReplyBox({
                 {charCount} char{charCount === 1 ? '' : 's'}
               </span>
             </span>
+          )}
+
+          {/* SMS-2b — an SMS reply also emails a copy so the inbox holds the full thread. */}
+          {channel === 'sms' && (
+            <span className="w-full text-xs text-gray-500">An email copy will also be sent.</span>
           )}
         </div>
       )}

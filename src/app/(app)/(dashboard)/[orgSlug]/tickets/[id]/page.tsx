@@ -40,7 +40,7 @@ export default async function TicketDetailPage({ params }: { params: Promise<{ o
 
   const { data: ticketData } = await supabase
     .from('tickets')
-    .select('id, display_id, subject, description, status, priority, created_at, organization_id, is_platform_support, customer_id, organizations(slug, sms_support_number), customers(phone)')
+    .select('id, display_id, subject, description, status, priority, created_at, organization_id, is_platform_support, customer_id, organizations(slug, sms_support_number), customers(phone, sms_opt_in)')
     .eq('id', id)
     .is('deleted_at', null)
     .single()
@@ -69,13 +69,14 @@ export default async function TicketDetailPage({ params }: { params: Promise<{ o
   // customer has a parseable phone.
   const smsData = ticketData as unknown as {
     organizations: { sms_support_number: string | null } | { sms_support_number: string | null }[] | null
-    customers:     { phone: string | null } | { phone: string | null }[] | null
+    customers:     { phone: string | null; sms_opt_in: boolean | null } | { phone: string | null; sms_opt_in: boolean | null }[] | null
   }
   const orgEmbed  = Array.isArray(smsData.organizations) ? smsData.organizations[0] : smsData.organizations
   const custEmbed = Array.isArray(smsData.customers)     ? smsData.customers[0]     : smsData.customers
   const smsSupportNumber   = orgEmbed?.sms_support_number ?? null
   const normalizedRecipient = custEmbed?.phone ? normalizeToE164(custEmbed.phone) : null
   const smsRecipientDisplay = normalizedRecipient ? formatPhoneDisplay(normalizedRecipient) : null
+  const smsOptedIn          = Boolean(custEmbed?.sms_opt_in)
 
   // AD Stage 3 — record this view so the tickets-grid unseen dot clears for
   // this user. Mirrors leads/[id] (lead_views). We await because the query
@@ -239,6 +240,7 @@ export default async function TicketDetailPage({ params }: { params: Promise<{ o
               initialDraft={initialDraft}
               smsSupportNumber={smsSupportNumber}
               smsRecipientDisplay={smsRecipientDisplay}
+              smsOptedIn={smsOptedIn}
             />
           </section>
         </div>

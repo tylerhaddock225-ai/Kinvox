@@ -11,6 +11,7 @@ import { draftAiReply } from '@/lib/ai/draft-reply'
 import { TICKET_REPLY_FRAME } from '@/lib/ai/frames'
 import { buildTicketDraftInputs } from '@/lib/ai/ticket-draft-inputs'
 import { sendOrgSms } from '@/lib/sms/send-org-sms'
+import { buildTicketSmsText } from '@/lib/sms/sms-format'
 import { normalizeToE164 } from '@/lib/phone'
 
 type State = { status: 'success' } | { status: 'error'; error: string } | null
@@ -319,29 +320,33 @@ export async function sendTicketMessage(_prev: State, formData: FormData): Promi
 
   const trimmed = body.trim()
 
-  // SMS-1 pre-flight: for an SMS public reply, resolve the recipient phone from
-  // the ticket's linked customer BEFORE writing anything, so a missing/unusable
-  // number fails cleanly with nothing persisted. The customer's stored phone is
-  // canonical E.164 (SMS-0 normalize-on-write), but normalize again defensively
-  // for legacy rows written before SMS-0.
+  // SMS-2b pre-flight: for an SMS public reply, gate on consent + resolve the
+  // recipient phone from the ticket's linked customer BEFORE writing anything, so
+  // a missing consent/number fails cleanly with nothing persisted. The customer's
+  // stored phone is canonical E.164 (SMS-0 normalize-on-write), but normalize
+  // again defensively for legacy rows written before SMS-0.
   let smsTo: string | null = null
   if (type === 'public' && channel === 'sms') {
     if (!ticket.customer_id) return { status: 'error', error: 'no_recipient_phone' }
     const { data: cust } = await supabase
       .from('customers')
-      .select('phone')
+      .select('phone, sms_opt_in')
       .eq('id', ticket.customer_id)
-      .maybeSingle<{ phone: string | null }>()
+      .maybeSingle<{ phone: string | null; sms_opt_in: boolean | null }>()
+    // Consent gate: SMS is opt-in only (TCPA / A2P posture). Refuse before write.
+    if (!cust?.sms_opt_in) return { status: 'error', error: 'not_opted_in' }
     smsTo = cust?.phone ? normalizeToE164(cust.phone) : null
     if (!smsTo) return { status: 'error', error: 'no_recipient_phone' }
   }
 
-  // Resolve the prior public message BEFORE inserting this one so the
-  // quoted block can never accidentally include the in-flight message.
-  // Falls through to ticket.description on first reply (handled in
-  // dispatchOutboundEmail). Email-only — the SMS body is the raw reply text.
+  // Resolve the prior public message BEFORE inserting this one so the quoted
+  // block can never accidentally include the in-flight message. Resolved for BOTH
+  // channels now: the SMS path also sends an email copy (below), whose quoted
+  // block must reference the message before this one, not the SMS row we're about
+  // to insert. Falls through to ticket.description on first reply (handled in
+  // dispatchOutboundEmail).
   let priorPublic: { body: string; created_at: string; sender_id: string | null } | null = null
-  if (type === 'public' && channel === 'email') {
+  if (type === 'public') {
     const { data } = await supabase
       .from('ticket_messages')
       .select('body, created_at, sender_id')
@@ -401,11 +406,16 @@ export async function sendTicketMessage(_prev: State, formData: FormData): Promi
     }
 
     if (channel === 'sms') {
-      // SMS-1 — outbound over the support rail. The row is already persisted;
+      // SMS-2b — outbound over the support rail. The row is already persisted;
       // the send is best-effort like email, but unlike email we surface a send
-      // failure to the caller so the agent isn't left unaware. No email
-      // machinery (Reply-To / subject / template) on this path — the SMS body
-      // is the raw reply text.
+      // failure to the caller so the agent isn't left unaware. The SMS body is
+      // header-framed ("[tk_X] <subject>\n\n<body>") so an inbound reply threads
+      // back via the tag; the stored row body stays the raw reply text.
+      const smsText = buildTicketSmsText({
+        displayId: ticket.display_id ?? ticket.id,
+        subject:   ticket.subject,
+        body:      trimmed,
+      })
       const { data: org } = await supabase
         .from('organizations')
         .select('id, sms_support_number')
@@ -413,7 +423,7 @@ export async function sendTicketMessage(_prev: State, formData: FormData): Promi
         .single<{ id: string; sms_support_number: string | null }>()
 
       const sendRes = org
-        ? await sendOrgSms({ org, rail: 'support', to: smsTo as string, body: trimmed })
+        ? await sendOrgSms({ org, rail: 'support', to: smsTo as string, body: smsText })
         : { ok: false as const, error: 'org_not_found' }
 
       if (sendRes.ok) {
@@ -428,8 +438,28 @@ export async function sendTicketMessage(_prev: State, formData: FormData): Promi
         }
       } else {
         console.error(`[ticket-sms] send failed ticket=${ticket_id}: ${sendRes.error}`)
-        // Non-fatal: the row persists and the thread refreshes, but tell the UI
-        // so the agent knows delivery didn't go through.
+      }
+
+      // Canon #3 — an SMS reply also sends an email copy of the SAME reply through
+      // the ticket's normal outbound email machinery (same subject tag + Reply-To
+      // so it threads), so the customer's inbox always holds the complete
+      // conversation. Runs regardless of the SMS result; non-fatal + self-logging.
+      await dispatchOutboundEmail({
+        supabase,
+        orgId,
+        senderName:       senderProfile?.full_name ?? null,
+        ticketId:         ticket.id,
+        ticketLeadId:     ticket.lead_id,
+        ticketCustomerId: ticket.customer_id,
+        ticketSubject:    ticket.subject,
+        ticketDisplayId:  ticket.display_id,
+        body:             trimmed,
+        priorPublic,
+      })
+
+      if (!sendRes.ok) {
+        // Non-fatal: the row + email copy persist, but tell the UI so the agent
+        // knows the SMS delivery itself didn't go through.
         await revalidateOrgPath(supabase, orgId, `/tickets/${ticket_id}`)
         return { status: 'error', error: 'sms_send_failed' }
       }

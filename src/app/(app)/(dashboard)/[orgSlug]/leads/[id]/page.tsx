@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 import { ArrowLeft, Mail, Phone, Building2, Tag, User, Calendar } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
+import { normalizeToE164, formatPhoneDisplay } from '@/lib/phone'
 import type { Lead } from '@/lib/types/database.types'
 import LeadStatusSelect from '@/components/LeadStatusSelect'
 import LeadConversationPanel from '@/components/leads/LeadConversationPanel'
@@ -74,7 +75,7 @@ export default async function LeadDetailPage({
     console.error(`[leads/${id}] lead_views upsert failed:`, viewErr.message)
   }
 
-  const [messagesRes, customerRes] = await Promise.all([
+  const [messagesRes, customerRes, orgRes] = await Promise.all([
     supabase
       .from('lead_messages')
       .select('id, message_type, author_kind, author_user_id, body, inbound_email_from, created_at, profiles!lead_messages_author_user_id_fkey(full_name)')
@@ -87,10 +88,22 @@ export default async function LeadDetailPage({
       .eq('lead_id', id)
       .is('deleted_at', null)
       .maybeSingle(),
+    supabase
+      .from('organizations')
+      .select('sms_lead_number')
+      .eq('id', l.organization_id)
+      .maybeSingle<{ sms_lead_number: string | null }>(),
   ])
 
   const messageRows = (messagesRes.data ?? []) as unknown as LeadMessageRow[]
   const linkedCustomerId = customerRes.data?.id ?? null
+
+  // SMS-2b — lead-rail SMS availability for the composer toggle (display-only;
+  // postLeadPublicReply re-resolves consent + phone server-side before sending).
+  const smsLeadNumber       = orgRes.data?.sms_lead_number ?? null
+  const normalizedLeadPhone = l.phone ? normalizeToE164(l.phone) : null
+  const smsRecipientDisplay = normalizedLeadPhone ? formatPhoneDisplay(normalizedLeadPhone) : null
+  const smsOptedIn          = Boolean((l as unknown as { sms_opt_in?: boolean }).sms_opt_in)
 
   // Normalize for the shared ConversationThread renderer. author_kind drives
   // the badge label; message_type drives the visual variant (public vs
@@ -239,6 +252,9 @@ export default async function LeadDetailPage({
             orgSlug={orgSlug}
             messages={conversationMessages}
             leadStatus={l.status}
+            smsLeadNumber={smsLeadNumber}
+            smsRecipientDisplay={smsRecipientDisplay}
+            smsOptedIn={smsOptedIn}
           />
         </section>
       </div>

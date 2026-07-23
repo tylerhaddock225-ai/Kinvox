@@ -1,12 +1,16 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { resolveEffectiveOrgId, revalidateOrgPath } from '@/lib/impersonation'
 import { revalidatePath } from 'next/cache'
 import type { Lead } from '@/lib/types/database.types'
-import { sendOrgTransactionalEmail, type OrgEmailContext } from '@/lib/email/send-org-email'
+import { sendOrgTransactionalEmail, type OrgEmailContext, type SendOrgEmailResult } from '@/lib/email/send-org-email'
 import { constructInboundEmailAddress } from '@/lib/email/inbound-address'
 import { renderConversationReply, type PriorMessage } from '@/lib/email/templates/reply'
+import { sendOrgSms } from '@/lib/sms/send-org-sms'
+import { buildLeadSmsText } from '@/lib/sms/sms-format'
+import { logLeadSmsSystemNote } from '@/lib/sms/consent-note'
 import { normalizeToE164 } from '@/lib/phone'
 
 export type CreateLeadState =
@@ -178,7 +182,14 @@ export async function setLeadSmsOptIn(leadId: string, optIn: boolean): Promise<v
     return
   }
 
+  // SMS-2b — record the consent change as a system note on the lead thread
+  // (admin client for the author_kind='system' row; fail-open).
   if (orgId) {
+    await logLeadSmsSystemNote(createAdminClient(), {
+      leadId,
+      orgId,
+      body: optIn ? 'SMS opt-in set manually.' : 'SMS opt-in removed.',
+    })
     await revalidateOrgPath(supabase, orgId, `/leads/${leadId}`)
   }
   revalidatePath('/[orgSlug]/leads', 'page')
@@ -362,12 +373,105 @@ async function resolveLeadInOrg(
 ) {
   const { data: lead } = await supabase
     .from('leads')
-    .select('id, organization_id, email, display_id, first_name, status')
+    .select('id, organization_id, email, phone, sms_opt_in, display_id, first_name, status')
     .eq('id', leadId)
     .is('deleted_at', null)
-    .maybeSingle<{ id: string; organization_id: string; email: string | null; display_id: string | null; first_name: string; status: string }>()
+    .maybeSingle<{
+      id: string; organization_id: string; email: string | null
+      phone: string | null; sms_opt_in: boolean | null
+      display_id: string | null; first_name: string; status: string
+    }>()
   if (!lead || lead.organization_id !== orgId) return null
   return lead
+}
+
+type LeadReplyLead = NonNullable<Awaited<ReturnType<typeof resolveLeadInOrg>>>
+type LeadReplyOrg  = OrgEmailContext & { inbound_lead_email_tag: string | null; sms_lead_number: string | null }
+
+// Prior public_reply on this lead, shaped for the quoted block. Extracted so both
+// the email path and the SMS path's email copy resolve it BEFORE inserting the
+// new row (never quoting the in-flight message). Mirrors the original inline logic.
+async function resolveLeadPriorMessage(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  lead:     LeadReplyLead,
+): Promise<PriorMessage | null> {
+  const { data: priorRow } = await supabase
+    .from('lead_messages')
+    .select('body, created_at, author_kind, author_user_id, inbound_email_from')
+    .eq('lead_id', lead.id)
+    .eq('message_type', 'public_reply')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle<{
+      body:               string
+      created_at:         string
+      author_kind:        'org_user' | 'lead' | 'system'
+      author_user_id:     string | null
+      inbound_email_from: string | null
+    }>()
+  if (!priorRow) return null
+
+  let senderName = ''
+  if (priorRow.author_kind === 'org_user' && priorRow.author_user_id) {
+    const { data: priorProfile } = await supabase
+      .from('profiles')
+      .select('full_name')
+      .eq('id', priorRow.author_user_id)
+      .maybeSingle<{ full_name: string | null }>()
+    senderName = priorProfile?.full_name?.trim() || ''
+  }
+  if (!senderName && priorRow.author_kind === 'lead') {
+    const fallbackFromEmail = priorRow.inbound_email_from?.split('<')[0]?.trim().replace(/^"|"$/g, '') || ''
+    senderName = lead.first_name?.trim() || fallbackFromEmail || priorRow.inbound_email_from || ''
+  }
+  if (!senderName) senderName = 'them'
+
+  return { senderName, sentAt: new Date(priorRow.created_at), body: priorRow.body }
+}
+
+// Render + send a lead public reply as email over the lead rail. Shared by the
+// email path (its primary send) and the SMS path (its non-fatal email copy) so
+// both carry an identical subject tag / Reply-To and thread together.
+async function sendLeadReplyEmail(args: {
+  orgRow:           LeadReplyOrg
+  lead:             LeadReplyLead
+  toEmail:          string
+  replierFirstName: string | null
+  body:             string
+  prior:            PriorMessage | null
+}): Promise<SendOrgEmailResult> {
+  const { orgRow, lead, toEmail, replierFirstName, body, prior } = args
+  const subjectBase = `Update from ${orgRow.name}`
+  const subject     = lead.display_id ? `[${lead.display_id}] ${subjectBase}` : subjectBase
+
+  const { htmlBody, textBody } = renderConversationReply({
+    leadFirstName: lead.first_name,
+    replierFirstName,
+    orgName:       orgRow.name,
+    body,
+    prior,
+  })
+
+  const replyTo     = constructInboundEmailAddress(orgRow.inbound_lead_email_tag)
+  const threadingId = `<${lead.display_id ?? `ld_${lead.id}`}@kinvox.com>`
+  if (!replyTo) {
+    console.warn(`[outbound] inbound tag missing for org=${orgRow.id} channel=lead — reply-to omitted, customer replies will land in org's verified mailbox and bypass conversation panel`)
+  }
+
+  return sendOrgTransactionalEmail({
+    org:               orgRow,
+    to:                toEmail,
+    subject,
+    htmlBody,
+    textBody,
+    tag:               'lead-reply',
+    fromAddressSource: 'lead',
+    replyTo:           replyTo ?? undefined,
+    headers: [
+      { Name: 'References',  Value: threadingId },
+      { Name: 'In-Reply-To', Value: threadingId },
+    ],
+  })
 }
 
 export async function postLeadInternalNote(
@@ -427,19 +531,104 @@ export async function postLeadPublicReply(
     return { status: 'error', error: 'Lead is converted — public replies disabled.' }
   }
 
+  // SMS-2b — reply channel. Absent/unknown → 'email' so every existing caller
+  // keeps its exact prior behavior.
+  const channelRaw = formData.get('channel') as string | null
+  const channel: 'email' | 'sms' = channelRaw === 'sms' ? 'sms' : 'email'
+
+  // Pull the org's lead-notifications channel state (+ the SMS lead number for
+  // the SMS path). This is the channel post-Sprint-3 split — verified_lead_email_*,
+  // NOT verified_support_email_*.
+  const { data: orgRow } = await supabase
+    .from('organizations')
+    .select('id, name, verified_support_email, verified_support_email_confirmed_at, verified_lead_email, verified_lead_email_confirmed_at, inbound_lead_email_tag, sms_lead_number')
+    .eq('id', orgId)
+    .single<LeadReplyOrg>()
+  if (!orgRow) return { status: 'error', error: 'Organization not found' }
+
+  // Replier identity: pull profiles.full_name for the authenticated user so the
+  // rendered signature reads "— <first> at <org>". Null is fine — the renderer
+  // falls back to "— <org> team".
+  const { data: replierProfile } = await supabase
+    .from('profiles')
+    .select('full_name')
+    .eq('id', user.id)
+    .maybeSingle<{ full_name: string | null }>()
+  const replierFirstName = replierProfile?.full_name?.trim().split(/\s+/)[0] ?? null
+
+  // ── SMS path ────────────────────────────────────────────────────────────────
+  // Mirrors the ticket SMS pattern with lead semantics: consent + phone gate
+  // BEFORE any write, row-first persistence, best-effort send, then an email copy.
+  if (channel === 'sms') {
+    if (!lead.sms_opt_in) return { status: 'error', error: 'not_opted_in' }
+    const leadPhone = lead.phone ? normalizeToE164(lead.phone) : null
+    if (!leadPhone) return { status: 'error', error: 'no_recipient_phone' }
+
+    // Resolve prior BEFORE inserting so the email copy's quoted block references
+    // the message before this one, not the SMS row we're about to write.
+    const prior = await resolveLeadPriorMessage(supabase, lead)
+
+    // Persist the row FIRST (row is the source of truth; the send is best-effort
+    // after). RLS insert policy requires author_kind 'org_user' + author_user_id
+    // = auth.uid() — matches the email path below.
+    const { data: insertedRow, error: insErr } = await supabase
+      .from('lead_messages')
+      .insert({
+        lead_id:         lead.id,
+        organization_id: orgId,
+        message_type:    'public_reply',
+        author_kind:     'org_user',
+        author_user_id:  user.id,
+        body,
+        channel:         'sms',
+      })
+      .select('id')
+      .single<{ id: string }>()
+    if (insErr) return { status: 'error', error: insErr.message }
+
+    // Send over the lead rail. The body is header-framed ("[ld_X] <org>\n\n<body>")
+    // so an inbound reply threads back via the tag; the stored row body stays raw.
+    const smsText = buildLeadSmsText({
+      displayId: lead.display_id ?? `ld_${lead.id}`,
+      orgName:   orgRow.name,
+      body,
+    })
+    const sendRes = await sendOrgSms({
+      org:  { id: orgRow.id, sms_support_number: null, sms_lead_number: orgRow.sms_lead_number },
+      rail: 'lead',
+      to:   leadPhone,
+      body: smsText,
+    })
+    if (sendRes.ok) {
+      // provider_message_id write needs the admin client — lead_messages has no
+      // UPDATE RLS policy (parity with the ticket SID write via the admin client).
+      const admin = createAdminClient()
+      const { error: sidErr } = await admin
+        .from('lead_messages')
+        .update({ provider_message_id: sendRes.providerMessageId })
+        .eq('id', insertedRow.id)
+      if (sidErr) console.error(`[lead-sms] provider-id write failed lead=${lead.id} msg=${insertedRow.id}: ${sidErr.message}`)
+    } else {
+      console.error(`[lead-sms] send failed lead=${lead.id}: ${sendRes.error}`)
+    }
+
+    // Canon #3 — email copy of the same reply through the lead rail's email
+    // machinery (same subject tag + Reply-To so it threads). Non-fatal + logged;
+    // skipped only when the lead has no email on file.
+    if (lead.email) {
+      const copy = await sendLeadReplyEmail({ orgRow, lead, toEmail: lead.email, replierFirstName, body, prior })
+      if (!copy.ok) console.error(`[lead-sms] email copy failed lead=${lead.id}: ${copy.error}`)
+    }
+
+    revalidatePath(`/[orgSlug]/leads/${leadId}`, 'page')
+    if (!sendRes.ok) return { status: 'error', error: 'sms_send_failed' }
+    return { status: 'success' }
+  }
+
+  // ── Email path (unchanged behavior) ──────────────────────────────────────────
   if (!lead.email) {
     return { status: 'error', error: 'Lead has no email address' }
   }
-
-  // Pull the org's lead-notifications channel state. This is the channel
-  // post-Sprint-3 split — verified_lead_email_*, NOT verified_support_email_*.
-  const { data: orgRow } = await supabase
-    .from('organizations')
-    .select('id, name, verified_support_email, verified_support_email_confirmed_at, verified_lead_email, verified_lead_email_confirmed_at, inbound_lead_email_tag')
-    .eq('id', orgId)
-    .single<OrgEmailContext & { inbound_lead_email_tag: string | null }>()
-  if (!orgRow) return { status: 'error', error: 'Organization not found' }
-
   if (!orgRow.verified_lead_email_confirmed_at) {
     return {
       status: 'error',
@@ -448,99 +637,12 @@ export async function postLeadPublicReply(
     }
   }
 
-  const subjectBase = `Update from ${orgRow.name}`
-  const subject     = lead.display_id
-    ? `[${lead.display_id}] ${subjectBase}`
-    : subjectBase
+  // Prior message for the quoted block: most recent public_reply on this lead.
+  // The lead-magnet confirmation is NOT recorded in lead_messages, so on the very
+  // first reply this returns null and the renderer skips the quoted block.
+  const prior = await resolveLeadPriorMessage(supabase, lead)
 
-  // Replier identity: pull profiles.full_name for the authenticated user
-  // so the rendered signature reads "— <first> at <org>". Null is fine —
-  // the renderer falls back to "— <org> team".
-  const { data: replierProfile } = await supabase
-    .from('profiles')
-    .select('full_name')
-    .eq('id', user.id)
-    .maybeSingle<{ full_name: string | null }>()
-  const replierFirstName = replierProfile?.full_name?.trim().split(/\s+/)[0] ?? null
-
-  // Prior message for the quoted block: most recent public_reply on this
-  // lead. The lead-magnet confirmation is NOT recorded in lead_messages,
-  // so on the very first reply this returns null and the renderer skips
-  // the quoted block — the customer already has the confirmation in their
-  // inbox above.
-  const { data: priorRow } = await supabase
-    .from('lead_messages')
-    .select('body, created_at, author_kind, author_user_id, inbound_email_from')
-    .eq('lead_id', lead.id)
-    .eq('message_type', 'public_reply')
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle<{
-      body:               string
-      created_at:         string
-      author_kind:        'org_user' | 'lead' | 'system'
-      author_user_id:     string | null
-      inbound_email_from: string | null
-    }>()
-
-  let prior: PriorMessage | null = null
-  if (priorRow) {
-    let senderName = ''
-    if (priorRow.author_kind === 'org_user' && priorRow.author_user_id) {
-      const { data: priorProfile } = await supabase
-        .from('profiles')
-        .select('full_name')
-        .eq('id', priorRow.author_user_id)
-        .maybeSingle<{ full_name: string | null }>()
-      senderName = priorProfile?.full_name?.trim() || ''
-    }
-    if (!senderName && priorRow.author_kind === 'lead') {
-      // Inbound row: prefer the lead's name, fall back to the raw From.
-      const fallbackFromEmail = priorRow.inbound_email_from?.split('<')[0]?.trim().replace(/^"|"$/g, '') || ''
-      senderName = lead.first_name?.trim() || fallbackFromEmail || priorRow.inbound_email_from || ''
-    }
-    if (!senderName) senderName = 'them'
-
-    prior = {
-      senderName,
-      sentAt: new Date(priorRow.created_at),
-      body:   priorRow.body,
-    }
-  }
-
-  const { htmlBody, textBody } = renderConversationReply({
-    leadFirstName:    lead.first_name,
-    replierFirstName,
-    orgName:          orgRow.name,
-    body,
-    prior,
-  })
-
-  // Reply-To + threading: same shape as the lead-confirmation send so
-  // Gmail/Outlook keep the conversation grouped, and the prospect's reply
-  // routes through the plus-addressed inbound mailbox into the lead
-  // conversation panel via the postmark/inbound webhook.
-  const replyTo     = constructInboundEmailAddress(orgRow.inbound_lead_email_tag)
-  const threadingId = `<${lead.display_id ?? `ld_${lead.id}`}@kinvox.com>`
-  if (!replyTo) {
-    console.warn(`[outbound] inbound tag missing for org=${orgRow.id} channel=lead — reply-to omitted, customer replies will land in org's verified mailbox and bypass conversation panel`)
-  }
-
-  const sendResult = await sendOrgTransactionalEmail({
-    org:               orgRow,
-    to:                lead.email,
-    subject,
-    htmlBody,
-    textBody,
-    tag:               'lead-reply',
-    fromAddressSource: 'lead',
-    replyTo:           replyTo ?? undefined,
-    headers: [
-      { Name: 'References',  Value: threadingId },
-      { Name: 'In-Reply-To', Value: threadingId },
-    ],
-  })
-
+  const sendResult = await sendLeadReplyEmail({ orgRow, lead, toEmail: lead.email, replierFirstName, body, prior })
   if (!sendResult.ok) {
     return { status: 'error', error: sendResult.error }
   }

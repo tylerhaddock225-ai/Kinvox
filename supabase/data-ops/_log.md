@@ -67,3 +67,19 @@ Append-only. Each row records a single `scripts/run-data-op.mjs` execution.
 > `run-data-op.mjs` — the Supabase CLI can't run `db query` non-interactively here (no DB password), same constraint as
 > the AD Stage 2 op above. Transaction-guarded; post-op verified: `sms_support_number=+17372324091`, `sms_lead_number=NULL`,
 > and exactly 1 org holds the number (partial-unique-index sanity). Sandbox only; NO-OP on prod (different org id there).
+| 2026-07-23 (SMS-2b) | sandbox | 20260723110000_normalize_phones_e164_sandbox.sql | ahjab | ok (customers_updated=0, leads_updated=19) |
+
+> **2026-07-23 — SMS-2b phone E.164 backfill (SANDBOX ONLY).** File: `sandbox/20260723110000_normalize_phones_e164_sandbox.sql`.
+> Purpose: normalize existing `customers.phone` + `leads.phone` to E.164 so the SMS inbound rail's exact-phone match can
+> route pre-SMS-0 rows. Simple SQL algo (strip non-digits; 10→'+1'||d; 11 leading '1'→'+'||d; else untouched) — NOT
+> libphonenumber. Applied via the **Management API** (sandbox ref `ntwimeqxyyvjyrisqofl`). Dry-run first, then applied:
+> **customers 0 changed** (both non-null already E.164), **leads 19 changed** (dry-run matched exactly). Post-op verified:
+> 0 parseable-but-unnormalized rows remain; lead phones now `{+12143647795, +14055550199, 555}` — `555` correctly left
+> untouched (unparseable). Idempotent (re-run = 0 rows). Sandbox only.
+>
+> **2026-07-23 — SMS-2b rail-swap pair (PREPARED, NOT APPLIED).** Files:
+> `sandbox/20260723120000_swap_niko_sms_support_to_lead.sql` (A: support→lead) and
+> `sandbox/20260723120100_swap_niko_sms_lead_to_support.sql` (B: revert lead→support). The Twilio trial account has ONE
+> number (`+17372324091`), currently on Niko's SUPPORT rail. To live-test the LEAD-rail SMS toggle + lead inbound webhook,
+> run A (moves the number to the lead column in one atomic guarded UPDATE), test, then run B to restore. **Neither has been
+> applied** — sandbox `sms_lead_number` stays NULL until Tyler requests the lead-rail test. Sandbox only.
